@@ -1,102 +1,107 @@
 # Forma
 
-A personal competitive programming and DSA notebook. Warm paper or midnight black with violet accents, and a complete daily practice loop.
+A daily competitive-programming notebook with warm-paper and black-and-ivory **Ink** themes. Practice in Forma or on Codeforces, reflect briefly, and keep a manageable revisit queue.
 
 ## Run locally
 
-Requires Node.js 20.9 or later.
+Requires Node.js 22 or later. CI uses Node.js 22.
 
 ```sh
-npm install
+npm ci
 npm run dev
 ```
 
-Open **http://localhost:3001**. Port 3001 avoids the other app already using port 3000 on this machine.
-
-For production:
+Open [localhost:3001](http://localhost:3001). For production:
 
 ```sh
 npm run build
 npm run start -- --port 3001
 ```
 
-## Your first session
+Local mode needs no account or environment variables. Optional account setup is documented in [docs/cloud-setup.md](docs/cloud-setup.md); the service was not provisioned or deployed during development.
 
-1. Add a problem on Today or Problems. Names are required; links, IDs, ratings, and topics are optional.
-2. Choose 15, 30, or 60 minutes and start. Solve in your editor or on the linked platform.
-3. Pause, hide the timer, and write notes whenever you like. Leaving the page or refreshing preserves the session.
-4. Finish with an outcome, an optional difficulty, and a one-line takeaway.
-5. Revisit and Progress update from that saved attempt.
+## Daily workflow
 
-The clearly marked demo is a separate workspace. Exploring, modifying, or importing demo records never replaces personal records. “Go to my workspace” returns to your own data.
+1. Add a problem, or connect a public Codeforces handle in Settings and import activity.
+2. Choose 15, 30, or 60 minutes on Today. Short practice favors a familiar revisit; longer practice can offer a revisit followed by a fresh problem. These are session compositions, not solve-time predictions.
+3. Pause, hide the timer, and write notes. A saved session survives navigation and reload.
+4. Finish with an outcome, an optional difficulty, and a takeaway. Imported attempts support quick reflections without invented solving time.
+5. Complete, reschedule, or intentionally practice a revisit. Skip today's recommendation or archive a problem without deleting its history.
 
-## Routes
+Demo, personal, and each verified account use separate workspaces. Demo exploration and restoration cannot replace personal records. The first-use state stays welcoming; returning users see a compact Today view with the next action higher on the page.
 
-| Route | Purpose |
-| --- | --- |
-| `/` or `/today` | Session suggestion, weekly rhythm, three revisits, a recent breakthrough |
-| `/problems` | Searchable, filterable collection; add/edit details and read complete attempt histories |
-| `/session` | Timestamp-based timer, persistent notes, quick reflection |
-| `/revisit` | Small recommended batch, full queue, rescheduling, retirement with undo |
-| `/progress` | Independent/assisted attempts, difficulties, weekly sessions, later independent solves, topic practice |
-| `/settings` | Public Codeforces connection, revisit defaults, practice preferences, themes, JSON export/import |
-| `/activity` | Handle-scoped public submissions, grouped practice attempts, quick reflections, older activity |
+| Route           | Purpose                                                                                 |
+| --------------- | --------------------------------------------------------------------------------------- |
+| `/` or `/today` | Stable daily reflection batch, due revisit, fresh discovery, practice rhythm            |
+| `/problems`     | Collection, editing, sourced histories, explicit attempt links                          |
+| `/session`      | Persistent timer, notes, reflection                                                     |
+| `/revisit`      | Recommended batch, full queue, completion, rescheduling, undo                           |
+| `/progress`     | Shared learning outcomes, difficulties, topics, breakthroughs, measured time            |
+| `/activity`     | Handle-scoped submissions, grouped attempts, reflections, older history                 |
+| `/settings`     | Codeforces, optional account, preferences, appearance, backups, installation, reminders |
 
-## Review and selection rules
+## Learning and scheduling
 
-This is a transparent schedule, not AI personalization:
+The learning view combines timed sessions and Codeforces reflections while retaining source IDs and handles. Accepted activity remains **reflection pending** until a learning outcome is recorded. Only Forma sessions contribute measured minutes. Submission counts, accepted problems, practice attempts, and timed sessions are distinct metrics.
 
-- Still need to understand it: **tomorrow**.
-- Editorial-assisted attempts: **3 days**.
-- Hint-assisted attempts: **5 days**.
-- Change these defaults in Settings (1–90 days). Existing chosen dates remain intact.
-- Imported independent solves need no mandatory revisit; choose completion or a later review (7 days suggested). Timed independent revisits still suggest **7, 14, 28, then 30 days**, with a date override or completion available before saving.
-- First-time independent solves and retired revisits stay out of the queue unless a later attempt needs help.
-- Dates never incur penalties. Reschedule or retire any revisit.
+If a timed session and imported group describe the same attempt, explicitly link them in the problem history and choose which reflection supplies learning credit. Both original records remain intact. There is no automatic linking by time proximity and no cross-handle credit.
 
-Today prioritizes ready revisits, then unattempted problems, then the least recently attempted problem. CP and Placement preferences narrow the pool using saved topics; shared DSA topics support both. If no topics match, the full collection is used and the interface explains the fallback.
+Default revisit intervals are tomorrow for an unsolved attempt, three days for editorial assistance, and five days for a hint. Settings can change these defaults from 1–90 days. Deliberate dates remain intact. Completing a revisit clears its schedule without claiming a successful solve; old reflection edits cannot reopen it. Future dates, deferrals, today's skips, and archived problems stay out of automatic suggestions. Intentional early practice remains available.
 
-## Data and privacy
+See [docs/learning-and-scheduling.md](docs/learning-and-scheduling.md) for provenance, scope, linking, practice-day definitions, and scheduling rules.
 
-The notebook, platform history and reflections stay in this browser's local storage. A small Next.js API adapter reads public Codeforces activity. There is no authentication or device sync. Clearing browser data removes the notebook; export backups periodically. Use one active tab when editing a workspace.
+## Codeforces and fresh discovery
 
-Schema v2 exports include problems, timed attempts, public-profile metadata, platform submissions, imported practice attempts, quick reflections, settings, theme, and the active session. Schema v1 notebooks migrate automatically, preserving notes, timers, manual history, and existing revisit dates. Storage keeps the original personal/demo slot names for compatibility. Download the JSON or copy the displayed JSON into a `.json` file. Import checks the schema, types, limits, dates, IDs, relationships, and external link protocols, then shows a preview and requires confirmation before replacing the current workspace. Files are limited to 5 MB.
+Connecting a public handle requires no Codeforces password or API key. Initial import reads 50 submissions. Manual recent refresh reads at most 150; older pages backfill separately. Coverage segments, unresolved gaps, and historical cursors survive repeated refreshes. Required pages commit together only after every request succeeds. Profile metadata has a separate freshness timestamp and is checked conservatively, at most daily.
 
-Corrupted saved records are preserved. When storage cannot be read or written, the app continues in memory and shows a notice. Mode switching preserves in-memory work; export it before closing the tab. Importing a checked backup with explicit confirmation retries persistence.
+Successive submissions for the same handle/problem group within two hours form a group; acceptance closes it. Stable group membership preserves reflections through verdict changes and historical pagination. This grouping never estimates solving duration.
 
-## Implementation
+Each handle receives a stable daily batch of at most five reflections. Saving, skipping, or refreshing does not refill it that day. All historical attempts remain accessible in Activity. Switching or disconnecting handles retains their records and keeps learning scopes separate.
 
-- Next.js App Router, React, strict TypeScript, Tailwind CSS, Lucide icons.
-- Self-hosted Geist, Geist Mono, and Instrument Serif; font licenses are in `public/fonts`.
-- `src/lib/model.ts`: domain types, scheduling, suggestions, demo records, import validation, progress derivation. Change `BRAND` here to rename the product.
-- `src/lib/storage.ts`: small persistence adapter, with independent personal/demo keys. Replace this adapter to add a backend.
-- `src/components/provider.tsx`: workspace lifecycle, theme, local persistence, sessions, and gentle feedback.
-- `src/app/globals.css`: design tokens, deliberate dark theme, responsive shell, readable layout, reduced-motion support.
-- Native HTML dialogs contain keyboard focus and restore it when closed. Mobile navigation and main actions have generous touch targets.
+Fresh discovery uses a problem catalogue cached for 24 hours, with single-flight loading and a stale-cache fallback after upstream errors. Choose a rating range and optional topic. Known accepted, saved, and temporarily dismissed problems are excluded. Missing ratings and insufficient candidates receive explicit states. Incomplete imported history is disclosed; unseen problems are not claimed to have never been solved. Topic tags stay hidden until requested. Explanations distinguish generic rules from evidence in saved history.
 
-## Verification
+The adapter follows the official [Codeforces API methods](https://codeforces.com/apiHelp/methods) and [request limit](https://codeforces.com/apiHelp). Activity and catalogue share 2.1-second request pacing, bounded timeouts, and transient retries. The limiter and catalogue cache are process-local; multiple server instances require shared coordination. New imports and uncached discovery need a running server with internet access. Automated checks use deterministic API fixtures; live calls are a separate check.
+
+## Persistence, migration, and backups
+
+IndexedDB stores revisioned workspaces. On first successful migration, Forma validates and copies the original schema v1/v2 personal and demo localStorage records, including notes and active timers. The original copies remain untouched, even after success. Missing optional fields receive backward-compatible defaults.
+
+Writes reread the latest revision inside a transaction. Compatible edits merge by stable identity; changing preferences in one tab cannot erase a problem added in another. Same-field conflicts stop the write and retain a recovery copy, including session notes. Cross-tab notifications refresh idle tabs. Save indicators confirm when local writes settle; critical completion messages wait for a successful write.
+
+Persistence, export, and import share strict validation and a **64 MiB canonical JSON capacity**. Every successfully produced backup is accepted by the importer within that capacity. Existing per-record/count limits still apply; records are never truncated. Imports preview their contents, require explicit replacement confirmation, reject a concurrently changed workspace, and preserve a copy before replacement. Settings exposes recovery backups.
+
+Storage-full, corrupt, or unavailable storage leaves originals intact and shows a recovery notice. Unsaved in-memory work remains available through workspace switching while the tab stays open; export it before closing. Clearing browser data removes device records. An optional account adds durable remote storage but does not replace backups.
+
+Account reads and writes verify the session server-side and enforce ownership in Postgres. Sync uses revisions, stable operation IDs, compatible merges, recoverable conflicts, and separate account caches. Personal migration is an explicit copy into an empty account; demo data is excluded. See [docs/cloud-setup.md](docs/cloud-setup.md) for setup, security, transport capacity, and service checks still required.
+
+## Installation and reminders
+
+The manifest, icons, and service worker support installation in compatible browsers. An already loaded tab can continue local practice offline; a cold offline launch shows a deliberate reconnect page. Shared caches contain only allowlisted public fonts, icons, and that fallback page. API responses and credentials are never cached there. Updates wait for safe explicit activation and never reload an active page.
+
+Reminders are opt-in, gentle, and **in-app only**. They appear on Today at the chosen local time while Forma is open and stay quiet during practice or after activity that day. No closed-app notification service is configured. See [docs/installation.md](docs/installation.md).
+
+## Implementation and verification
+
+Next.js App Router, React, strict TypeScript, Tailwind CSS, Lucide icons, and self-hosted Geist/Geist Mono/Instrument Serif. Font licenses are in `public/fonts`.
+
+- `src/lib/model.ts`: domain types, strict validation, timer, base scheduling.
+- `src/lib/concurrency.ts` and `storage.ts`: capacity, three-way merge, transactional revisions, recovery.
+- `src/lib/codeforces*.ts`: import boundaries, grouping, reflection batches, profile freshness.
+- `src/lib/learning.ts`: derived sourced history and explicit linking.
+- `src/lib/catalogue.ts` and `discovery.ts`: catalogue and transparent selection rules.
+- `src/lib/cloud-*.ts` and `supabase/migrations`: optional verified account transport and durable storage.
+- `src/lib/reminders.ts`, manifest, and `public/sw.js`: daily access and safe offline behavior.
 
 ```sh
 npm run lint
+npx next typegen
 npm run typecheck
-npm run test
+npm test
 npm run build
+npx playwright install chromium
+npm run test:browser
 ```
 
-Twenty-two deterministic tests cover Codeforces deduplication, verdict updates, partial failures, reflection preservation, profile scopes, API pacing and normalization, migration, as well as background-safe timing and recovery, review intervals and retirement, focus-aware selection, demo evidence, import validation and roundtrips, and unavailable/corrupt storage. Browser checks cover public profile preview, Today, activity, quick reflection, date overrides, Revisit, both themes, and mobile layouts. Live requests returned the public tourist profile and 50 submissions; daily reflection tests used isolated demo fixtures. See `docs/verification.md` for the browser checks and screenshots.
+The browser suite starts the production server on port 3002 and uses isolated fixtures, leaving the normal personal workspace untouched. CI runs these checks on pushes and pull requests.
 
-## Codeforces workflow and boundaries
-
-1. In Settings, enter a public handle, preview the returned profile, then choose **Connect and import**. No password, API key, or other setup is required.
-2. The initial import reads the latest **50 submissions**. Manual refresh reads up to **150**, stopping at a known boundary when possible. Load older activity one page at a time. Coverage and any unfilled gap stay visible; statistics refer to imported records.
-3. Up to **five recent imported attempts** enter the daily reflection batch. Today shows at most **three different problems**. Older attempts remain available on Activity without becoming daily tasks. Skipping removes the task from the batch; the reflection remains available later.
-4. Reflect independently of the platform verdict. An accepted but unreflected submission never counts as independent understanding. Imported attempts contribute no timed sessions or inferred minutes.
-5. Revisit dates follow local calendar days. Event timestamps use UTC ISO strings. Newer reflected attempts control automatic scheduling; editing an older reflection cannot replace that schedule. A deliberately chosen date or opt-out is preserved unless explicitly changed.
-
-Submissions for the same handle and problem group when successive submissions are within **two hours**; acceptance closes an attempt. A later submission starts a separate attempt. Existing group membership stays stable when a pending verdict changes, and older failed submissions may be prepended without changing a saved group's ID. These timestamps define grouping only, never solving duration.
-
-Platform problems use canonical contest/index or alternate problemset/index identities, scoped to their original handle. Manual notebook problems remain separate, with their notes and session histories. Changing or disconnecting a handle retains all imported history; Activity and Progress can inspect saved profiles. Revisit includes the manual notebook and the currently connected profile.
-
-The adapter uses anonymous [user.info and user.status](https://codeforces.com/apiHelp/methods), with fixed upstream URLs and validated query parameters. It follows the [one-request-per-two-seconds limit](https://codeforces.com/apiHelp), pacing starts at 2.1 seconds, using 8-second upstream timeouts and at most one transient retry. Required pages commit atomically after every request succeeds. Refreshes update verdicts in the recent window, and older pages also reconcile matching submissions. There is no continuous or automatic polling.
-
-A running Node/Next.js server with internet access is required for new imports. Saved records, reflections and the queue remain usable offline. The current limiter is process-local, appropriate for this local application; deployment across multiple server processes would require coordinated pacing. Browser storage and backup size limits still apply.
+Latest local verification: **90 unit/integration tests passed; 30 desktop/mobile browser tests passed; two configured-account browser tests skipped**. Lint, strict TypeScript, and the production build passed. The final build used `npm run build -- --webpack` because the tool sandbox blocked Turbopack's local processing port. Actual migration SQL was exercised in local PostgreSQL, including ownership, revisions, and retry safety. Both themes and mobile reflection controls were inspected in rendered screenshots. See [docs/verification.md](docs/verification.md) for evidence and remaining live-service limitations.

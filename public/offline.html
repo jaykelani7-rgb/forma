@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#090909" />
+    <title>Forma — Offline</title>
+    <style>
+      @font-face {
+        font-family: Geist;
+        src: url("/fonts/geist-regular.ttf") format("truetype");
+        font-display: swap;
+      }
+      @font-face {
+        font-family: Instrument;
+        src: url("/fonts/instrument-regular.ttf") format("truetype");
+        font-display: swap;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: #090909;
+        color: #f1efe9;
+        font-family: Geist, system-ui, sans-serif;
+        line-height: 1.7;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 28px;
+      }
+      main {
+        max-width: 540px;
+      }
+      img {
+        width: 54px;
+        height: 54px;
+      }
+      .eyebrow {
+        font-size: 11px;
+        letter-spacing: 2px;
+        color: #aaa79f;
+        margin-top: 30px;
+      }
+      h1 {
+        font:
+          normal 52px/1.1 Instrument,
+          Georgia,
+          serif;
+        letter-spacing: -1px;
+        margin: 15px 0 24px;
+      }
+      p {
+        font-size: 15px;
+        color: #aaa79f;
+      }
+      a {
+        display: inline-flex;
+        align-items: center;
+        min-height: 48px;
+        color: #151513;
+        background: #e7e2d8;
+        border-radius: 4px;
+        text-decoration: none;
+        padding: 10px 20px;
+        margin-top: 16px;
+      }
+      a:focus-visible {
+        outline: 2px solid #f1efe9;
+        outline-offset: 5px;
+      }
+      .note {
+        border-top: 1px solid #30302d;
+        padding-top: 22px;
+        margin-top: 30px;
+        font-size: 13px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <img src="/icons/forma-192.png" alt="Forma" />
+      <div class="eyebrow">A PRACTICE IN PROGRESS</div>
+      <h1>A quiet moment offline.</h1>
+      <p>
+        Forma needs a connection to open a fresh page. Your saved notebook stays
+        on this device. Reconnect, then return to your practice.
+      </p>
+      <a href="/">Try opening Forma again</a>
+      <p class="note">
+        A Forma tab already open can continue local practice offline. New
+        Codeforces imports, fresh discovery and account sync wait for a
+        connection. This page does not read or change your records.
+      </p>
+    </main>
+  </body>
+</html>

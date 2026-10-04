@@ -1,8 +1,7 @@
-import { CodeforcesError, createCodeforcesAdapter } from "@/lib/codeforces-api";
+import { CodeforcesError, codeforcesAdapter as adapter } from "@/lib/codeforces-api";
 import { validHandle } from "@/lib/codeforces-types";
 
 export const runtime="nodejs";
-const adapter=createCodeforcesAdapter();
 export async function GET(request:Request) {
   const params=new URL(request.url).searchParams;
   const action=params.get("action");
