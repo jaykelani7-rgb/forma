@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   ArrowRight,
   CalendarDays,
@@ -24,16 +24,56 @@ import { useWorkspace } from "./provider";
 import { EmptyState, Modal, OutcomeLabel, PageHeader, Tags } from "./ui";
 
 export function Revisit() {
-  const { data, update, startSession, notify } = useWorkspace();
+  const { data, update, startSession, notify, guardWorkspace } = useWorkspace();
   const [showAll, setShowAll] = useState(false);
   const [reschedule, setReschedule] = useState<Problem | null>(null);
   const [retired, setRetired] = useState<Problem | null>(null);
   const [date, setDate] = useState(localDate(addDays(new Date(), 1)));
   const [error, setError] = useState("");
+  const [pending, setPending] = useState(false);
+  const [retryCompletion, setRetryCompletion] = useState<Problem | null>(null);
+  const saving = useRef(false);
   const queue = reviewQueue(data);
   const batch = showAll ? queue : queue.slice(0, 3);
-  function saveDate(e: React.FormEvent) {
+  async function commit(
+    change: (current: typeof data) => typeof data,
+    success: () => void,
+    retry?: Problem,
+  ) {
+    if (saving.current) return;
+    const isCurrent = guardWorkspace();
+    saving.current = true;
+    setPending(true);
+    setError("");
+    try {
+      const saved = await update(change);
+      if (!isCurrent()) return;
+      if (!saved) {
+        setError(
+          "This revisit change was not committed. Review the storage message and recovery copies in Settings, then retry.",
+        );
+        if (retry) setRetryCompletion(retry);
+        return;
+      }
+      setRetryCompletion(null);
+      success();
+    } catch (failure) {
+      if (isCurrent()) {
+        setError(
+          failure instanceof Error
+            ? failure.message
+            : "This revisit change was not committed. Review the storage message and retry.",
+        );
+        if (retry) setRetryCompletion(retry);
+      }
+    } finally {
+      saving.current = false;
+      if (isCurrent()) setPending(false);
+    }
+  }
+  async function saveDate(e: React.FormEvent) {
     e.preventDefault();
+    if (saving.current) return;
     const chosen = String(
       new FormData(e.currentTarget as HTMLFormElement).get("revisitDate") ??
         date,
@@ -42,14 +82,25 @@ export function Revisit() {
       setError("Choose today or a day that gives you a little more space.");
       return;
     }
-    if (reschedule) update((d) => rescheduleProblem(d, reschedule.id, chosen));
-    setReschedule(null);
-    notify("Revisit rescheduled. Your pace, your choice.");
+    if (!reschedule) return;
+    const problemId = reschedule.id;
+    await commit(
+      (d) => rescheduleProblem(d, problemId, chosen),
+      () => {
+        setReschedule(null);
+        notify("Revisit rescheduled. Your pace, your choice.");
+      },
+    );
   }
-  function retire(problem: Problem) {
-    update((d) => completeRevisit(d, problem.id));
-    setRetired(problem);
-    notify("Revisit completed. Its history is still in Problems.");
+  async function retire(problem: Problem) {
+    await commit(
+      (d) => completeRevisit(d, problem.id),
+      () => {
+        setRetired(problem);
+        notify("Revisit completed. Its history is still in Problems.");
+      },
+      problem,
+    );
   }
   return (
     <div className="page-enter">
@@ -74,28 +125,51 @@ export function Revisit() {
           <small>in your list</small>
         </span>
       </div>
+      {pending && !reschedule && (
+        <p role="status" className="small muted">
+          Saving revisit change…
+        </p>
+      )}
+      {error && !reschedule && (
+        <div role="alert" className="form-error">
+          <p>{error}</p>
+          {retryCompletion && (
+            <button
+              className="text-link"
+              disabled={pending}
+              onClick={() => retire(retryCompletion)}
+            >
+              Retry completing {retryCompletion.title}
+            </button>
+          )}
+        </div>
+      )}
       {retired && (
         <div className="undo-note" role="status">
           <span>{retired.title} is off your revisit list.</span>
           <button
             className="text-link"
-            onClick={() => {
-              update((d) => ({
-                ...d,
-                problems: d.problems.map((p) =>
-                  p.id === retired.id
-                    ? {
-                        ...p,
-                        reviewAt: retired.reviewAt,
-                        reviewCount: retired.reviewCount,
-                        reviewManual: retired.reviewManual,
-                        reviewCompletedAt: retired.reviewCompletedAt,
-                      }
-                    : p,
-                ),
-              }));
-              setRetired(null);
-            }}
+            disabled={pending}
+            onClick={() =>
+              commit(
+                (d) => ({
+                  ...d,
+                  problems: d.problems.map((p) =>
+                    p.id === retired.id
+                      ? {
+                          ...p,
+                          reviewAt: retired.reviewAt,
+                          reviewCount: retired.reviewCount,
+                          reviewManual: retired.reviewManual,
+                          reviewCompletedAt: retired.reviewCompletedAt,
+                          reviewAttemptId: retired.reviewAttemptId,
+                        }
+                      : p,
+                  ),
+                }),
+                () => setRetired(null),
+              )
+            }
           >
             Undo
           </button>
@@ -156,6 +230,7 @@ export function Revisit() {
                     <div className="revisit-actions">
                       <button
                         className="button primary"
+                        disabled={pending}
                         onClick={() => startSession(problem)}
                       >
                         Start revisit
@@ -163,6 +238,7 @@ export function Revisit() {
                       </button>
                       <button
                         className="button ghost"
+                        disabled={pending}
                         onClick={() => {
                           setDate(
                             problem.reviewAt! < localDate()
@@ -178,6 +254,7 @@ export function Revisit() {
                       </button>
                       <button
                         className="text-link retire"
+                        disabled={pending}
                         onClick={() => retire(problem)}
                       >
                         <Check size={15} />
@@ -223,7 +300,9 @@ export function Revisit() {
       {reschedule && (
         <Modal
           title="Give it a little space."
-          onClose={() => setReschedule(null)}
+          onClose={() => {
+            if (!saving.current) setReschedule(null);
+          }}
         >
           <form onSubmit={saveDate} className="form-stack">
             <p className="muted">
@@ -236,6 +315,7 @@ export function Revisit() {
                 name="revisitDate"
                 type="date"
                 value={date}
+                disabled={pending}
                 onChange={(e) => setDate(e.target.value)}
                 min={localDate()}
                 required
@@ -251,12 +331,17 @@ export function Revisit() {
               <button
                 type="button"
                 className="button secondary"
+                disabled={pending}
                 onClick={() => setReschedule(null)}
               >
                 Cancel
               </button>
-              <button className="button primary" type="submit">
-                Save date
+              <button
+                className="button primary"
+                type="submit"
+                disabled={pending}
+              >
+                {pending ? "Saving…" : "Save date"}
                 <ArrowRight size={16} />
               </button>
             </div>

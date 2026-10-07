@@ -219,3 +219,181 @@ test("aborting account sync prevents a subsequent upload and preserves the local
     "Unsynced notes",
   );
 });
+
+test("offline local edits reconcile with different remote edits when the account reconnects", async () => {
+  const key = "account:offline-reconnect-fixture" as const;
+  const base = emptyData();
+  const initial = await loadWorkspace(key, base);
+  await syncMetadata(key, {
+    base: { revision: 1, data: base },
+  } satisfies SyncCheckpoint);
+  let online = false;
+  let writes = 0;
+  let remote: CloudRevision = {
+    revision: 2,
+    data: {
+      ...base,
+      settings: { ...base.settings, displayName: "Edit from another device" },
+    },
+  };
+  const transport = {
+    read: async () => {
+      if (!online) throw new Error("Offline fixture");
+      return remote;
+    },
+    write: async (write: { baseRevision: number; data: typeof base }) => {
+      writes++;
+      assert.equal(write.baseRevision, remote.revision);
+      remote = { revision: remote.revision + 1, data: write.data };
+      return remote;
+    },
+  };
+  await commitWorkspace(key, initial, {
+    ...base,
+    settings: { ...base.settings, weeklyGoal: 11 },
+  });
+  await assert.rejects(synchronizeAccount(key, transport), /Offline fixture/);
+  assert.equal(writes, 0);
+  assert.equal((await loadWorkspace(key)).data.settings.weeklyGoal, 11);
+  assert.equal((await syncMetadata<SyncCheckpoint>(key))?.base.revision, 1);
+  online = true;
+  await synchronizeAccount(key, transport);
+  assert.equal(writes, 1);
+  assert.equal(remote.data?.settings.weeklyGoal, 11);
+  assert.equal(remote.data?.settings.displayName, "Edit from another device");
+  assert.equal(
+    (await loadWorkspace(key)).data.settings.displayName,
+    "Edit from another device",
+  );
+  assert.equal((await syncMetadata<SyncCheckpoint>(key))?.pending, undefined);
+});
+
+test("switching accounts during an acknowledged write keeps its retry scoped to the original account", async () => {
+  const firstKey = "account:switch-pending-a" as const;
+  const secondKey = "account:switch-pending-b" as const;
+  const first = await loadWorkspace(firstKey);
+  const second = await loadWorkspace(secondKey);
+  await commitWorkspace(firstKey, first, {
+    ...first.data,
+    settings: {
+      ...first.data.settings,
+      displayName: "Account A's unsynced draft",
+    },
+  });
+  await commitWorkspace(secondKey, second, {
+    ...second.data,
+    settings: {
+      ...second.data.settings,
+      displayName: "Account B's separate draft",
+    },
+  });
+  const controller = new AbortController();
+  let started!: () => void;
+  const writeStarted = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  let acknowledge!: () => void;
+  const acknowledgement = new Promise<void>((resolve) => {
+    acknowledge = resolve;
+  });
+  const operations = new Map<string, CloudRevision>();
+  let firstRemote: CloudRevision = { revision: 0, data: null };
+  const firstIds: string[] = [];
+  const firstTransport = {
+    read: async () => firstRemote,
+    write: async (write: { operationId: string; data: typeof first.data }) => {
+      firstIds.push(write.operationId);
+      const prior = operations.get(write.operationId);
+      if (prior) return prior;
+      firstRemote = { revision: 1, data: write.data };
+      operations.set(write.operationId, firstRemote);
+      started();
+      await acknowledgement;
+      return firstRemote;
+    },
+  };
+  const pending = synchronizeAccount(
+    firstKey,
+    firstTransport,
+    controller.signal,
+  );
+  const aborted = assert.rejects(pending, /abort/i);
+  await writeStarted;
+  controller.abort();
+  let secondRemote: CloudRevision = { revision: 0, data: null };
+  await synchronizeAccount(secondKey, {
+    read: async () => secondRemote,
+    write: async (write) => {
+      secondRemote = { revision: 1, data: write.data };
+      return secondRemote;
+    },
+  });
+  acknowledge();
+  await aborted;
+  assert.equal(
+    secondRemote.data?.settings.displayName,
+    "Account B's separate draft",
+  );
+  assert.ok((await syncMetadata<SyncCheckpoint>(firstKey))?.pending);
+  assert.equal(
+    (await syncMetadata<SyncCheckpoint>(secondKey))?.pending,
+    undefined,
+  );
+  await synchronizeAccount(firstKey, firstTransport);
+  assert.deepEqual(firstIds, [firstIds[0], firstIds[0]]);
+  assert.equal(firstRemote.revision, 1);
+  assert.equal(
+    (await loadWorkspace(firstKey)).data.settings.displayName,
+    "Account A's unsynced draft",
+  );
+  assert.equal(
+    (await loadWorkspace(secondKey)).data.settings.displayName,
+    "Account B's separate draft",
+  );
+  assert.equal(
+    (await syncMetadata<SyncCheckpoint>(firstKey))?.pending,
+    undefined,
+  );
+});
+
+test("a local edit committed during a successful upload remains pending for the following sync", async () => {
+  const key = "account:edit-during-write-fixture" as const;
+  const initial = await loadWorkspace(key);
+  await commitWorkspace(key, initial, {
+    ...initial.data,
+    settings: { ...initial.data.settings, weeklyGoal: 9 },
+  });
+  let remote: CloudRevision = { revision: 0, data: null };
+  let writes = 0;
+  const transport = {
+    read: async () => remote,
+    write: async (write: { data: typeof initial.data }) => {
+      writes++;
+      if (writes === 1) {
+        const current = await loadWorkspace(key);
+        await commitWorkspace(key, current, {
+          ...current.data,
+          settings: {
+            ...current.data.settings,
+            displayName: "New local edit while upload runs",
+          },
+        });
+      }
+      remote = { revision: remote.revision + 1, data: write.data };
+      return remote;
+    },
+  };
+  await synchronizeAccount(key, transport);
+  assert.equal(remote.data?.settings.displayName, "");
+  assert.equal(
+    (await loadWorkspace(key)).data.settings.displayName,
+    "New local edit while upload runs",
+  );
+  await synchronizeAccount(key, transport);
+  assert.equal(writes, 2);
+  assert.equal(
+    remote.data?.settings.displayName,
+    "New local edit while upload runs",
+  );
+  assert.equal(remote.data?.settings.weeklyGoal, 9);
+});

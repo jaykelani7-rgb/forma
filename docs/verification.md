@@ -1,6 +1,8 @@
 # Verification record
 
-Current improvement phase verified locally on **4 October 2026**. Browser tests use isolated workspaces and deterministic Codeforces/catalogue fixtures; the user's personal history is not a test fixture and was not replaced.
+For the **7 October 2026 reliability pass**, see [reliability-pass.md](reliability-pass.md) for current results, updated screenshots, and exact remaining hosted-account checks.
+
+The following record covers the earlier improvement phase verified locally on **4 October 2026**. Browser tests use isolated workspaces and deterministic Codeforces/catalogue fixtures; the user's personal history is not a test fixture and was not replaced.
 
 ## Executed checks
 

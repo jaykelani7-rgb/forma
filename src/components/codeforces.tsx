@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import Link from "next/link";
 import {
   ArrowRight,
@@ -61,12 +61,19 @@ function SyncNotice() {
                     : "Couldn’t import activity"}
             </strong>
             <p>{sync.error}</p>
-            {profile?.lastSyncAt && (
-              <p>
-                Showing saved activity from{" "}
-                {new Date(profile.lastSyncAt).toLocaleString()}. Nothing was
-                replaced.
-              </p>
+            {sync.code === "storage" ? (
+              <Link href="/settings" className="text-link">
+                Review saving and recovery copies in Settings
+                <ArrowRight size={14} />
+              </Link>
+            ) : (
+              profile?.lastSyncAt && (
+                <p>
+                  Showing saved activity from{" "}
+                  {new Date(profile.lastSyncAt).toLocaleString()}. Nothing was
+                  replaced.
+                </p>
+              )
             )}
           </div>
         </div>
@@ -83,14 +90,43 @@ export function CodeforcesConnection() {
     connectHandle,
     syncActivity,
     disconnectHandle,
+    guardWorkspace,
   } = useWorkspace();
   const profile = connectedProfile(data);
   const [changing, setChanging] = useState(false);
   const [handle, setHandle] = useState("");
   const [preview, setPreview] = useState<PublicProfile | null>(null);
+  const checking = useRef(false);
+  const connecting = useRef(false);
+  const [connectingNow, setConnectingNow] = useState(false);
   async function check(event: React.FormEvent) {
     event.preventDefault();
-    setPreview(await previewHandle(handle));
+    if (checking.current) return;
+    const isCurrent = guardWorkspace();
+    checking.current = true;
+    try {
+      const value = await previewHandle(handle);
+      if (isCurrent()) setPreview(value);
+    } finally {
+      checking.current = false;
+    }
+  }
+  async function connect() {
+    if (!preview || connecting.current) return;
+    const isCurrent = guardWorkspace();
+    connecting.current = true;
+    setConnectingNow(true);
+    try {
+      const saved = await connectHandle(preview);
+      if (!isCurrent()) return;
+      if (saved) {
+        setChanging(false);
+        setPreview(null);
+      }
+    } finally {
+      connecting.current = false;
+      if (isCurrent()) setConnectingNow(false);
+    }
   }
   return (
     <section className="settings-section" id="codeforces">
@@ -237,11 +273,8 @@ export function CodeforcesConnection() {
             </p>
             <button
               className="button primary"
-              onClick={async () => {
-                setChanging(false);
-                setPreview(null);
-                await connectHandle(preview);
-              }}
+              disabled={connectingNow}
+              onClick={connect}
             >
               Connect and import
               <Check size={16} />
@@ -685,9 +718,11 @@ export function CodeforcesProgress() {
   );
 }
 export function RevisitDefaults() {
-  const { data, update, notify } = useWorkspace();
+  const { data, update, notify, guardWorkspace } = useWorkspace();
   const [days, setDays] = useState(data.settings.reviewDays);
   const [error, setError] = useState("");
+  const [pending, setPending] = useState(false);
+  const saving = useRef(false);
   return (
     <section className="settings-section">
       <div className="settings-section-heading">
@@ -699,8 +734,9 @@ export function RevisitDefaults() {
       </div>
       <form
         className="settings-fields"
-        onSubmit={(e) => {
+        onSubmit={async (e) => {
           e.preventDefault();
+          if (saving.current) return;
           if (
             !Object.values(days).every(
               (n) => Number.isInteger(n) && n >= 1 && n <= 90,
@@ -709,14 +745,35 @@ export function RevisitDefaults() {
             setError("Choose whole numbers from 1 to 90 days.");
             return;
           }
-          update((d) => ({
-            ...d,
-            settings: { ...d.settings, reviewDays: { ...days } },
-          }));
+          const isCurrent = guardWorkspace();
+          saving.current = true;
+          setPending(true);
           setError("");
-          notify(
-            "Revisit defaults saved. Existing dates stay as you chose them.",
-          );
+          try {
+            const saved = await update((d) => ({
+              ...d,
+              settings: { ...d.settings, reviewDays: { ...days } },
+            }));
+            if (!isCurrent()) return;
+            if (saved)
+              notify(
+                "Revisit defaults saved. Existing dates stay as you chose them.",
+              );
+            else
+              setError(
+                "These defaults were not committed. Your input is still here. Review the storage message and recovery copies in Settings, then retry.",
+              );
+          } catch (failure) {
+            if (isCurrent())
+              setError(
+                failure instanceof Error
+                  ? failure.message
+                  : "These defaults were not committed. Review the storage message and retry.",
+              );
+          } finally {
+            saving.current = false;
+            if (isCurrent()) setPending(false);
+          }
         }}
       >
         <div className="cf-rule-fields">
@@ -735,6 +792,7 @@ export function RevisitDefaults() {
                   min={1}
                   max={90}
                   value={days[key]}
+                  disabled={pending}
                   onChange={(e) =>
                     setDays({ ...days, [key]: Number(e.target.value) })
                   }
@@ -759,8 +817,8 @@ export function RevisitDefaults() {
             {error}
           </p>
         )}
-        <button className="button secondary" type="submit">
-          Save revisit defaults
+        <button className="button secondary" type="submit" disabled={pending}>
+          {pending ? "Saving…" : "Save revisit defaults"}
           <Check size={16} />
         </button>
       </form>

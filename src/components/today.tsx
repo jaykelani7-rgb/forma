@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import Link from "next/link";
 import {
   ArrowRight,
@@ -14,9 +14,9 @@ import {
 } from "lucide-react";
 import {
   Duration,
+  Problem,
   addDays,
   breakthroughs,
-  latestReflection,
   localDate,
   reviewLabel,
   reviewQueue,
@@ -29,7 +29,8 @@ import {
 import { useWorkspace } from "./provider";
 import { FreshDiscovery } from "./discovery";
 import { TodayActivity } from "./codeforces";
-import { SectionHeading, Tags } from "./ui";
+import { SectionHeading } from "./ui";
+import styles from "./today-discovery.module.css";
 
 function PracticeIllustration({ empty = false }: { empty?: boolean }) {
   return (
@@ -162,8 +163,19 @@ export function WeeklyRhythm() {
   );
 }
 export function Today() {
-  const { data, mode, setMode, startSession, setAddOpen, update } =
-    useWorkspace();
+  const {
+    data,
+    mode,
+    setMode,
+    startSession,
+    setAddOpen,
+    update,
+    guardWorkspace,
+    storagePending,
+  } = useWorkspace();
+  const [busy, setBusy] = useState(false);
+  const actionLock = useRef(false);
+  const [actionError, setActionError] = useState("");
   const [duration, setDuration] = useState<Duration>(
     data.settings.defaultDuration,
   );
@@ -175,8 +187,7 @@ export function Today() {
     active && activeProblem
       ? {
           problem: activeProblem,
-          reason:
-            "Your notes and timer are right where you left them. Pick up the idea whenever you’re ready.",
+          reason: "Your notes and timer are ready when you are.",
           focusFallback: false,
           revisit: true,
         }
@@ -184,6 +195,56 @@ export function Today() {
   const upcoming = reviewQueue(data).slice(0, 3);
   const breakthrough = breakthroughs(data)[0];
   const now = new Date();
+  async function start(problem: Problem) {
+    if (actionLock.current) return;
+    const isCurrent = guardWorkspace();
+    actionLock.current = true;
+    setBusy(true);
+    setActionError("");
+    try {
+      const saved = await startSession(problem, duration);
+      if (isCurrent() && !saved)
+        setActionError(
+          "The session could not be saved. Review the storage message and recovery copies in Settings before trying again.",
+        );
+    } catch {
+      if (isCurrent())
+        setActionError(
+          "The session could not be saved. Your workspace is preserved; review saving and recovery in Settings.",
+        );
+    } finally {
+      if (isCurrent()) {
+        actionLock.current = false;
+        setBusy(false);
+      }
+    }
+  }
+  async function skip() {
+    if (!recommended || actionLock.current) return;
+    const isCurrent = guardWorkspace();
+    actionLock.current = true;
+    setBusy(true);
+    setActionError("");
+    try {
+      const saved = await update((current) =>
+        skipRecommendation(current, recommended.problem.id),
+      );
+      if (isCurrent() && !saved)
+        setActionError(
+          "The skip could not be saved. Review saving and recovery in Settings; the proposed change remains recoverable.",
+        );
+    } catch {
+      if (isCurrent())
+        setActionError(
+          "The skip could not be saved. Review saving and recovery in Settings.",
+        );
+    } finally {
+      if (isCurrent()) {
+        actionLock.current = false;
+        setBusy(false);
+      }
+    }
+  }
   return (
     <div className="today-page page-enter">
       <header
@@ -221,148 +282,233 @@ export function Today() {
       </header>
       <div className="today-grid">
         <div className="today-primary">
-          <section
-            className="session-card"
-            aria-labelledby="session-card-title"
-          >
-            <div className="session-card-top">
-              <span className="eyebrow">
-                <span className="green-square" />
-                {active
-                  ? "YOUR SESSION IS WAITING"
-                  : recommended
-                    ? "A GOOD PLACE TO BEGIN"
-                    : "MAKE A LITTLE ROOM FOR PRACTICE"}
-              </span>
-              <span className="card-number mono">01 / FOCUS</span>
-            </div>
-            <div className="duration-row">
-              <span className="small muted">
-                {active
-                  ? "Your session intention"
-                  : "How much time do you have?"}
-              </span>
-              {active ? (
-                <span className="active-duration mono">
-                  <Clock3 size={14} />
-                  {active.targetMinutes} min
+          {(active || recommended) && (
+            <section
+              className={`session-card ${styles.primaryCard}`}
+              aria-labelledby="session-card-title"
+            >
+              <div className="session-card-top">
+                <span className="eyebrow">
+                  <span className="green-square" />
+                  {active
+                    ? "YOUR SESSION IS WAITING"
+                    : recommended
+                      ? "A GOOD PLACE TO BEGIN"
+                      : "MAKE A LITTLE ROOM FOR PRACTICE"}
                 </span>
-              ) : (
-                <div
-                  className="segmented"
-                  role="group"
-                  aria-label="Session duration"
-                >
-                  {([15, 30, 60] as Duration[]).map((value) => (
-                    <button
-                      key={value}
-                      onClick={() => setDuration(value)}
-                      aria-pressed={duration === value}
-                      className={duration === value ? "selected" : ""}
-                    >
-                      {value}
-                      <span> min</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-            <div className="session-card-content">
-              <div>
-                {recommended ? (
-                  <>
-                    <div className="focus-kind">
-                      <RotateCcw size={13} />
-                      {recommended.revisit
-                        ? "A FAMILIAR PROBLEM, A FRESH TRY"
-                        : "SOMETHING NEW TO UNDERSTAND"}
-                    </div>
-                    <h2 id="session-card-title">
-                      {active
-                        ? "Continue "
-                        : recommended.revisit
-                          ? "Revisit "
-                          : "Explore "}
-                      <span>{recommended.problem.title}</span>
-                    </h2>
-                    <div className="problem-meta">
-                      <span>{recommended.problem.platform}</span>
-                      {recommended.problem.problemCode && (
-                        <span className="mono">
-                          #{recommended.problem.problemCode}
-                        </span>
-                      )}
-                      {recommended.problem.rating !== null && (
-                        <span className="mono">
-                          {recommended.problem.rating} rating
-                        </span>
-                      )}
-                    </div>
-                    <p className="suggestion-reason">{recommended.reason}</p>
-                    <Tags tags={recommended.problem.tags} />
-                    {recommended.focusFallback && (
-                      <p className="focus-fallback">
-                        No topics match your focus yet, so this suggestion uses
-                        your full collection.
-                      </p>
-                    )}
-                  </>
+                <span className="card-number mono">01 / FOCUS</span>
+              </div>
+              <div className="duration-row">
+                <span className="small muted">
+                  {active
+                    ? "Your session intention"
+                    : "How much time do you have?"}
+                </span>
+                {active ? (
+                  <span className="active-duration mono">
+                    <Clock3 size={14} />
+                    {active.targetMinutes} min
+                  </span>
                 ) : (
-                  <>
-                    <div className="focus-kind">
-                      <Leaf size={14} />
-                      GOOD THINGS BEGIN SMALL
-                    </div>
-                    <h2 id="session-card-title">
-                      Your next chapter
-                      <br />
-                      <em>starts here.</em>
-                    </h2>
-                    <p className="suggestion-reason">
-                      A problem to think about. A little time to yourself.
-                      <br className="desktop-break" /> Build a practice that
-                      feels like your own.
-                    </p>
-                    <p className="first-use-note">
-                      Start with one problem. We’ll take it from there.
-                    </p>
-                  </>
+                  <div
+                    className="segmented"
+                    role="group"
+                    aria-label="Session duration"
+                  >
+                    {([15, 30, 60] as Duration[]).map((value) => (
+                      <button
+                        key={value}
+                        onClick={() => setDuration(value)}
+                        aria-pressed={duration === value}
+                        className={duration === value ? "selected" : ""}
+                      >
+                        {value}
+                        <span> min</span>
+                      </button>
+                    ))}
+                  </div>
                 )}
               </div>
-              <PracticeIllustration empty={!recommended} />
+              <div className="session-card-content">
+                <div>
+                  {recommended ? (
+                    <>
+                      <div className="focus-kind">
+                        <RotateCcw size={13} />
+                        {recommended.revisit
+                          ? "A FAMILIAR PROBLEM, A FRESH TRY"
+                          : "SOMETHING NEW TO UNDERSTAND"}
+                      </div>
+                      <h2 id="session-card-title">
+                        {active
+                          ? "Continue "
+                          : recommended.revisit
+                            ? "Revisit "
+                            : "Explore "}
+                        <span>{recommended.problem.title}</span>
+                      </h2>
+                      <div className="problem-meta">
+                        <span>{recommended.problem.platform}</span>
+                        {recommended.problem.problemCode && (
+                          <span className="mono">
+                            #{recommended.problem.problemCode}
+                          </span>
+                        )}
+                        {recommended.problem.rating !== null && (
+                          <span className="mono">
+                            {recommended.problem.rating} rating
+                          </span>
+                        )}
+                      </div>
+                      <p className="suggestion-reason">{recommended.reason}</p>
+                      {recommended.problem.tags.length > 0 && (
+                        <details
+                          className={`discovery-tags ${styles.savedTags}`}
+                        >
+                          <summary>Reveal topic tags</summary>
+                          <p className="small muted">
+                            {recommended.problem.tags.join(" · ")}
+                          </p>
+                        </details>
+                      )}
+                      {recommended.focusFallback && (
+                        <p className="focus-fallback">
+                          No topics match your focus yet, so this suggestion
+                          uses your full collection.
+                        </p>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <div className="focus-kind">
+                        <Leaf size={14} />
+                        GOOD THINGS BEGIN SMALL
+                      </div>
+                      <h2 id="session-card-title">
+                        Your next chapter
+                        <br />
+                        <em>starts here.</em>
+                      </h2>
+                      <p className="suggestion-reason">
+                        A problem to think about. A little time to yourself.
+                        <br className="desktop-break" /> Build a practice that
+                        feels like your own.
+                      </p>
+                      <p className="first-use-note">
+                        Start with one problem. We’ll take it from there.
+                      </p>
+                    </>
+                  )}
+                </div>
+                <PracticeIllustration empty={!recommended} />
+              </div>
+              <div className="session-card-actions">
+                {active ? (
+                  storagePending || busy ? (
+                    <button className="button primary" disabled>
+                      <Play size={15} fill="currentColor" />
+                      Continue session
+                      <ArrowRight size={17} />
+                    </button>
+                  ) : (
+                    <Link href="/session" className="button primary">
+                      <Play size={15} fill="currentColor" />
+                      Continue session
+                      <ArrowRight size={17} />
+                    </Link>
+                  )
+                ) : recommended ? (
+                  <button
+                    className="button primary"
+                    onClick={() => void start(recommended.problem)}
+                    disabled={busy || storagePending}
+                  >
+                    <Play size={15} fill="currentColor" />
+                    Start session
+                    <ArrowRight size={17} />
+                  </button>
+                ) : (
+                  <button
+                    className="button primary"
+                    onClick={() => setAddOpen(true)}
+                  >
+                    <Plus size={17} />
+                    Add my first problem
+                    <ArrowRight size={17} />
+                  </button>
+                )}
+                {recommended ? (
+                  <Link href="/problems" className="quiet-action">
+                    Choose my own problem
+                    <ArrowUpRight size={15} />
+                  </Link>
+                ) : (
+                  <button
+                    className="quiet-action"
+                    onClick={() => setMode("demo")}
+                  >
+                    Explore the demo
+                    <ArrowUpRight size={15} />
+                  </button>
+                )}
+              </div>
+            </section>
+          )}
+          {actionError && (
+            <div className={`form-error ${styles.actionError}`} role="alert">
+              <p>{actionError}</p>
+              <Link href="/settings" className="text-link">
+                Review saving &amp; recovery
+                <ArrowUpRight size={14} />
+              </Link>
             </div>
-            <div className="session-card-actions">
-              {active ? (
-                <Link href="/session" className="button primary">
-                  <Play size={15} fill="currentColor" />
-                  Resume session
-                  <ArrowRight size={17} />
-                </Link>
-              ) : recommended ? (
-                <button
-                  className="button primary"
-                  onClick={() => startSession(recommended.problem, duration)}
-                >
-                  <Play size={15} fill="currentColor" />
-                  Start session
-                  <ArrowRight size={17} />
-                </button>
-              ) : (
-                <button
-                  className="button primary"
-                  onClick={() => setAddOpen(true)}
-                >
-                  <Plus size={17} />
-                  Add my first problem
-                  <ArrowRight size={17} />
-                </button>
-              )}
-              {recommended ? (
-                <Link href="/problems" className="quiet-action">
-                  Choose my own problem
-                  <ArrowUpRight size={15} />
-                </Link>
-              ) : (
+          )}
+          {recommended && !active && (
+            <button
+              className="text-link muted"
+              onClick={() => void skip()}
+              disabled={busy || storagePending}
+            >
+              Skip today’s recommendation
+            </button>
+          )}
+          {!active && !recommended && (
+            <div className={`duration-row ${styles.freshDuration}`}>
+              <span className="small muted">How much time do you have?</span>
+              <div
+                className="segmented"
+                role="group"
+                aria-label="Session duration"
+              >
+                {([15, 30, 60] as Duration[]).map((value) => (
+                  <button
+                    key={value}
+                    onClick={() => setDuration(value)}
+                    aria-pressed={duration === value}
+                    className={duration === value ? "selected" : ""}
+                  >
+                    {value}
+                    <span> min</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          <FreshDiscovery
+            duration={active?.targetMinutes ?? duration}
+            secondary={!!active || !!recommended}
+          />
+          {!active && !recommended && (
+            <div className={styles.collectionChoices}>
+              <Link href="/problems" className="quiet-action">
+                Choose from my problems
+                <ArrowUpRight size={15} />
+              </Link>
+              <button className="quiet-action" onClick={() => setAddOpen(true)}>
+                Add a problem
+                <Plus size={15} />
+              </button>
+              {!data.problems.length && mode !== "demo" && (
                 <button
                   className="quiet-action"
                   onClick={() => setMode("demo")}
@@ -372,18 +518,7 @@ export function Today() {
                 </button>
               )}
             </div>
-          </section>
-          {recommended && !active && (
-            <button
-              className="text-link muted"
-              onClick={() =>
-                update((d) => skipRecommendation(d, recommended.problem.id))
-              }
-            >
-              Skip today’s recommendation
-            </button>
           )}
-          <FreshDiscovery duration={duration} />
           <TodayActivity />
           <section className="upcoming-section">
             <SectionHeading
@@ -397,17 +532,17 @@ export function Today() {
                   <button
                     className="upcoming-row"
                     key={problem.id}
-                    onClick={() => startSession(problem, duration)}
+                    onClick={() => void start(problem)}
+                    disabled={busy || storagePending || !!active}
                   >
                     <span className="upcoming-index mono">0{index + 1}</span>
                     <div className="upcoming-problem">
                       <strong>{problem.title}</strong>
                       <span>
-                        {latestReflection(data, problem.id)?.difficulty ===
-                        "coding"
-                          ? "From idea to implementation"
-                          : problem.tags.slice(0, 2).join(" · ") ||
-                            problem.platform}
+                        {problem.platform}
+                        {problem.problemCode
+                          ? ` · #${problem.problemCode}`
+                          : ""}
                       </span>
                     </div>
                     <span
@@ -437,7 +572,7 @@ export function Today() {
             </p>
           </section>
         </div>
-        <aside className="today-support">
+        <aside className={`today-support ${styles.support}`}>
           <WeeklyRhythm />
           <section className="breakthrough-section">
             <div className="section-heading">

@@ -37,6 +37,7 @@ export function Settings() {
     storageError,
     storagePending,
     workspaceKey,
+    guardWorkspace,
   } = useWorkspace();
   const [name, setName] = useState(data.settings.displayName);
   const [goal, setGoal] = useState(String(data.settings.weeklyGoal));
@@ -58,13 +59,19 @@ export function Settings() {
   } | null>(null);
   const [recoveries, setRecoveries] = useState<Recovery[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
+  const saving = useRef(false);
+  const restoring = useRef(false);
+  const [restoreBusy, setRestoreBusy] = useState(false);
   async function save(e: React.FormEvent) {
     e.preventDefault();
+    if (saving.current) return;
     const weeklyGoal = Number(goal);
     if (!Number.isInteger(weeklyGoal) || weeklyGoal < 1 || weeklyGoal > 14) {
       setError("Choose a weekly goal between 1 and 14 sessions.");
       return;
     }
+    const isCurrent = guardWorkspace();
+    saving.current = true;
     const saved = await update((d) => ({
       ...d,
       settings: {
@@ -75,7 +82,13 @@ export function Settings() {
         focus,
       },
     }));
-    setError("");
+    saving.current = false;
+    if (!isCurrent()) return;
+    setError(
+      saved
+        ? ""
+        : "Preferences could not be saved. Your entries remain here; review saving and recovery copies below, then retry.",
+    );
     if (saved)
       notify("Your preferences are saved. Make this practice your own.");
   }
@@ -110,10 +123,13 @@ export function Settings() {
   }
   async function copyBackup() {
     if (!backup) return;
+    const isCurrent = guardWorkspace();
     try {
       await navigator.clipboard.writeText(backup.json);
+      if (!isCurrent()) return;
       notify("Backup JSON copied. Save it in a .json file to restore later.");
     } catch {
+      if (!isCurrent()) return;
       notify(
         "This browser couldn’t copy automatically. Select the JSON below and copy it into a .json file.",
       );
@@ -123,6 +139,7 @@ export function Settings() {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
+    const isCurrent = guardWorkspace();
     setImportError("");
     setImporting(true);
     try {
@@ -133,6 +150,7 @@ export function Settings() {
       const raw = await file.text();
       const input = JSON.parse(raw);
       const incoming = decodeBackup(raw);
+      if (!isCurrent()) return;
       setPending({
         data: incoming,
         theme: ["light", "dark", "system"].includes(input.theme)
@@ -141,6 +159,7 @@ export function Settings() {
         filename: file.name,
       });
     } catch (error) {
+      if (!isCurrent()) return;
       setImportError(
         error instanceof SyntaxError
           ? "This file isn’t valid JSON. Choose a Forma backup and try again."
@@ -149,12 +168,22 @@ export function Settings() {
             : "The file could not be read.",
       );
     } finally {
-      setImporting(false);
+      if (isCurrent()) setImporting(false);
     }
   }
   async function confirmImport() {
-    if (!pending) return;
-    if (!(await replaceData(pending.data))) {
+    if (!pending || restoring.current) return;
+    restoring.current = true;
+    setRestoreBusy(true);
+    // Replacement invalidates earlier operations synchronously, so capture its
+    // own generation after starting it.
+    const completion = replaceData(pending.data);
+    const isCurrent = guardWorkspace();
+    const saved = await completion;
+    restoring.current = false;
+    if (!isCurrent()) return;
+    setRestoreBusy(false);
+    if (!saved) {
       setImportError(
         "Restoration needs attention. Review storage errors and recovery copies.",
       );
@@ -393,9 +422,18 @@ export function Settings() {
           </p>
           <button
             className="text-link"
-            onClick={async () =>
-              setRecoveries(await recoveriesFor(workspaceKey))
-            }
+            onClick={async () => {
+              const isCurrent = guardWorkspace();
+              try {
+                const copies = await recoveriesFor(workspaceKey);
+                if (isCurrent()) setRecoveries(copies);
+              } catch {
+                if (isCurrent())
+                  setImportError(
+                    "Recovery copies could not be read. Export the visible workspace before closing this tab.",
+                  );
+              }
+            }}
           >
             Review recovery copies
           </button>
@@ -445,7 +483,9 @@ export function Settings() {
       {pending && (
         <Modal
           title="Bring your notebook back."
-          onClose={() => setPending(null)}
+          onClose={() => {
+            if (!restoreBusy) setPending(null);
+          }}
         >
           <div className="form-stack">
             <p className="muted">
@@ -472,12 +512,17 @@ export function Settings() {
             <div className="form-actions">
               <button
                 className="button secondary"
+                disabled={restoreBusy}
                 onClick={() => setPending(null)}
               >
                 Keep current data
               </button>
-              <button className="button primary" onClick={confirmImport}>
-                Replace and restore
+              <button
+                className="button primary"
+                disabled={restoreBusy}
+                onClick={confirmImport}
+              >
+                {restoreBusy ? "Restoring…" : "Replace and restore"}
                 <ArrowRight size={16} />
               </button>
             </div>

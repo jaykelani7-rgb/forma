@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { ArrowRight, Link2 } from "lucide-react";
 import { Problem, safeUrl, uid } from "@/lib/model";
 import { useWorkspace } from "./provider";
@@ -12,8 +12,11 @@ export function AddProblem({
   onClose: () => void;
   problem?: Problem;
 }) {
-  const { update, notify } = useWorkspace();
+  const { update, notify, guardWorkspace } = useWorkspace();
   const [error, setError] = useState("");
+  const [pending, setPending] = useState(false);
+  const saving = useRef(false);
+  const identity = useRef(problem?.id ?? uid());
   const [platform, setPlatform] = useState(
     problem
       ? ["Codeforces", "LeetCode"].includes(problem.platform)
@@ -28,6 +31,7 @@ export function AddProblem({
   );
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (saving.current) return;
     const form = new FormData(event.currentTarget);
     const title = String(form.get("title") ?? "").trim();
     const url = String(form.get("url") ?? "").trim();
@@ -63,7 +67,7 @@ export function AddProblem({
     }
     const value: Problem = {
       ...problem,
-      id: problem?.id ?? uid(),
+      id: identity.current,
       title,
       platform: platform === "Other" ? custom.trim() : platform,
       url,
@@ -78,30 +82,61 @@ export function AddProblem({
       setError("Add a platform name.");
       return;
     }
-    const saved = await update((data) => ({
-      ...data,
-      problems: problem
-        ? data.problems.map((p) => (p.id === problem.id ? value : p))
-        : [...data.problems, value],
-    }));
-    if (!saved) {
-      setError(
-        "This change is not saved yet. Review the storage message and recovery copies before closing.",
+    const isCurrent = guardWorkspace();
+    saving.current = true;
+    setPending(true);
+    setError("");
+    try {
+      const saved = await update((data) => ({
+        ...data,
+        problems: data.problems.some((p) => p.id === value.id)
+          ? data.problems.map((p) =>
+              p.id === value.id
+                ? {
+                    ...p,
+                    title: value.title,
+                    platform: value.platform,
+                    url: value.url,
+                    problemCode: value.problemCode,
+                    tags: value.tags,
+                    rating: value.rating,
+                  }
+                : p,
+            )
+          : [...data.problems, value],
+      }));
+      if (!isCurrent()) return;
+      if (!saved) {
+        setError(
+          "This change was not committed. Your input is still here. Review the storage message and recovery copies in Settings, then retry.",
+        );
+        return;
+      }
+      notify(
+        problem
+          ? "Problem details updated."
+          : "Problem added. A good place to begin.",
       );
-      return;
+      onClose();
+    } catch (failure) {
+      if (isCurrent())
+        setError(
+          failure instanceof Error
+            ? failure.message
+            : "This change was not committed. Review the storage message and retry.",
+        );
+    } finally {
+      saving.current = false;
+      if (isCurrent()) setPending(false);
     }
-    notify(
-      problem
-        ? "Problem details updated."
-        : "Problem added. A good place to begin.",
-    );
-    onClose();
   }
   const known = platform === "Codeforces" || platform === "LeetCode";
   return (
     <Modal
       title={problem ? "A few small edits." : "Add to your practice."}
-      onClose={onClose}
+      onClose={() => {
+        if (!saving.current) onClose();
+      }}
     >
       <form className="form-stack" onSubmit={submit}>
         <p className="muted">
@@ -113,6 +148,7 @@ export function AddProblem({
           <input
             autoFocus
             name="title"
+            disabled={pending}
             placeholder="e.g. Diagonal Traverse"
             defaultValue={problem?.title}
             maxLength={240}
@@ -124,6 +160,7 @@ export function AddProblem({
             Platform
             <select
               value={known ? platform : "Other"}
+              disabled={pending}
               onChange={(e) => setPlatform(e.target.value)}
             >
               <option>Codeforces</option>
@@ -135,6 +172,7 @@ export function AddProblem({
             Problem ID <span className="optional">optional</span>
             <input
               name="problemCode"
+              disabled={pending}
               defaultValue={problem?.problemCode}
               placeholder={platform === "Codeforces" ? "e.g. 189A" : "e.g. 498"}
               maxLength={60}
@@ -146,6 +184,7 @@ export function AddProblem({
             Platform name
             <input
               value={custom}
+              disabled={pending}
               onChange={(e) => setCustom(e.target.value)}
               maxLength={60}
               placeholder="e.g. AtCoder"
@@ -160,6 +199,7 @@ export function AddProblem({
             <input
               type="url"
               name="url"
+              disabled={pending}
               defaultValue={problem?.url}
               placeholder="https://…"
               maxLength={2000}
@@ -171,6 +211,7 @@ export function AddProblem({
             Topics <span className="optional">comma separated</span>
             <input
               name="tags"
+              disabled={pending}
               defaultValue={problem?.tags.join(", ")}
               placeholder="Arrays, Binary search"
               maxLength={1200}
@@ -180,6 +221,7 @@ export function AddProblem({
             Rating <span className="optional">optional</span>
             <input
               name="rating"
+              disabled={pending}
               type="number"
               min={0}
               max={10000}
@@ -195,11 +237,16 @@ export function AddProblem({
           </p>
         )}
         <div className="form-actions">
-          <button className="button secondary" type="button" onClick={onClose}>
+          <button
+            className="button secondary"
+            type="button"
+            onClick={onClose}
+            disabled={pending}
+          >
             Cancel
           </button>
-          <button className="button primary" type="submit">
-            {problem ? "Save changes" : "Add problem"}
+          <button className="button primary" type="submit" disabled={pending}>
+            {pending ? "Saving…" : problem ? "Save changes" : "Add problem"}
             <ArrowRight size={16} />
           </button>
         </div>

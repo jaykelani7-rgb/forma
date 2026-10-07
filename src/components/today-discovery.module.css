@@ -1,0 +1,133 @@
+/* Today has one prominent practice action. Alternate choices use the same Ink
+   tokens, with room for keyboard focus and text enlargement. */
+.alternative {
+  margin: 18px 0 26px;
+  min-width: 0;
+}
+.alternativeSummary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 48px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+  color: var(--muted);
+  cursor: pointer;
+  list-style: none;
+}
+.alternativeSummary::-webkit-details-marker {
+  display: none;
+}
+.alternativeSummary[hidden] {
+  display: none;
+}
+.alternative[open] > .alternativeSummary > svg {
+  transform: rotate(90deg);
+}
+.discoveryCard {
+  margin: 12px 0 0;
+}
+.secondaryDiscovery .discoveryCard {
+  background: transparent;
+  border: 0;
+  padding: 12px 0;
+}
+.secondaryDiscovery .discoveryCard :global(.section-heading h2) {
+  font-size: 16px;
+}
+.secondaryDiscovery .discoveryCard :global(.discovery-problem h3) {
+  font-size: 29px;
+}
+.primaryDiscovery .discoveryCard :global(.discovery-problem h3) {
+  font-size: 38px;
+}
+.primaryDiscovery .discoveryCard :global(.section-heading h2) {
+  font-size: 17px;
+}
+.freshDuration {
+  margin: 0 0 18px;
+  flex-wrap: wrap;
+}
+.collectionChoices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  margin: -10px 0 16px;
+}
+.savedTags {
+  margin-top: 8px;
+}
+.savedTags summary {
+  font-size: 11px;
+}
+.savedTags p {
+  overflow-wrap: anywhere;
+}
+.actionError {
+  margin: 16px 0;
+}
+.actionError p {
+  line-height: 1.7;
+}
+.primaryCard :global(.session-card-content) {
+  min-height: 225px;
+}
+@media (max-width: 760px) {
+  .primaryDiscovery .discoveryCard :global(.discovery-problem h3) {
+    font-size: 34px;
+  }
+  .primaryCard :global(.session-card-content) > div:first-child {
+    padding-right: 0;
+  }
+  .primaryCard :global(.session-card-content h2) {
+    max-width: none;
+  }
+  .primaryCard :global(.practice-art) {
+    display: none;
+  }
+  .alternativeSummary {
+    font-size: 12px;
+  }
+  .freshDuration {
+    gap: 12px;
+  }
+  .collectionChoices {
+    gap: 6px 18px;
+  }
+}
+@media (max-width: 360px) {
+  .primaryCard :global(.session-card-content h2),
+  .primaryDiscovery .discoveryCard :global(.discovery-problem h3) {
+    font-size: 30px;
+  }
+}
+.discoveryCard :global(.button),
+.primaryCard :global(.button) {
+  white-space: normal;
+  max-width: 100%;
+  text-align: center;
+}
+.discoveryCard :global(.section-heading) {
+  flex-wrap: wrap;
+}
+@media (max-width: 760px) {
+  .primaryCard :global(.duration-row) {
+    flex-wrap: wrap;
+  }
+}
+
+.support > * {
+  min-width: 0;
+}
+@media (max-width: 760px) {
+  .support :global(.section-heading) {
+    flex-wrap: wrap;
+  }
+}
+@media (max-width: 420px) {
+  .support {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

@@ -1,5 +1,9 @@
 import { Data, Outcome, Problem, addDays, localDate } from "./model";
 import {
+  attemptAfterReviewCompletion,
+  preservesManualReview,
+} from "./reflection-scheduling";
+import {
   ActivityPage,
   CF_INBOX_SIZE,
   ImportedAttempt,
@@ -425,10 +429,17 @@ export function dailyReflectionBatch(
   now = new Date(),
 ): ImportedAttempt[] {
   const date = localDate(now);
+  const batch = data.codeforces.reflectionBatches?.find(
+    (value) =>
+      handleKey(value.handle) === handleKey(handle) && value.date === date,
+  );
+  const assignedIds = batch ? new Set(batch.attemptIds) : null;
   return profileActivity(data, handle)
     .filter(
       (attempt) =>
-        attempt.batchDate === date &&
+        (assignedIds
+          ? assignedIds.has(attempt.id)
+          : attempt.batchDate === date) &&
         !attempt.skipped &&
         !practiceReflectionFor(data, attempt.id),
     )
@@ -441,7 +452,13 @@ export function dailyReflectionCounts(
 ) {
   const date = localDate(now);
   const activity = profileActivity(data, handle);
-  const assigned = activity.filter((attempt) => attempt.batchDate === date);
+  const batch = data.codeforces.reflectionBatches?.find(
+    (value) =>
+      handleKey(value.handle) === handleKey(handle) && value.date === date,
+  );
+  const assigned =
+    batch?.attemptIds ??
+    activity.filter((attempt) => attempt.batchDate === date);
   return {
     total: assigned.length,
     pending: dailyReflectionBatch(data, handle, now).length,
@@ -456,7 +473,18 @@ export function ensureDailyReflectionBatch(data: Data, now = new Date()): Data {
   const handle = data.codeforces.connectedHandle;
   if (!handle) return data;
   const date = localDate(now);
+  const batches = data.codeforces.reflectionBatches ?? [];
+  if (
+    batches.some(
+      (batch) =>
+        handleKey(batch.handle) === handleKey(handle) && batch.date === date,
+    )
+  )
+    return data;
   const activity = profileActivity(data, handle);
+  // Before a profile's first import there is no batch to freeze. Once history
+  // exists, even an empty day's commitment remains stable through later imports.
+  if (!activity.length) return data;
   const existing = activity.filter((attempt) => attempt.batchDate === date);
   const selected = existing.length
     ? existing
@@ -467,21 +495,32 @@ export function ensureDailyReflectionBatch(data: Data, now = new Date()): Data {
         )
         .slice(0, CF_INBOX_SIZE);
   const selectedIds = new Set(selected.map((attempt) => attempt.id));
-  let changed = false;
   const practiceAttempts = data.codeforces.practiceAttempts.map((attempt) => {
     if (handleKey(attempt.handle) !== handleKey(handle)) return attempt;
     const assigned = selectedIds.has(attempt.id);
     const inbox =
       assigned && !attempt.skipped && !practiceReflectionFor(data, attempt.id);
-    const batchDate = assigned ? date : attempt.batchDate;
-    if (attempt.inbox === inbox && attempt.batchDate === batchDate)
-      return attempt;
-    changed = true;
-    return { ...attempt, inbox, ...(batchDate ? { batchDate } : {}) };
+    // New membership belongs only to the immutable day ledger. Preserve legacy
+    // dates so devices on different local dates do not compete for this field.
+    if (attempt.inbox === inbox) return attempt;
+    return { ...attempt, inbox };
   });
-  return changed
-    ? { ...data, codeforces: { ...data.codeforces, practiceAttempts } }
-    : data;
+  return {
+    ...data,
+    codeforces: {
+      ...data.codeforces,
+      practiceAttempts,
+      reflectionBatches: [
+        ...batches,
+        {
+          id: `daily:${handleKey(handle)}:${date}`,
+          handle,
+          date,
+          attemptIds: selected.map((a) => a.id),
+        },
+      ],
+    },
+  };
 }
 
 export function reflectionFor(data: Data, id: string) {
@@ -607,18 +646,11 @@ export function saveQuickReflection(
     takeaway: input.takeaway.trim(),
     savedAt: now.toISOString(),
   };
-  const afterCompletion =
-    !problem.reviewCompletedAt ||
-    Date.parse(attempt.firstSubmittedAt) >
-      Date.parse(problem.reviewCompletedAt);
-  const newPracticeAfterCompletion =
-    !!problem.reviewCompletedAt && afterCompletion && !problem.reviewAt;
   const canSchedule =
     relevantSchedule(data, attempt) &&
-    (afterCompletion || input.overrideSchedule) &&
-    (!problem.reviewManual ||
-      input.overrideSchedule ||
-      newPracticeAfterCompletion);
+    (attemptAfterReviewCompletion(problem, attempt) ||
+      input.overrideSchedule) &&
+    (!preservesManualReview(problem, attempt) || input.overrideSchedule);
   return {
     ...data,
     problems: data.problems.map((p) =>

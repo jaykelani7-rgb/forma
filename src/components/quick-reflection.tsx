@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Check, CalendarDays } from "lucide-react";
 import {
   DIFFICULTIES,
@@ -9,6 +9,7 @@ import {
   localDate,
 } from "@/lib/model";
 import { ImportedAttempt } from "@/lib/codeforces-types";
+import { preservesManualReview } from "@/lib/reflection-scheduling";
 import {
   latestSubmission,
   proposedReview,
@@ -34,9 +35,10 @@ export function QuickReflectionDialog({
   attempt: ImportedAttempt;
   onClose: () => void;
 }) {
-  const { data, update, notify } = useWorkspace();
+  const { data, update, notify, guardWorkspace } = useWorkspace();
   const problem = data.problems.find((p) => p.id === attempt.problemId)!;
   const previous = reflectionFor(data, attempt.id);
+  const keepManualSchedule = preservesManualReview(problem, attempt);
   const [outcome, setOutcome] = useState<Outcome | null>(
     previous?.outcome ?? null,
   );
@@ -45,7 +47,7 @@ export function QuickReflectionDialog({
   );
   const [takeaway, setTakeaway] = useState(previous?.takeaway ?? "");
   const [date, setDate] = useState<string | null>(
-    problem.reviewManual || problem.reviewAttemptId === attempt.id
+    keepManualSchedule || problem.reviewAttemptId === attempt.id
       ? problem.reviewAt
       : previous
         ? proposedReview(data, problem, previous.outcome)
@@ -53,16 +55,19 @@ export function QuickReflectionDialog({
   );
   const [override, setOverride] = useState(false);
   const [error, setError] = useState("");
+  const [pending, setPending] = useState<"save" | "skip" | null>(null);
+  const saving = useRef(false);
   const relevant = relevantSchedule(data, attempt);
   const latest = latestSubmission(data, attempt);
   function choose(value: Outcome) {
     setOutcome(value);
     setError("");
-    if (!problem.reviewManual && !override)
+    if (!keepManualSchedule && !override)
       setDate(proposedReview(data, problem, value));
   }
   async function save(event: React.FormEvent) {
     event.preventDefault();
+    if (saving.current) return;
     if (!outcome) {
       setError("Choose the reflection that fits this attempt.");
       return;
@@ -78,29 +83,83 @@ export function QuickReflectionDialog({
       setError("Choose a valid local calendar date, or no revisit.");
       return;
     }
-    const saved=await update((d) =>
-      saveQuickReflection(d, attempt.id, {
-        outcome,
-        difficulty,
-        takeaway,
-        reviewAt: chosen,
-        overrideSchedule: override || chosen !== date,
-      }),
-    );
-    if(!saved){setError("Reflection could not be committed. Review the storage message; your proposed changes remain recoverable.");return;}
-    notify(
-      relevant
-        ? chosen
-          ? "Reflection saved. Your suggested revisit is in the queue."
-          : "Reflection saved. No new revisit needed."
-        : "Reflection saved. The newer attempt keeps its revisit date.",
-    );
-    onClose();
+    const isCurrent = guardWorkspace();
+    saving.current = true;
+    setPending("save");
+    setError("");
+    try {
+      const saved = await update((d) =>
+        saveQuickReflection(d, attempt.id, {
+          outcome,
+          difficulty,
+          takeaway,
+          reviewAt: chosen,
+          overrideSchedule: override || chosen !== date,
+        }),
+      );
+      if (!isCurrent()) return;
+      if (!saved) {
+        setError(
+          "Reflection was not committed. Your input is still here. Review the storage message and recovery copies in Settings, then retry.",
+        );
+        return;
+      }
+      notify(
+        relevant
+          ? chosen
+            ? "Reflection saved. Your suggested revisit is in the queue."
+            : "Reflection saved. No new revisit needed."
+          : "Reflection saved. The newer attempt keeps its revisit date.",
+      );
+      onClose();
+    } catch (failure) {
+      if (isCurrent())
+        setError(
+          failure instanceof Error
+            ? failure.message
+            : "Reflection was not committed. Keep this input and retry after reviewing the storage message.",
+        );
+    } finally {
+      saving.current = false;
+      if (isCurrent()) setPending(null);
+    }
+  }
+  async function skip() {
+    if (saving.current) return;
+    if (previous) {
+      onClose();
+      return;
+    }
+    const isCurrent = guardWorkspace();
+    saving.current = true;
+    setPending("skip");
+    setError("");
+    try {
+      const saved = await update((d) => skipReflection(d, attempt.id));
+      if (!isCurrent()) return;
+      if (saved) onClose();
+      else
+        setError(
+          "The skip was not committed. Review the storage message and recovery copies in Settings, then retry.",
+        );
+    } catch (failure) {
+      if (isCurrent())
+        setError(
+          failure instanceof Error
+            ? failure.message
+            : "The skip was not committed. Please retry.",
+        );
+    } finally {
+      saving.current = false;
+      if (isCurrent()) setPending(null);
+    }
   }
   return (
     <Modal
       title="A moment to understand."
-      onClose={onClose}
+      onClose={() => {
+        if (!saving.current) onClose();
+      }}
       className="quick-reflection-modal"
     >
       <form onSubmit={save} className="form-stack">
@@ -125,6 +184,7 @@ export function QuickReflectionDialog({
                 <button
                   data-initial-focus={i === 0 ? "true" : undefined}
                   type="button"
+                  disabled={pending !== null}
                   key={key}
                   aria-pressed={outcome === key}
                   className={outcome === key ? "selected" : ""}
@@ -149,6 +209,7 @@ export function QuickReflectionDialog({
                 {Object.entries(DIFFICULTIES).map(([key, label]) => (
                   <button
                     type="button"
+                    disabled={pending !== null}
                     key={key}
                     className={difficulty === key ? "selected" : ""}
                     aria-pressed={difficulty === key}
@@ -168,6 +229,7 @@ export function QuickReflectionDialog({
             One thing to remember <span className="optional">optional</span>
             <input
               value={takeaway}
+              disabled={pending !== null}
               onChange={(e) => setTakeaway(e.target.value)}
               maxLength={300}
               placeholder="Next time, I’ll…"
@@ -179,10 +241,12 @@ export function QuickReflectionDialog({
                 <CalendarDays size={16} />
                 <strong>Your next step</strong>
               </div>
-              {problem.reviewManual && !override && (
+              {keepManualSchedule && !override && (
                 <p className="small muted">
-                  Keeping the revisit date you chose. Change it here only if you
-                  want to.
+                  {date === null
+                    ? "Keeping your choice of no revisit."
+                    : "Keeping the revisit date you chose."}{" "}
+                  Change it here only if you want to.
                 </p>
               )}
               <div
@@ -192,6 +256,7 @@ export function QuickReflectionDialog({
               >
                 <button
                   type="button"
+                  disabled={pending !== null}
                   aria-pressed={date !== null}
                   className={date !== null ? "selected" : ""}
                   onClick={() => {
@@ -214,6 +279,7 @@ export function QuickReflectionDialog({
                 </button>
                 <button
                   type="button"
+                  disabled={pending !== null}
                   aria-pressed={date === null}
                   className={date === null ? "selected" : ""}
                   onClick={() => {
@@ -231,6 +297,7 @@ export function QuickReflectionDialog({
                     name="reviewDate"
                     type="date"
                     value={date}
+                    disabled={pending !== null}
                     onChange={(e) => {
                       setDate(e.target.value);
                       setOverride(true);
@@ -260,16 +327,22 @@ export function QuickReflectionDialog({
         <div className="form-actions">
           <button
             type="button"
+            disabled={pending !== null}
             className="text-link"
-            onClick={() => {
-              if (!previous) update((d) => skipReflection(d, attempt.id));
-              onClose();
-            }}
+            onClick={skip}
           >
-            {previous ? "Cancel" : "Skip for now"}
+            {pending === "skip"
+              ? "Skipping…"
+              : previous
+                ? "Cancel"
+                : "Skip for now"}
           </button>
-          <button type="submit" className="button primary">
-            Save reflection
+          <button
+            type="submit"
+            className="button primary"
+            disabled={pending !== null}
+          >
+            {pending === "save" ? "Saving…" : "Save reflection"}
             <Check size={16} />
           </button>
         </div>

@@ -56,12 +56,19 @@ export interface QuickReflection {
   takeaway: string;
   savedAt: string;
 }
+export interface ReflectionBatch {
+  id: string;
+  handle: string;
+  date: string;
+  attemptIds: string[];
+}
 export interface CodeforcesData {
   connectedHandle: string | null;
   profiles: SyncedProfile[];
   submissions: PlatformSubmission[];
   practiceAttempts: ImportedAttempt[];
   reflections: QuickReflection[];
+  reflectionBatches?: ReflectionBatch[];
 }
 export interface SubmissionInput {
   id: number;
@@ -89,6 +96,7 @@ export const emptyCodeforces = (): CodeforcesData => ({
   submissions: [],
   practiceAttempts: [],
   reflections: [],
+  reflectionBatches: [],
 });
 export const handleKey = (handle: string) => handle.toLowerCase();
 export function validHandle(handle: string) {
@@ -392,11 +400,48 @@ export function validateCodeforces(
     )
       return fail();
   }
+  const reflectionBatches: ReflectionBatch[] = [];
+  const batches = input.reflectionBatches ?? [];
+  if (!Array.isArray(batches) || batches.length > 50000) return fail();
+  const batchIds = new Set<string>();
+  const attemptsById = new Map(practiceAttempts.map((a) => [a.id, a]));
+  for (const batch of batches) {
+    if (
+      !obj(batch) ||
+      !text(batch.handle, 24) ||
+      !handles.has(handleKey(batch.handle)) ||
+      !text(batch.date, 10) ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(batch.date) ||
+      !Number.isFinite(Date.parse(`${batch.date}T12:00:00Z`)) ||
+      new Date(`${batch.date}T12:00:00Z`).toISOString().slice(0, 10) !==
+        batch.date ||
+      batch.id !== `daily:${handleKey(batch.handle)}:${batch.date}` ||
+      batchIds.has(batch.id) ||
+      !Array.isArray(batch.attemptIds) ||
+      batch.attemptIds.length > CF_INBOX_SIZE ||
+      new Set(batch.attemptIds).size !== batch.attemptIds.length ||
+      !batch.attemptIds.every(
+        (id) =>
+          typeof id === "string" &&
+          handleKey(attemptsById.get(id)?.handle ?? "") ===
+            handleKey(batch.handle as string),
+      )
+    )
+      return fail();
+    batchIds.add(batch.id);
+    reflectionBatches.push({
+      id: batch.id as string,
+      handle: batch.handle,
+      date: batch.date,
+      attemptIds: [...batch.attemptIds] as string[],
+    });
+  }
   return {
     connectedHandle: input.connectedHandle as string | null,
     profiles,
     submissions,
     practiceAttempts,
     reflections,
+    reflectionBatches,
   };
 }

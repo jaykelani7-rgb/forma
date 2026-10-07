@@ -20,6 +20,7 @@ import {
   createDemo,
   elapsed,
   emptyData,
+  localDate,
   uid,
   validateData,
 } from "@/lib/model";
@@ -52,6 +53,11 @@ import {
 } from "@/lib/cloud-sync";
 import { encodeBackup } from "@/lib/concurrency";
 import {
+  reconcileWorkspaceDay,
+  nextDailyCheckDelay,
+} from "@/lib/daily-workspace";
+import { withPracticeSession } from "@/lib/practice-session";
+import {
   operationIsCurrent,
   readSettledWorkspace,
   UnsavedWorkspaceError,
@@ -80,13 +86,19 @@ interface Workspace {
   setTheme: (theme: Theme) => void;
   setMode: (mode: Mode) => void;
   notify: (message: string) => void;
-  startSession: (problem: Problem, duration?: Duration) => void;
+  startSession: (problem: Problem, duration?: Duration) => Promise<boolean>;
+  startFreshSession: (
+    problem: Problem,
+    duration?: Duration,
+  ) => Promise<boolean>;
+  guardWorkspace: () => () => boolean;
+  localDay: string;
   replaceData: (data: Data) => Promise<boolean>;
   sync: SyncState;
   previewHandle: (handle: string) => Promise<PublicProfile | null>;
-  connectHandle: (profile: PublicProfile) => Promise<void>;
+  connectHandle: (profile: PublicProfile) => Promise<boolean>;
   syncActivity: (older?: boolean) => Promise<void>;
-  disconnectHandle: () => void;
+  disconnectHandle: () => Promise<boolean>;
   account: CloudAccount | null;
   cloudStatus:
     | "local"
@@ -139,6 +151,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [storagePending, setStoragePending] = useState(false);
   const channel = useRef<BroadcastChannel | null>(null);
   const [workspaceKey, setWorkspaceKey] = useState<WorkspaceKey>("personal");
+  const [localDay, setLocalDay] = useState("");
+  const practiceLock = useRef(false);
   const keyRef = useRef<WorkspaceKey>("personal");
   function captureOperation() {
     return {
@@ -155,6 +169,17 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       editVersion: editVersion.current,
     };
   }
+  function guardWorkspace() {
+    const expected = captureOperation();
+    return () =>
+      current.current.ready && operationIsCurrent(expected, captureOperation());
+  }
+  async function reconcileCurrentDay(now = new Date()) {
+    setLocalDay(localDate(now));
+    if (!current.current.ready || persistBlocked.current) return;
+    const next = reconcileWorkspaceDay(current.current.data, now);
+    if (next !== current.current.data) await persist(next);
+  }
   function invalidateCloud() {
     cloudVersion.current++;
     cloudAbort.current?.abort();
@@ -166,6 +191,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setBundle(value);
   }
   function persist(proposed: Data, replace = false) {
+    const isCurrent = guardWorkspace();
     editVersion.current++;
     const base = record.current;
     const key = keyRef.current;
@@ -193,10 +219,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             "Another tab changed the same records. The newer workspace is kept; your proposed changes are saved as a recovery copy in Settings. Review both before restoring.",
           );
         }
-        if (pendingWrites.current === 1)
+        if (pendingWrites.current === 1 && isCurrent())
           showBundle({ data: result.record.data, mode, ready: true });
         channel.current?.postMessage({ key, revision: result.record.revision });
-        return result.conflicts.length === 0;
+        return result.conflicts.length === 0 && isCurrent();
       } catch {
         if (keyRef.current === key) {
           persistBlocked.current = true;
@@ -221,6 +247,31 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [addOpen, setAddOpen] = useState(false);
   const notify = useCallback((message: string) => setToast(message), []);
   useEffect(() => {
+    let timer: ReturnType<typeof setTimeout>;
+    let disposed = false;
+    const check = () => {
+      if (disposed) return;
+      const now = new Date();
+      void reconcileCurrentDay(now);
+      clearTimeout(timer);
+      timer = setTimeout(check, nextDailyCheckDelay(now));
+    };
+    const visible = () => {
+      if (document.visibilityState === "visible") check();
+    };
+    check();
+    window.addEventListener("focus", check);
+    document.addEventListener("visibilitychange", visible);
+    return () => {
+      disposed = true;
+      clearTimeout(timer);
+      window.removeEventListener("focus", check);
+      document.removeEventListener("visibilitychange", visible);
+    };
+    // Live refs keep calendar checks scoped to the active workspace.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
     let cancelled = false;
     let mode: Mode = "personal";
     try {
@@ -240,7 +291,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       mode,
       mode === "demo" ? withCodeforcesDemo(createDemo()) : emptyData(),
     )
-      .then((saved) => {
+      .then(async (saved) => {
         if (cancelled) return;
         record.current = saved;
         showBundle({ data: saved.data, mode, ready: true });
@@ -248,7 +299,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           mode === "demo" ? withCodeforcesDemo(saved.data) : saved.data,
         );
         if (JSON.stringify(visited) !== JSON.stringify(saved.data))
-          persist(visited);
+          await persist(visited);
+        await reconcileCurrentDay();
       })
       .catch(() => {
         if (cancelled) return;
@@ -295,6 +347,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           return;
         record.current = latest;
         showBundle({ ...current.current, data: latest.data });
+        await reconcileCurrentDay();
       } catch {
         /* keep the readable copy */
       }
@@ -386,6 +439,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       persistBlocked.current = !!unsaved;
       setStorageError(unsaved?.error ?? null);
       showBundle({ data: unsaved?.data ?? saved.data, mode, ready: true });
+      await reconcileCurrentDay();
     } catch {
       if (activation !== activationVersion.current) return;
       const unsaved = volatile.current.get(key);
@@ -484,9 +538,20 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       }
       record.current = saved;
       showBundle({ ...current.current, data: saved.data });
+      await reconcileCurrentDay();
+      if (
+        !operationIsCurrent(
+          operation,
+          captureOperation(),
+          cloudController.signal,
+        )
+      )
+        return;
+      if (persistBlocked.current) throw new UnsavedWorkspaceError();
       setCloudStatus(
         acknowledgement.data &&
-          encodeBackup(saved.data) === encodeBackup(acknowledgement.data)
+          encodeBackup(current.current.data) ===
+            encodeBackup(acknowledgement.data)
           ? "synced"
           : "pending",
       );
@@ -717,30 +782,46 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   }, []);
   async function startSession(
     problem: Problem,
-    duration = bundle.data.settings.defaultDuration,
+    duration = current.current.data.settings.defaultDuration,
+    fresh = false,
   ) {
-    if (bundle.data.session) {
-      if (bundle.data.session.problemId !== problem.id)
+    if (practiceLock.current || !current.current.ready) return false;
+    const isCurrent = guardWorkspace();
+    if (current.current.data.session) {
+      if (current.current.data.session.problemId !== problem.id) {
         notify(
           "A session is already open. Finish or discard it before starting another.",
         );
+        return false;
+      }
+      if (persistBlocked.current || pendingWrites.current) return false;
       router.push("/session");
-      return;
+      return true;
     }
-    const now = Date.now();
-    const session: Session = {
-      id: uid(),
-      problemId: problem.id,
-      startedAt: new Date(now).toISOString(),
-      runningSince: now,
-      elapsedMs: 0,
-      targetMinutes: duration,
-      notes: "",
-      timerVisible: true,
-      phase: "focus",
-    };
-    await update((data) => ({ ...data, session }));
-    router.push("/session");
+    practiceLock.current = true;
+    try {
+      await queue.current;
+      if (!isCurrent() || persistBlocked.current) return false;
+      const saved = await update((data) =>
+        withPracticeSession(data, problem, duration, Date.now(), uid(), fresh),
+      );
+      if (!saved || !isCurrent()) return false;
+      router.push("/session");
+      return true;
+    } catch (error) {
+      if (isCurrent())
+        notify(
+          error instanceof Error
+            ? error.message
+            : "Practice could not start. Retry after reviewing Settings recovery.",
+        );
+      return false;
+    } finally {
+      practiceLock.current = false;
+    }
+  }
+  async function startFreshSession(problem: Problem, duration?: Duration) {
+    return startSession(problem, duration, true);
   }
   async function replaceData(data: Data) {
     operationVersion.current++;
@@ -768,7 +849,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     return saved;
   }
   async function previewHandle(raw: string): Promise<PublicProfile | null> {
-    if (syncLock.current || bundle.mode === "demo") return null;
+    if (
+      syncLock.current ||
+      !current.current.ready ||
+      current.current.mode === "demo"
+    )
+      return null;
+    const isCurrent = guardWorkspace();
     const handle = raw.trim();
     if (!validHandle(handle)) {
       setSync({
@@ -785,11 +872,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setSync({ ...idleSync, busy: true, phase: "preview" });
     try {
       const profile = await previewPublicProfile(handle, controller.signal);
-      if (version !== operationVersion.current) return null;
+      if (version !== operationVersion.current || !isCurrent()) return null;
       setSync(idleSync);
       return profile;
     } catch (e) {
-      if (version === operationVersion.current)
+      if (version === operationVersion.current && isCurrent())
         setSync({
           ...idleSync,
           phase: "preview",
@@ -798,18 +885,26 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         });
       return null;
     } finally {
-      if (version === operationVersion.current) syncLock.current = false;
+      if (version === operationVersion.current) {
+        syncLock.current = false;
+        setSync((state) => (state.busy ? idleSync : state));
+      }
     }
   }
   async function performSync(snapshot: Data, older = false) {
-    if (syncLock.current || bundle.mode === "demo") return;
+    if (
+      syncLock.current ||
+      !current.current.ready ||
+      current.current.mode === "demo"
+    )
+      return false;
     const profile = connectedProfile(snapshot);
-    if (!profile) return;
+    if (!profile) return false;
+    const isCurrent = guardWorkspace();
     syncLock.current = true;
     const version = operationVersion.current;
     const controller = new AbortController();
     syncAbort.current = controller;
-    const mode = bundle.mode;
     setSync({ ...idleSync, busy: true, phase: older ? "older" : "refresh" });
     try {
       const newest = Math.max(
@@ -824,23 +919,46 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         older,
         controller.signal,
       );
-      if (version !== operationVersion.current) return;
       if (
-        current.current.mode === mode &&
-        handleKey(current.current.data.codeforces.connectedHandle ?? "") ===
+        version !== operationVersion.current ||
+        !isCurrent() ||
+        controller.signal.aborted
+      )
+        return false;
+      if (
+        handleKey(current.current.data.codeforces.connectedHandle ?? "") !==
+        handleKey(profile.handle)
+      )
+        return false;
+      const saved = await update((data) => {
+        const imported = mergeActivity(
+          data,
+          profile.handle,
+          transaction.pages,
+          older ? "older" : "refresh",
+        );
+        return transaction.profile
+          ? mergeProfileMetadata(imported, transaction.profile)
+          : imported;
+      });
+      if (
+        version !== operationVersion.current ||
+        !isCurrent() ||
+        controller.signal.aborted ||
+        handleKey(current.current.data.codeforces.connectedHandle ?? "") !==
           handleKey(profile.handle)
       )
-        update((data) => {
-          const imported = mergeActivity(
-            data,
-            profile.handle,
-            transaction.pages,
-            older ? "older" : "refresh",
-          );
-          return transaction.profile
-            ? mergeProfileMetadata(imported, transaction.profile)
-            : imported;
+        return false;
+      if (!saved) {
+        setSync({
+          ...idleSync,
+          phase: older ? "older" : "refresh",
+          code: "storage",
+          error:
+            "Activity could not be saved. Your proposed import remains recoverable in this tab or Settings. Export a backup, review recovery copies and restore saving before retrying the import.",
         });
+        return false;
+      }
       setSync(idleSync);
       if (transaction.profileWarning) notify(transaction.profileWarning);
       else
@@ -849,37 +967,84 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             ? "Older activity imported. Reflect on it whenever useful."
             : "Recent activity imported. Acceptance and understanding stay separate.",
         );
+      return true;
     } catch (e) {
-      if (version === operationVersion.current)
+      if (version === operationVersion.current && isCurrent())
         setSync({
           ...idleSync,
           error:
             e instanceof Error ? e.message : "Activity could not be imported.",
           code: e instanceof CodeforcesError ? e.code : "temporary",
         });
+      return false;
     } finally {
-      if (version === operationVersion.current) syncLock.current = false;
+      if (version === operationVersion.current) {
+        syncLock.current = false;
+        setSync((state) => (state.busy ? idleSync : state));
+      }
     }
   }
   async function connectHandle(profile: PublicProfile) {
-    if (syncLock.current || bundle.mode === "demo") return;
-    const connected = connectProfile(bundle.data, profile);
-    update((d) => connectProfile(d, profile));
-    await performSync(connected);
+    if (
+      syncLock.current ||
+      !current.current.ready ||
+      current.current.mode === "demo"
+    )
+      return false;
+    const isCurrent = guardWorkspace();
+    const version = operationVersion.current;
+    syncLock.current = true;
+    setSync({ ...idleSync, busy: true, phase: "refresh" });
+    try {
+      const saved = await update((d) => connectProfile(d, profile));
+      if (version !== operationVersion.current || !isCurrent()) return false;
+      if (!saved) {
+        setSync({
+          ...idleSync,
+          code: "storage",
+          error:
+            "The profile connection could not be saved. Keep this handle, export a backup and review Settings recovery before retrying.",
+        });
+        return false;
+      }
+    } finally {
+      if (version === operationVersion.current) syncLock.current = false;
+    }
+    if (!isCurrent()) return false;
+    return performSync(current.current.data);
   }
   async function syncActivity(older = false) {
-    await performSync(bundle.data, older);
+    await performSync(current.current.data, older);
   }
-  function disconnectHandle() {
+  async function disconnectHandle() {
+    if (syncLock.current || !current.current.ready) return false;
     operationVersion.current++;
     invalidateCloud();
     syncAbort.current?.abort();
-    syncLock.current = false;
-    update(disconnectProfile);
-    setSync(idleSync);
-    notify(
-      "Public profile disconnected. All imported history and reflections are kept.",
-    );
+    const isCurrent = guardWorkspace();
+    const version = operationVersion.current;
+    syncLock.current = true;
+    setSync({ ...idleSync, busy: true });
+    try {
+      const saved = await update(disconnectProfile);
+      if (version !== operationVersion.current || !isCurrent()) return false;
+      if (!saved) {
+        setSync({
+          ...idleSync,
+          code: "storage",
+          error:
+            "The disconnection could not be saved. Imported history is preserved; review Settings recovery and restore saving before retrying.",
+        });
+        return false;
+      }
+      setSync(idleSync);
+      notify(
+        "Public profile disconnected. All imported history and reflections are kept.",
+      );
+      return true;
+    } finally {
+      if (version === operationVersion.current) syncLock.current = false;
+    }
   }
   return (
     <Context.Provider
@@ -902,6 +1067,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         setMode,
         notify,
         startSession,
+        startFreshSession,
+        guardWorkspace,
+        localDay,
         replaceData,
         sync,
         previewHandle,

@@ -23,7 +23,7 @@ Local mode needs no account or environment variables. Optional account setup is 
 ## Daily workflow
 
 1. Add a problem, or connect a public Codeforces handle in Settings and import activity.
-2. Choose 15, 30, or 60 minutes on Today. Short practice favors a familiar revisit; longer practice can offer a revisit followed by a fresh problem. These are session compositions, not solve-time predictions.
+2. Today gives an active session priority; otherwise it shows one eligible practice recommendation. Fresh alternatives and discovery filters remain available below it. Choose 15, 30, or 60 minutes; these intentions do not predict solving time.
 3. Pause, hide the timer, and write notes. A saved session survives navigation and reload.
 4. Finish with an outcome, an optional difficulty, and a takeaway. Imported attempts support quick reflections without invented solving time.
 5. Complete, reschedule, or intentionally practice a revisit. Skip today's recommendation or archive a problem without deleting its history.
@@ -46,7 +46,7 @@ The learning view combines timed sessions and Codeforces reflections while retai
 
 If a timed session and imported group describe the same attempt, explicitly link them in the problem history and choose which reflection supplies learning credit. Both original records remain intact. There is no automatic linking by time proximity and no cross-handle credit.
 
-Default revisit intervals are tomorrow for an unsolved attempt, three days for editorial assistance, and five days for a hint. Settings can change these defaults from 1–90 days. Deliberate dates remain intact. Completing a revisit clears its schedule without claiming a successful solve; old reflection edits cannot reopen it. Future dates, deferrals, today's skips, and archived problems stay out of automatic suggestions. Intentional early practice remains available.
+Default revisit intervals are tomorrow for an unsolved attempt, three days for editorial assistance, and five days for a hint. Settings can change these defaults from 1–90 days. Deliberate dates and opt-outs remain intact. Completing a revisit clears its schedule without claiming a successful solve; old reflection edits cannot reopen it, while a genuinely later assisted attempt receives its default. Future dates, deferrals, today's skips, and archived problems stay out of automatic suggestions. Intentional early practice remains available.
 
 See [docs/learning-and-scheduling.md](docs/learning-and-scheduling.md) for provenance, scope, linking, practice-day definitions, and scheduling rules.
 
@@ -56,7 +56,7 @@ Connecting a public handle requires no Codeforces password or API key. Initial i
 
 Successive submissions for the same handle/problem group within two hours form a group; acceptance closes it. Stable group membership preserves reflections through verdict changes and historical pagination. This grouping never estimates solving duration.
 
-Each handle receives a stable daily batch of at most five reflections. Saving, skipping, or refreshing does not refill it that day. All historical attempts remain accessible in Activity. Switching or disconnecting handles retains their records and keeps learning scopes separate.
+Each handle receives a stable daily batch of at most five reflections. Loading, switching workspaces, cloud updates, local midnight, and visibility return reconcile that day's immutable membership. Saving, skipping, or importing more activity does not refill it that day. Timezone and DST changes use the local calendar. All historical attempts remain accessible in Activity. Switching or disconnecting handles retains their records and keeps learning scopes separate.
 
 Fresh discovery uses a problem catalogue cached for 24 hours, with single-flight loading and a stale-cache fallback after upstream errors. Choose a rating range and optional topic. Known accepted, saved, and temporarily dismissed problems are excluded. Missing ratings and insufficient candidates receive explicit states. Incomplete imported history is disclosed; unseen problems are not claimed to have never been solved. Topic tags stay hidden until requested. Explanations distinguish generic rules from evidence in saved history.
 
@@ -66,7 +66,7 @@ The adapter follows the official [Codeforces API methods](https://codeforces.com
 
 IndexedDB stores revisioned workspaces. On first successful migration, Forma validates and copies the original schema v1/v2 personal and demo localStorage records, including notes and active timers. The original copies remain untouched, even after success. Missing optional fields receive backward-compatible defaults.
 
-Writes reread the latest revision inside a transaction. Compatible edits merge by stable identity; changing preferences in one tab cannot erase a problem added in another. Same-field conflicts stop the write and retain a recovery copy, including session notes. Cross-tab notifications refresh idle tabs. Save indicators confirm when local writes settle; critical completion messages wait for a successful write.
+Writes reread the latest revision inside a transaction. Compatible edits merge by stable identity; changing preferences in one tab cannot erase a problem added in another. Same-field conflicts stop the write and retain a recovery copy, including session notes. Cross-tab notifications refresh idle tabs. Save indicators and completion messages wait for a successful write; failed forms retain their drafts and recovery guidance. Fresh problem creation and session start share one atomic revision. Workspace changes suppress stale completion feedback.
 
 Persistence, export, and import share strict validation and a **64 MiB canonical JSON capacity**. Every successfully produced backup is accepted by the importer within that capacity. Existing per-record/count limits still apply; records are never truncated. Imports preview their contents, require explicit replacement confirmation, reject a concurrently changed workspace, and preserve a copy before replacement. Settings exposes recovery backups.
 
@@ -104,4 +104,4 @@ npm run test:browser
 
 The browser suite starts the production server on port 3002 and uses isolated fixtures, leaving the normal personal workspace untouched. CI runs these checks on pushes and pull requests.
 
-Latest local verification: **90 unit/integration tests passed; 30 desktop/mobile browser tests passed; two configured-account browser tests skipped**. Lint, strict TypeScript, and the production build passed. The final build used `npm run build -- --webpack` because the tool sandbox blocked Turbopack's local processing port. Actual migration SQL was exercised in local PostgreSQL, including ownership, revisions, and retry safety. Both themes and mobile reflection controls were inspected in rendered screenshots. See [docs/verification.md](docs/verification.md) for evidence and remaining live-service limitations.
+Latest local verification, **7 October 2026**: **110 unit/integration tests passed; 76 desktop/mobile browser tests passed; two hosted-account browser tests skipped**. Lint, strict TypeScript, and the supported Webpack production build passed. Actual migration SQL was exercised in local PostgreSQL, including ownership, revisions, and retry safety; these local fixtures do not establish hosted account behavior. The actual catalogue route passed deterministic success/cache/stale/unavailable checks and a separate live HTTP/cache check. Both themes, narrow/enlarged-text layouts, and mobile reflection controls were verified. See [docs/reliability-pass.md](docs/reliability-pass.md) for fixes, screenshots, test boundaries, and exact remaining hosted-account checks; [docs/verification.md](docs/verification.md) preserves the earlier record.
