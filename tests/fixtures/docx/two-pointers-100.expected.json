@@ -1,0 +1,727 @@
+[
+  {
+    "title": "Foundation",
+    "entries": [
+      {
+        "title": "Sereja and Dima",
+        "code": "381A",
+        "url": "https://codeforces.com/problemset/problem/381/A",
+        "rating": 800,
+        "pattern": "Opposite ends"
+      },
+      {
+        "title": "Prepend and Append",
+        "code": "1791C",
+        "url": "https://codeforces.com/problemset/problem/1791/C",
+        "rating": 800,
+        "pattern": "Shrink from both ends"
+      },
+      {
+        "title": "Favorite Sequence",
+        "code": "1462A",
+        "url": "https://codeforces.com/problemset/problem/1462/A",
+        "rating": 800,
+        "pattern": "Alternating left/right"
+      },
+      {
+        "title": "1D Eraser",
+        "code": "1873D",
+        "url": "https://codeforces.com/problemset/problem/1873/D",
+        "rating": 800,
+        "pattern": "Forward pointer / greedy"
+      },
+      {
+        "title": "Cipher Shifer",
+        "code": "1840A",
+        "url": "https://codeforces.com/problemset/problem/1840/A",
+        "rating": 800,
+        "pattern": "String scanning"
+      },
+      {
+        "title": "Sasha and Array Coloring",
+        "code": "1843A",
+        "url": "https://codeforces.com/problemset/problem/1843/A",
+        "rating": 800,
+        "pattern": "Sort + pair extremes"
+      },
+      {
+        "title": "Prefiquence",
+        "code": "1968B",
+        "url": "https://codeforces.com/problemset/problem/1968/B",
+        "rating": 800,
+        "pattern": "Subsequence two pointers"
+      },
+      {
+        "title": "Contest Proposal",
+        "code": "1972A",
+        "url": "https://codeforces.com/problemset/problem/1972/A",
+        "rating": 800,
+        "pattern": "Sorted matching"
+      },
+      {
+        "title": "Rebellion",
+        "code": "1746B",
+        "url": "https://codeforces.com/problemset/problem/1746/B",
+        "rating": 800,
+        "pattern": "Opposite-end swapping"
+      },
+      {
+        "title": "Game of Mathletes",
+        "code": "2060C",
+        "url": "https://codeforces.com/problemset/problem/2060/C",
+        "rating": 900,
+        "pattern": "Classic pair sum"
+      },
+      {
+        "title": "AB Flipping",
+        "code": "1896B",
+        "url": "https://codeforces.com/problemset/problem/1896/B",
+        "rating": 900,
+        "pattern": "String pointer counting"
+      },
+      {
+        "title": "Ski Resort",
+        "code": "1840C",
+        "url": "https://codeforces.com/problemset/problem/1840/C",
+        "rating": 1000,
+        "pattern": "Valid contiguous segments"
+      },
+      {
+        "title": "Black and White Stripe",
+        "code": "1690D",
+        "url": "https://codeforces.com/problemset/problem/1690/D",
+        "rating": 1000,
+        "pattern": "Fixed sliding window"
+      },
+      {
+        "title": "Traffic Light",
+        "code": "1744C",
+        "url": "https://codeforces.com/problemset/problem/1744/C",
+        "rating": 1000,
+        "pattern": "Circular scan"
+      },
+      {
+        "title": "Letters",
+        "code": "978C",
+        "url": "https://codeforces.com/problemset/problem/978/C",
+        "rating": 1000,
+        "pattern": "Monotonic pointer"
+      },
+      {
+        "title": "Challenging Valleys",
+        "code": "1760D",
+        "url": "https://codeforces.com/problemset/problem/1760/D",
+        "rating": 1000,
+        "pattern": "Compress / scan segments"
+      },
+      {
+        "title": "Broken Keyboard",
+        "code": "1251A",
+        "url": "https://codeforces.com/problemset/problem/1251/A",
+        "rating": 1000,
+        "pattern": "Run-length scanning"
+      },
+      {
+        "title": "Eating Candies",
+        "code": "1669F",
+        "url": "https://codeforces.com/problemset/problem/1669/F",
+        "rating": 1100,
+        "pattern": "Two ends + running sums"
+      },
+      {
+        "title": "Kalindrome Array",
+        "code": "1610B",
+        "url": "https://codeforces.com/problemset/problem/1610/B",
+        "rating": 1100,
+        "pattern": "Palindrome two pointers"
+      },
+      {
+        "title": "Pair Programming",
+        "code": "1547C",
+        "url": "https://codeforces.com/problemset/problem/1547/C",
+        "rating": 1100,
+        "pattern": "Merge two sequences"
+      }
+    ]
+  },
+  {
+    "title": "Core Patterns",
+    "entries": [
+      {
+        "title": "BerSU Ball",
+        "code": "489B",
+        "url": "https://codeforces.com/problemset/problem/489/B",
+        "rating": 1200,
+        "pattern": "Greedy sorted matching"
+      },
+      {
+        "title": "Binary Deque",
+        "code": "1692E",
+        "url": "https://codeforces.com/problemset/problem/1692/E",
+        "rating": 1200,
+        "pattern": "Target-sum window"
+      },
+      {
+        "title": "Dora and Search",
+        "code": "1793C",
+        "url": "https://codeforces.com/problemset/problem/1793/C",
+        "rating": 1200,
+        "pattern": "Remove from both ends"
+      },
+      {
+        "title": "Ternary String",
+        "code": "1354B",
+        "url": "https://codeforces.com/problemset/problem/1354/B",
+        "rating": 1200,
+        "pattern": "Minimum valid window"
+      },
+      {
+        "title": "Boats Competition",
+        "code": "1399C",
+        "url": "https://codeforces.com/problemset/problem/1399/C",
+        "rating": 1200,
+        "pattern": "Pair sum counting"
+      },
+      {
+        "title": "Friends and the Restaurant",
+        "code": "1729D",
+        "url": "https://codeforces.com/problemset/problem/1729/D",
+        "rating": 1200,
+        "pattern": "Pair extremes"
+      },
+      {
+        "title": "Right Left Wrong",
+        "code": "2000D",
+        "url": "https://codeforces.com/problemset/problem/2000/D",
+        "rating": 1200,
+        "pattern": "Two pointers + prefix sums"
+      },
+      {
+        "title": "Balanced Team",
+        "code": "1133C",
+        "url": "https://codeforces.com/problemset/problem/1133/C",
+        "rating": 1200,
+        "pattern": "Sort + variable window"
+      },
+      {
+        "title": "Lecture Sleep",
+        "code": "961B",
+        "url": "https://codeforces.com/problemset/problem/961/B",
+        "rating": 1200,
+        "pattern": "Fixed window + contribution"
+      },
+      {
+        "title": "Three Parts of the Array",
+        "code": "1006C",
+        "url": "https://codeforces.com/problemset/problem/1006/C",
+        "rating": 1200,
+        "pattern": "Prefix vs suffix sums"
+      },
+      {
+        "title": "Grandma Capa Knits a Scarf",
+        "code": "1582C",
+        "url": "https://codeforces.com/problemset/problem/1582/C",
+        "rating": 1200,
+        "pattern": "Mismatch handling"
+      },
+      {
+        "title": "Alice, Bob and Chocolate",
+        "code": "6C",
+        "url": "https://codeforces.com/problemset/problem/6/C",
+        "rating": 1200,
+        "pattern": "Two ends + time sums"
+      },
+      {
+        "title": "George and Round",
+        "code": "387B",
+        "url": "https://codeforces.com/problemset/problem/387/B",
+        "rating": 1200,
+        "pattern": "Greedy subsequence matching"
+      },
+      {
+        "title": "Queries about less or equal elements",
+        "code": "600B",
+        "url": "https://codeforces.com/problemset/problem/600/B",
+        "rating": 1300,
+        "pattern": "Two sorted arrays"
+      },
+      {
+        "title": "Number of Pairs",
+        "code": "1538C",
+        "url": "https://codeforces.com/problemset/problem/1538/C",
+        "rating": 1300,
+        "pattern": "Count pairs in range"
+      },
+      {
+        "title": "Strange Birthday Party",
+        "code": "1470A",
+        "url": "https://codeforces.com/problemset/problem/1470/A",
+        "rating": 1300,
+        "pattern": "Greedy advancing pointer"
+      },
+      {
+        "title": "Balanced Tunnel",
+        "code": "1237B",
+        "url": "https://codeforces.com/problemset/problem/1237/B",
+        "rating": 1300,
+        "pattern": "Order tracking"
+      },
+      {
+        "title": "Points on Line",
+        "code": "251A",
+        "url": "https://codeforces.com/problemset/problem/251/A",
+        "rating": 1300,
+        "pattern": "Window + combinations"
+      },
+      {
+        "title": "Longest Strike",
+        "code": "1676F",
+        "url": "https://codeforces.com/problemset/problem/1676/F",
+        "rating": 1300,
+        "pattern": "Frequency interval window"
+      },
+      {
+        "title": "Money Trees",
+        "code": "1873F",
+        "url": "https://codeforces.com/problemset/problem/1873/F",
+        "rating": 1300,
+        "pattern": "Constrained sliding window"
+      }
+    ]
+  },
+  {
+    "title": "Intermediate",
+    "entries": [
+      {
+        "title": "Books",
+        "code": "279B",
+        "url": "https://codeforces.com/problemset/problem/279/B",
+        "rating": 1400,
+        "pattern": "Canonical variable window"
+      },
+      {
+        "title": "Pair of Topics",
+        "code": "1324D",
+        "url": "https://codeforces.com/problemset/problem/1324/D",
+        "rating": 1400,
+        "pattern": "Sort + pair counting"
+      },
+      {
+        "title": "2^Sort",
+        "code": "1692G",
+        "url": "https://codeforces.com/problemset/problem/1692/G",
+        "rating": 1400,
+        "pattern": "Condition-based window"
+      },
+      {
+        "title": "Hossam and Friends",
+        "code": "1771B",
+        "url": "https://codeforces.com/problemset/problem/1771/B",
+        "rating": 1400,
+        "pattern": "Forbidden-pair window"
+      },
+      {
+        "title": "RationalLee",
+        "code": "1369C",
+        "url": "https://codeforces.com/problemset/problem/1369/C",
+        "rating": 1400,
+        "pattern": "Greedy extremes"
+      },
+      {
+        "title": "Inaccurate Subsequence Search",
+        "code": "1955D",
+        "url": "https://codeforces.com/problemset/problem/1955/D",
+        "rating": 1400,
+        "pattern": "Window frequency bookkeeping"
+      },
+      {
+        "title": "Unstable String",
+        "code": "1535C",
+        "url": "https://codeforces.com/problemset/problem/1535/C",
+        "rating": 1400,
+        "pattern": "Dynamic valid window"
+      },
+      {
+        "title": "awoo's Favorite Problem",
+        "code": "1697C",
+        "url": "https://codeforces.com/problemset/problem/1697/C",
+        "rating": 1400,
+        "pattern": "String transformation pointers"
+      },
+      {
+        "title": "Min-Max Array Transformation",
+        "code": "1721C",
+        "url": "https://codeforces.com/problemset/problem/1721/C",
+        "rating": 1400,
+        "pattern": "Multiple monotonic pointers"
+      },
+      {
+        "title": "Physics Practical",
+        "code": "253B",
+        "url": "https://codeforces.com/problemset/problem/253/B",
+        "rating": 1400,
+        "pattern": "Sorted interval window"
+      },
+      {
+        "title": "Approximating a Constant Range",
+        "code": "602B",
+        "url": "https://codeforces.com/problemset/problem/602/B",
+        "rating": 1400,
+        "pattern": "Maintain window validity"
+      },
+      {
+        "title": "Kefa and Company",
+        "code": "580B",
+        "url": "https://codeforces.com/problemset/problem/580/B",
+        "rating": 1500,
+        "pattern": "Weighted sliding window"
+      },
+      {
+        "title": "Special Elements",
+        "code": "1352E",
+        "url": "https://codeforces.com/problemset/problem/1352/E",
+        "rating": 1500,
+        "pattern": "Positive-sum subarrays"
+      },
+      {
+        "title": "Cellular Network",
+        "code": "702C",
+        "url": "https://codeforces.com/problemset/problem/702/C",
+        "rating": 1500,
+        "pattern": "Two sorted arrays"
+      },
+      {
+        "title": "Vasya and String",
+        "code": "676C",
+        "url": "https://codeforces.com/problemset/problem/676/C",
+        "rating": 1500,
+        "pattern": "At-most-k replacements"
+      },
+      {
+        "title": "They Are Everywhere",
+        "code": "701C",
+        "url": "https://codeforces.com/problemset/problem/701/C",
+        "rating": 1500,
+        "pattern": "Minimum cover window"
+      },
+      {
+        "title": "Maximum width",
+        "code": "1492C",
+        "url": "https://codeforces.com/problemset/problem/1492/C",
+        "rating": 1500,
+        "pattern": "Prefix/suffix matching"
+      },
+      {
+        "title": "Sage's Birthday (hard version)",
+        "code": "1419D2",
+        "url": "https://codeforces.com/problemset/problem/1419/D2",
+        "rating": 1500,
+        "pattern": "Pointer placement after sort"
+      },
+      {
+        "title": "Price Maximization",
+        "code": "1690E",
+        "url": "https://codeforces.com/problemset/problem/1690/E",
+        "rating": 1500,
+        "pattern": "Complementary pairing"
+      },
+      {
+        "title": "Backspace",
+        "code": "1553D",
+        "url": "https://codeforces.com/problemset/problem/1553/D",
+        "rating": 1500,
+        "pattern": "Reverse string pointers"
+      }
+    ]
+  },
+  {
+    "title": "Advanced",
+    "entries": [
+      {
+        "title": "Longest k-Good Segment",
+        "code": "616D",
+        "url": "https://codeforces.com/problemset/problem/616/D",
+        "rating": 1600,
+        "pattern": "At-most-k distinct window"
+      },
+      {
+        "title": "PriceFixed",
+        "code": "1539D",
+        "url": "https://codeforces.com/problemset/problem/1539/D",
+        "rating": 1600,
+        "pattern": "Greedy opposite ends"
+      },
+      {
+        "title": "Maximum Product Strikes Back",
+        "code": "1660D",
+        "url": "https://codeforces.com/problemset/problem/1660/D",
+        "rating": 1600,
+        "pattern": "Segment trimming"
+      },
+      {
+        "title": "Binary String",
+        "code": "1680C",
+        "url": "https://codeforces.com/problemset/problem/1680/C",
+        "rating": 1600,
+        "pattern": "Window optimization"
+      },
+      {
+        "title": "Hard Process",
+        "code": "660C",
+        "url": "https://codeforces.com/problemset/problem/660/C",
+        "rating": 1600,
+        "pattern": "Max window with k flips"
+      },
+      {
+        "title": "Vasya and Arrays",
+        "code": "1036D",
+        "url": "https://codeforces.com/problemset/problem/1036/D",
+        "rating": 1600,
+        "pattern": "Equal cumulative sums"
+      },
+      {
+        "title": "To Add or Not to Add",
+        "code": "231C",
+        "url": "https://codeforces.com/problemset/problem/231/C",
+        "rating": 1600,
+        "pattern": "Sorted cost window"
+      },
+      {
+        "title": "Three-level Laser",
+        "code": "924B",
+        "url": "https://codeforces.com/problemset/problem/924/B",
+        "rating": 1600,
+        "pattern": "Max feasible right pointer"
+      },
+      {
+        "title": "Maximum Subrectangle",
+        "code": "1060C",
+        "url": "https://codeforces.com/problemset/problem/1060/C",
+        "rating": 1600,
+        "pattern": "Two-pointer optimization"
+      },
+      {
+        "title": "Number of Ways",
+        "code": "466C",
+        "url": "https://codeforces.com/problemset/problem/466/C",
+        "rating": 1700,
+        "pattern": "Prefix partition pointers"
+      },
+      {
+        "title": "Eugene and an array",
+        "code": "1333C",
+        "url": "https://codeforces.com/problemset/problem/1333/C",
+        "rating": 1700,
+        "pattern": "Window + prefix sums"
+      },
+      {
+        "title": "Quiz Master",
+        "code": "1777C",
+        "url": "https://codeforces.com/problemset/problem/1777/C",
+        "rating": 1700,
+        "pattern": "Coverage window"
+      },
+      {
+        "title": "Xenia and Colorful Gems",
+        "code": "1336B",
+        "url": "https://codeforces.com/problemset/problem/1336/B",
+        "rating": 1700,
+        "pattern": "Three-array pointers"
+      },
+      {
+        "title": "Close Tuples (hard version)",
+        "code": "1462E2",
+        "url": "https://codeforces.com/problemset/problem/1462/E2",
+        "rating": 1700,
+        "pattern": "Window + combinatorics"
+      },
+      {
+        "title": "Ira and Flamenco",
+        "code": "1833F",
+        "url": "https://codeforces.com/problemset/problem/1833/F",
+        "rating": 1700,
+        "pattern": "Frequency window + combinatorics"
+      },
+      {
+        "title": "String Deletion",
+        "code": "1430D",
+        "url": "https://codeforces.com/problemset/problem/1430/D",
+        "rating": 1700,
+        "pattern": "Greedy dual pointers"
+      },
+      {
+        "title": "Correct Placement",
+        "code": "1472E",
+        "url": "https://codeforces.com/problemset/problem/1472/E",
+        "rating": 1700,
+        "pattern": "Sort + candidate pointer"
+      },
+      {
+        "title": "Remove the Substring (hard version)",
+        "code": "1203D2",
+        "url": "https://codeforces.com/problemset/problem/1203/D2",
+        "rating": 1700,
+        "pattern": "Prefix/suffix subsequence"
+      },
+      {
+        "title": "Glider",
+        "code": "1041D",
+        "url": "https://codeforces.com/problemset/problem/1041/D",
+        "rating": 1700,
+        "pattern": "Advanced interval window"
+      },
+      {
+        "title": "XK Segments",
+        "code": "895B",
+        "url": "https://codeforces.com/problemset/problem/895/B",
+        "rating": 1700,
+        "pattern": "Range counting pointers"
+      }
+    ]
+  },
+  {
+    "title": "Mastery",
+    "entries": [
+      {
+        "title": "Count Triangles",
+        "code": "1355C",
+        "url": "https://codeforces.com/problemset/problem/1355/C",
+        "rating": 1800,
+        "pattern": "Range counting / cumulative pointers"
+      },
+      {
+        "title": "Cleaning the Phone",
+        "code": "1475D",
+        "url": "https://codeforces.com/problemset/problem/1475/D",
+        "rating": 1800,
+        "pattern": "Two groups + pointer"
+      },
+      {
+        "title": "Two Platforms",
+        "code": "1409E",
+        "url": "https://codeforces.com/problemset/problem/1409/E",
+        "rating": 1800,
+        "pattern": "Window + prefix best"
+      },
+      {
+        "title": "Sheikh (Easy version)",
+        "code": "1732C1",
+        "url": "https://codeforces.com/problemset/problem/1732/C1",
+        "rating": 1800,
+        "pattern": "Bitwise window reasoning"
+      },
+      {
+        "title": "ATM and Students",
+        "code": "1611F",
+        "url": "https://codeforces.com/problemset/problem/1611/F",
+        "rating": 1800,
+        "pattern": "Prefix condition window"
+      },
+      {
+        "title": "Palindrome Shuffle",
+        "code": "2069D",
+        "url": "https://codeforces.com/problemset/problem/2069/D",
+        "rating": 1800,
+        "pattern": "Palindrome range window"
+      },
+      {
+        "title": "Moscow Gorillas",
+        "code": "1793D",
+        "url": "https://codeforces.com/problemset/problem/1793/D",
+        "rating": 1800,
+        "pattern": "Expanding interval"
+      },
+      {
+        "title": "Petya and Exam",
+        "code": "1282C",
+        "url": "https://codeforces.com/problemset/problem/1282/C",
+        "rating": 1800,
+        "pattern": "Deadline sweep"
+      },
+      {
+        "title": "Foe Pairs",
+        "code": "652C",
+        "url": "https://codeforces.com/problemset/problem/652/C",
+        "rating": 1800,
+        "pattern": "Constraint boundary window"
+      },
+      {
+        "title": "Lightsabers (medium)",
+        "code": "958F2",
+        "url": "https://codeforces.com/problemset/problem/958/F2",
+        "rating": 1800,
+        "pattern": "Minimum multiset window"
+      },
+      {
+        "title": "Zigzags",
+        "code": "1400D",
+        "url": "https://codeforces.com/problemset/problem/1400/D",
+        "rating": 1900,
+        "pattern": "Pair counting"
+      },
+      {
+        "title": "The Best Vacation",
+        "code": "1358D",
+        "url": "https://codeforces.com/problemset/problem/1358/D",
+        "rating": 1900,
+        "pattern": "Circular weighted window"
+      },
+      {
+        "title": "Binary Literature",
+        "code": "1508A",
+        "url": "https://codeforces.com/problemset/problem/1508/A",
+        "rating": 1900,
+        "pattern": "Merge strings with pointers"
+      },
+      {
+        "title": "1D Sokoban",
+        "code": "1494C",
+        "url": "https://codeforces.com/problemset/problem/1494/C",
+        "rating": 1900,
+        "pattern": "Split + window matching"
+      },
+      {
+        "title": "Exposition",
+        "code": "6E",
+        "url": "https://codeforces.com/problemset/problem/6/E",
+        "rating": 1900,
+        "pattern": "Min/max constrained window"
+      },
+      {
+        "title": "Non-Secret Cypher",
+        "code": "190D",
+        "url": "https://codeforces.com/problemset/problem/190/D",
+        "rating": 1900,
+        "pattern": "At-least-k frequency window"
+      },
+      {
+        "title": "Match Points",
+        "code": "1156C",
+        "url": "https://codeforces.com/problemset/problem/1156/C",
+        "rating": 2000,
+        "pattern": "Advanced greedy pairing"
+      },
+      {
+        "title": "Minimizing Difference",
+        "code": "1244E",
+        "url": "https://codeforces.com/problemset/problem/1244/E",
+        "rating": 2000,
+        "pattern": "Balance extremes"
+      },
+      {
+        "title": "R2D2 and Droid Army",
+        "code": "514D",
+        "url": "https://codeforces.com/problemset/problem/514/D",
+        "rating": 2000,
+        "pattern": "Multi-column max window"
+      },
+      {
+        "title": "Strip",
+        "code": "487B",
+        "url": "https://codeforces.com/problemset/problem/487/B",
+        "rating": 2000,
+        "pattern": "Sliding window + DP"
+      }
+    ]
+  }
+]

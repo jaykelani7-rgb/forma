@@ -1,6 +1,6 @@
 # Forma
 
-A daily competitive-programming notebook with warm-paper and black-and-ivory **Ink** themes. Practice in Forma or on Codeforces, reflect briefly, and keep a manageable revisit queue.
+A daily competitive-programming notebook with a clean light appearance and black-and-ivory **Ink**. Import a DOCX practice sheet into Tracks, practice in Forma or on Codeforces, reflect briefly, and keep a manageable revisit queue. Comfortable and Large text preferences apply across the app and work alongside browser zoom.
 
 ## Run locally
 
@@ -22,8 +22,8 @@ Local mode needs no account or environment variables. Optional account setup is 
 
 ## Daily workflow
 
-1. Add a problem, or connect a public Codeforces handle in Settings and import activity.
-2. Today gives an active session priority; otherwise it shows one eligible practice recommendation. Fresh alternatives and discovery filters remain available below it. Choose 15, 30, or 60 minutes; these intentions do not predict solving time.
+1. Add a problem, import a DOCX sheet in Tracks, or connect a public Codeforces handle in Settings and import activity.
+2. Today gives an active session priority, then an appropriate due revisit, then unfinished work from your active track. Fresh alternatives and discovery filters remain available below it. Choose 15, 30, or 60 minutes; these intentions do not predict solving time.
 3. Pause, hide the timer, and write notes. A saved session survives navigation and reload.
 4. Finish with an outcome, an optional difficulty, and a takeaway. Imported attempts support quick reflections without invented solving time.
 5. Complete, reschedule, or intentionally practice a revisit. Skip today's recommendation or archive a problem without deleting its history.
@@ -34,11 +34,22 @@ Demo, personal, and each verified account use separate workspaces. Demo explorat
 | --------------- | --------------------------------------------------------------------------------------- |
 | `/` or `/today` | Stable daily reflection batch, due revisit, fresh discovery, practice rhythm            |
 | `/problems`     | Collection, editing, sourced histories, explicit attempt links                          |
+| `/tracks`       | DOCX preview/import, active track, unlocked stages, shared learning progress            |
 | `/session`      | Persistent timer, notes, reflection                                                     |
 | `/revisit`      | Recommended batch, full queue, completion, rescheduling, undo                           |
 | `/progress`     | Shared learning outcomes, difficulties, topics, breakthroughs, measured time            |
 | `/activity`     | Handle-scoped submissions, grouped attempts, reflections, older history                 |
 | `/settings`     | Codeforces, optional account, preferences, appearance, backups, installation, reminders |
+
+## Practice sheets and Tracks
+
+Choose **Tracks → Import practice sheet** and upload a `.docx` containing Codeforces links or explicit problem IDs. Parsing takes place in your browser. The editable preview lets you correct identifiers, titles, ratings, hints and stage assignments, rename/reorder/remove stages, and reorder/remove problems. Counts disclose unresolved identities and duplicate memberships. Cancelling the preview creates no records. Confirmation saves the track, its stages/memberships and any new problems in one revision; a failed save retains the preview and supports a safe retry with the same IDs.
+
+The supplied two-pointers sheet was verified against the real file: **100 problems in five ordered stages of 20, zero unresolved identities and zero duplicates**. Source titles, ratings, pattern hints, descriptions and suggested practice times are preserved. The sheet provides links and titles; **Open on Codeforces** opens full statements externally. Hints stay hidden until requested. PDF, OCR and older `.doc` imports are not supported. DOCX uploads are limited to 8 MiB with additional ZIP/XML resource limits.
+
+All stages are unlocked. Set a track as active to use it on Today, or start any stage problem explicitly. After saving a focused reflection, choose **Next problem** or **Return to stage**; the next timer starts only when requested. Tracks reuse canonical Codeforces problems and the existing reflection/revisit history. Acceptance on the current connected handle and independent solving are separate dimensions. Independent reflections complete the track's learning progress; assisted and unsolved work still needs revision. Future revisit dates, skips, deferrals and archives remain respected by automatic selection.
+
+Re-importing the same file offers the existing track or a deliberate copy; copies share problem history. Removing a track preserves its underlying problems, attempts, notes and revisit dates. Older backups receive empty track collections and Comfortable text defaults. See [docs/tracks-and-readability.md](docs/tracks-and-readability.md) for source acceptance, resource boundaries and verification.
 
 ## Learning and scheduling
 
@@ -88,6 +99,7 @@ Next.js App Router, React, strict TypeScript, Tailwind CSS, Lucide icons, and se
 - `src/lib/concurrency.ts` and `storage.ts`: capacity, three-way merge, transactional revisions, recovery.
 - `src/lib/codeforces*.ts`: import boundaries, grouping, reflection batches, profile freshness.
 - `src/lib/learning.ts`: derived sourced history and explicit linking.
+- `src/lib/docx-import.ts`, `tracks*.ts` and `today-practice.ts`: bounded DOCX parsing, track membership/progress and daily priorities.
 - `src/lib/catalogue.ts` and `discovery.ts`: catalogue and transparent selection rules.
 - `src/lib/cloud-*.ts` and `supabase/migrations`: optional verified account transport and durable storage.
 - `src/lib/reminders.ts`, manifest, and `public/sw.js`: daily access and safe offline behavior.
@@ -104,4 +116,4 @@ npm run test:browser
 
 The browser suite starts the production server on port 3002 and uses isolated fixtures, leaving the normal personal workspace untouched. CI runs these checks on pushes and pull requests.
 
-Latest local verification, **7 October 2026**: **110 unit/integration tests passed; 76 desktop/mobile browser tests passed; two hosted-account browser tests skipped**. Lint, strict TypeScript, and the supported Webpack production build passed. Actual migration SQL was exercised in local PostgreSQL, including ownership, revisions, and retry safety; these local fixtures do not establish hosted account behavior. The actual catalogue route passed deterministic success/cache/stale/unavailable checks and a separate live HTTP/cache check. Both themes, narrow/enlarged-text layouts, and mobile reflection controls were verified. See [docs/reliability-pass.md](docs/reliability-pass.md) for fixes, screenshots, test boundaries, and exact remaining hosted-account checks; [docs/verification.md](docs/verification.md) preserves the earlier record.
+Latest local verification, **7 October 2026**: **160 unit/integration tests passed; 104 desktop/mobile browser tests passed; two hosted-account browser tests skipped** because disposable test credentials are absent. Lint, strict TypeScript, and the supported Webpack production build passed. The real DOCX, editable/cancellable previews, failed-save recovery, shared track history, focused practice, reflections, progress and reload were exercised end to end. Both themes, actual text contrast, keyboard dialogs, saved Large text, long names and narrow/reflow layouts were checked. Actual migration SQL was exercised in local PostgreSQL, including ownership, revisions and retry safety; these local fixtures do not establish hosted account behavior. See [docs/tracks-and-readability.md](docs/tracks-and-readability.md) for current results, screenshots and boundaries. [docs/reliability-pass.md](docs/reliability-pass.md) and [docs/verification.md](docs/verification.md) preserve earlier verification.

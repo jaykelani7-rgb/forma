@@ -12,7 +12,7 @@
   min-height: 48px;
   padding: 12px 0;
   border-bottom: 1px solid var(--line);
-  font-size: 13px;
+  font-size: var(--text-support);
   color: var(--muted);
   cursor: pointer;
   list-style: none;
@@ -35,16 +35,16 @@
   padding: 12px 0;
 }
 .secondaryDiscovery .discoveryCard :global(.section-heading h2) {
-  font-size: 16px;
+  font-size: var(--text-body);
 }
 .secondaryDiscovery .discoveryCard :global(.discovery-problem h3) {
-  font-size: 29px;
+  font-size: 1.8125rem;
 }
 .primaryDiscovery .discoveryCard :global(.discovery-problem h3) {
-  font-size: 38px;
+  font-size: 2.375rem;
 }
 .primaryDiscovery .discoveryCard :global(.section-heading h2) {
-  font-size: 17px;
+  font-size: var(--text-body);
 }
 .freshDuration {
   margin: 0 0 18px;
@@ -60,7 +60,7 @@
   margin-top: 8px;
 }
 .savedTags summary {
-  font-size: 11px;
+  font-size: var(--text-control);
 }
 .savedTags p {
   overflow-wrap: anywhere;
@@ -76,7 +76,7 @@
 }
 @media (max-width: 760px) {
   .primaryDiscovery .discoveryCard :global(.discovery-problem h3) {
-    font-size: 34px;
+    font-size: 2.125rem;
   }
   .primaryCard :global(.session-card-content) > div:first-child {
     padding-right: 0;
@@ -88,7 +88,7 @@
     display: none;
   }
   .alternativeSummary {
-    font-size: 12px;
+    font-size: var(--text-support);
   }
   .freshDuration {
     gap: 12px;
@@ -100,7 +100,7 @@
 @media (max-width: 360px) {
   .primaryCard :global(.session-card-content h2),
   .primaryDiscovery .discoveryCard :global(.discovery-problem h3) {
-    font-size: 30px;
+    font-size: 1.875rem;
   }
 }
 .discoveryCard :global(.button),

@@ -1,0 +1,453 @@
+.page {
+  min-width: 0;
+  font-size: 1rem;
+  line-height: 1.65;
+}
+.page h2,
+.page h3 {
+  overflow-wrap: anywhere;
+}
+.page :global(.button),
+.page :global(.text-link) {
+  font-size: 0.9375rem;
+  white-space: normal;
+}
+.back {
+  margin-bottom: 1.5rem;
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));
+  gap: 1.25rem;
+  margin-top: 1.5rem;
+}
+.card {
+  min-width: 0;
+  padding: 1.5rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.card h2 {
+  font-size: 1.5rem;
+  line-height: 1.3;
+  margin: 0.75rem 0;
+  font-family: "Instrument Serif", Georgia, serif;
+}
+.card p {
+  color: var(--muted);
+  font-size: 0.9375rem;
+}
+.source {
+  color: var(--muted);
+  font-size: 0.8125rem;
+  overflow-wrap: anywhere;
+}
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8125rem;
+  color: var(--accent);
+  padding: 0.25rem 0.5rem;
+  border-radius: 3px;
+  background: var(--accent-soft);
+}
+.metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.5rem;
+  margin: 1.25rem 0;
+  font-size: 0.875rem;
+  color: var(--muted);
+}
+.metrics strong {
+  color: var(--text);
+  font-size: 1rem;
+  font-weight: 550;
+}
+.progress {
+  width: 100%;
+  height: 0.5rem;
+  border: 0;
+  appearance: none;
+  background: var(--soft);
+  border-radius: 0.5rem;
+  overflow: hidden;
+}
+.progress::-webkit-progress-bar {
+  background: var(--soft);
+}
+.progress::-webkit-progress-value {
+  background: var(--accent);
+  border-radius: 0.5rem;
+}
+.progress::-moz-progress-bar {
+  background: var(--accent);
+}
+.next {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 1.5rem;
+  margin: 1.5rem 0;
+}
+.next h2 {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-size: 2rem;
+  line-height: 1.25;
+  margin: 0.6rem 0;
+}
+.next p {
+  color: var(--muted);
+  margin-bottom: 1rem;
+  font-size: 0.9375rem;
+}
+.stageList {
+  list-style: none;
+  padding: 0;
+  margin: 1.5rem 0;
+  display: grid;
+  gap: 1rem;
+}
+.stage {
+  display: grid;
+  grid-template-columns: 3rem minmax(0, 1fr) auto;
+  gap: 1rem;
+  align-items: start;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 1.25rem;
+}
+.motif {
+  width: 3rem;
+  height: 3rem;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--accent);
+  background: var(--soft);
+}
+.stage h2 {
+  font-size: 1.25rem;
+  margin-bottom: 0.35rem;
+}
+.stage p {
+  color: var(--muted);
+  font-size: 0.9375rem;
+}
+.stage .metrics {
+  margin: 0.75rem 0 0;
+}
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin: 1.5rem 0;
+  align-items: end;
+}
+.toolbar label {
+  font-size: 0.875rem;
+  min-width: min(100%, 12rem);
+}
+.toolbar label:first-child {
+  flex: 1;
+}
+.problemList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.problem {
+  padding: 1.5rem 0;
+  border-top: 1px solid var(--line);
+  display: grid;
+  grid-template-columns: 2.5rem minmax(0, 1fr);
+  gap: 0.75rem;
+}
+.position {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  font-size: 0.875rem;
+  padding-top: 0.2rem;
+}
+.problem h3 {
+  font-size: 1.0625rem;
+  line-height: 1.5;
+  font-weight: 550;
+}
+.problem .actions {
+  margin-top: 0.85rem;
+}
+.metadata {
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  font-size: 0.8125rem;
+  margin-top: 0.4rem;
+}
+.statuses {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.6rem 0;
+}
+.statuses span {
+  font-size: 0.8125rem;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 0.25rem 0.5rem;
+  color: var(--muted);
+}
+.statuses .due {
+  color: var(--review);
+  border-color: var(--review);
+}
+.hint {
+  margin-top: 0.7rem;
+  font-size: 0.875rem;
+  color: var(--muted);
+}
+.hint summary {
+  cursor: pointer;
+  min-height: 2.75rem;
+  display: flex;
+  align-items: center;
+  color: var(--accent);
+}
+.hint p {
+  padding: 0.5rem 0.75rem;
+  border-left: 2px solid var(--line);
+}
+.takeaways {
+  margin: 2rem 0;
+  padding: 1.5rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.takeaways h2 {
+  font-size: 1.25rem;
+  margin-bottom: 0.75rem;
+}
+.takeaways ul {
+  padding-left: 1.2rem;
+  margin-bottom: 0;
+}
+.takeaways li {
+  margin-top: 0.65rem;
+  font-size: 0.9375rem;
+}
+.error {
+  color: var(--status-danger, var(--review));
+  background: var(--status-danger-soft, var(--soft));
+  border: 1px solid var(--status-danger, var(--review));
+  padding: 0.9rem;
+  border-radius: 4px;
+  font-size: 0.9375rem;
+  overflow-wrap: anywhere;
+}
+.empty {
+  padding: 2rem 0;
+  color: var(--muted);
+}
+.notice {
+  padding: 1rem;
+  background: var(--soft);
+  border: 1px solid var(--line);
+  margin: 1rem 0;
+  font-size: 0.9375rem;
+  color: var(--muted);
+}
+.copyChoice {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-height: 2.75rem;
+  margin: 0.5rem 0;
+  line-height: 1.5;
+}
+.copyChoice input {
+  width: 1.15rem;
+  height: 1.15rem;
+  min-height: 0;
+  margin: 0;
+  flex-shrink: 0;
+  accent-color: var(--accent);
+}
+.modal {
+  width: min(64rem, calc(100vw - 2rem));
+  max-width: 64rem;
+  max-height: calc(100dvh - 2rem);
+  padding: 0;
+  overflow: hidden;
+}
+.modal[open] {
+  display: flex;
+  flex-direction: column;
+}
+.modal :global(.modal-header) {
+  padding: 1.5rem;
+  margin: 0;
+  flex-shrink: 0;
+}
+.modal :global(.modal-header h2) {
+  font-size: 2rem;
+}
+.scroll {
+  overflow: auto;
+  min-height: 0;
+  padding: 0.25rem 1.5rem 1.5rem;
+}
+.footer {
+  flex-shrink: 0;
+  padding: 1rem 1.5rem max(1rem, env(safe-area-inset-bottom));
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+}
+.modal :global(.button) {
+  font-size: 0.9375rem;
+  white-space: normal;
+}
+.upload {
+  display: grid;
+  gap: 1.25rem;
+  font-size: 1rem;
+}
+.upload label,
+.editor label {
+  font-size: 0.875rem;
+}
+.upload p {
+  color: var(--muted);
+  font-size: 0.9375rem;
+}
+.summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.25rem;
+  font-size: 0.875rem;
+  padding: 1rem 0;
+  color: var(--muted);
+}
+.summary strong {
+  color: var(--text);
+}
+.editor {
+  display: grid;
+  gap: 1rem;
+}
+.editorStage {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.editorStage > summary {
+  cursor: pointer;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 1rem;
+  min-height: 3rem;
+  font-size: 1rem;
+  font-weight: 550;
+  overflow-wrap: anywhere;
+}
+.stageBody {
+  padding: 0 1rem 1rem;
+}
+.stageFields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin: 0.75rem 0 1rem;
+}
+.stageFields label:first-child {
+  grid-column: 1 / -1;
+}
+.editorEntry {
+  border-top: 1px solid var(--line);
+  padding: 1rem 0;
+}
+.entryFields {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: 0.85rem;
+}
+.entryFields .wide {
+  grid-column: 1 / -1;
+}
+.entryFields input,
+.stageFields input,
+.stageFields textarea,
+.entryFields select {
+  font-size: 1rem;
+}
+.editorEntry .actions,
+.stageBody > .actions {
+  margin: 0.75rem 0;
+}
+.editorEntry :global(.button),
+.stageBody > .actions :global(.button) {
+  padding: 0.6rem 0.8rem;
+}
+.unresolved {
+  display: block;
+  color: var(--review);
+  font-size: 0.875rem;
+  margin-top: 0.5rem;
+}
+@media (max-width: 760px) {
+  .stage {
+    grid-template-columns: 2.5rem minmax(0, 1fr);
+    padding: 1rem;
+    gap: 0.75rem;
+  }
+  .stage > :global(.button) {
+    grid-column: 2;
+    justify-self: start;
+  }
+  .motif {
+    width: 2.5rem;
+    height: 2.5rem;
+  }
+  .card,
+  .next,
+  .takeaways {
+    padding: 1.1rem;
+  }
+  .modal {
+    width: calc(100vw - 1rem);
+    max-height: calc(100dvh - 1rem);
+  }
+  .modal :global(.modal-header),
+  .scroll,
+  .footer {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+  .stageFields,
+  .entryFields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .entryFields .wide,
+  .stageFields label:first-child {
+    grid-column: auto;
+  }
+  .footer :global(.button) {
+    flex: 1;
+  }
+}

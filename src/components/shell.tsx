@@ -16,6 +16,7 @@ import {
   RotateCcw,
   Plus,
   ShieldCheck,
+  Layers3,
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { BRAND } from "@/lib/model";
@@ -26,6 +27,7 @@ import { Modal } from "./ui";
 const navigation = [
   { href: "/", label: "Today", icon: CalendarDays },
   { href: "/problems", label: "Problems", icon: BookOpen },
+  { href: "/tracks", label: "Tracks", icon: Layers3 },
   { href: "/revisit", label: "Revisit", icon: RotateCcw },
   { href: "/activity", label: "Activity", icon: Activity },
   { href: "/progress", label: "Progress", icon: BarChart3 },
@@ -49,6 +51,7 @@ export function BrandMark({ small = false }: { small?: boolean }) {
 }
 export function Shell({ children }: { children: ReactNode }) {
   const path = usePathname();
+  const activePath = path.startsWith("/tracks/") ? "/tracks" : path;
   const {
     data,
     ready,
@@ -82,12 +85,12 @@ export function Shell({ children }: { children: ReactNode }) {
               <Link
                 key={href}
                 href={href}
-                aria-current={path === href ? "page" : undefined}
-                className={`nav-link ${path === href ? "active" : ""}`}
+                aria-current={activePath === href ? "page" : undefined}
+                className={`nav-link ${activePath === href ? "active" : ""}`}
               >
                 <Icon size={19} strokeWidth={1.65} />
                 <span>{label}</span>
-                {path === href && <span className="nav-dot" />}
+                {activePath === href && <span className="nav-dot" />}
               </Link>
             ))}
           </nav>
@@ -186,7 +189,7 @@ export function Shell({ children }: { children: ReactNode }) {
               <div className="breadcrumb">
                 Your workspace<span>/</span>
                 <strong>
-                  {navigation.find((n) => n.href === path)?.label ??
+                  {navigation.find((n) => n.href === activePath)?.label ??
                     (path === "/activity" ? "Activity" : "Settings")}
                 </strong>
               </div>
@@ -217,8 +220,12 @@ export function Shell({ children }: { children: ReactNode }) {
             </button>
           </div>
         )}
-        {storagePending && <div className="storage-save-status" role="status">Saving local changes…</div>}
-      {storageError && (
+        {storagePending && (
+          <div className="storage-save-status" role="status">
+            Saving local changes…
+          </div>
+        )}
+        {storageError && (
           <div className="storage-banner" role="status">
             {storageError}
           </div>
@@ -250,8 +257,8 @@ export function Shell({ children }: { children: ReactNode }) {
                 <Link
                   key={href}
                   href={href}
-                  className={path === href ? "active" : ""}
-                  aria-current={path === href ? "page" : undefined}
+                  className={activePath === href ? "active" : ""}
+                  aria-current={activePath === href ? "page" : undefined}
                 >
                   <Icon size={20} />
                   <span>{label}</span>

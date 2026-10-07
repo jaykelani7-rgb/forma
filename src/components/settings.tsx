@@ -31,6 +31,7 @@ export function Settings() {
     theme,
     setTheme,
     update,
+    retryLocalSave,
     notify,
     replaceData,
     setMode,
@@ -62,6 +63,27 @@ export function Settings() {
   const saving = useRef(false);
   const restoring = useRef(false);
   const [restoreBusy, setRestoreBusy] = useState(false);
+  const [textBusy, setTextBusy] = useState(false);
+  const [textError, setTextError] = useState("");
+  const textLock = useRef(false);
+  async function chooseTextSize(textSize: "comfortable" | "large") {
+    if (textLock.current) return;
+    const isCurrent = guardWorkspace();
+    textLock.current = true;
+    setTextBusy(true);
+    const saved = await update((d) => ({
+      ...d,
+      settings: { ...d.settings, textSize },
+    }));
+    textLock.current = false;
+    if (!isCurrent()) return;
+    setTextBusy(false);
+    setTextError(
+      saved
+        ? ""
+        : "Text size changed in this tab. Retry saving below to keep it after reopening.",
+    );
+  }
   async function save(e: React.FormEvent) {
     e.preventDefault();
     if (saving.current) return;
@@ -360,6 +382,38 @@ export function Settings() {
               </button>
             ))}
           </div>
+          <fieldset className="text-size-options">
+            <legend>Text size</legend>
+            <div className="segmented">
+              {(["comfortable", "large"] as const).map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  disabled={textBusy || storagePending}
+                  aria-pressed={
+                    (data.settings.textSize ?? "comfortable") === value
+                  }
+                  className={
+                    (data.settings.textSize ?? "comfortable") === value
+                      ? "selected"
+                      : ""
+                  }
+                  onClick={() => void chooseTextSize(value)}
+                >
+                  {value === "comfortable" ? "Comfortable" : "Large"}
+                </button>
+              ))}
+            </div>
+            <p className="field-help">
+              A saved preference across the app. Browser zoom works alongside
+              it.
+            </p>
+            {textError && (
+              <p className="form-error" role="alert">
+                {textError}
+              </p>
+            )}
+          </fieldset>
         </div>
       </section>
       <CodeforcesConnection />
@@ -381,11 +435,28 @@ export function Settings() {
             migration.
           </p>
           {storageError && (
-            <p className="form-error">
-              Storage needs attention. Export your current data, then import a
-              backup to retry saving. Importing replaces the original local
-              records.
-            </p>
+            <div className="form-error">
+              <p>
+                Storage needs attention. Export your current data before closing
+                this tab. Retry saving when space or storage access is
+                available; conflicting changes remain in recovery copies.
+              </p>
+              <button
+                type="button"
+                className="button secondary"
+                disabled={storagePending}
+                onClick={async () => {
+                  const isCurrent = guardWorkspace();
+                  const saved = await retryLocalSave();
+                  if (saved && isCurrent()) {
+                    setTextError("");
+                    notify("Your unsaved changes are now saved.");
+                  }
+                }}
+              >
+                Retry saving
+              </button>
+            </div>
           )}
           <div className="backup-actions">
             <button className="button secondary" onClick={exportData}>

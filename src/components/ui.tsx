@@ -44,7 +44,49 @@ export function Modal({
       ref={ref}
       className={`modal ${className}`}
       aria-labelledby={titleId}
-      onCancel={onClose}
+      tabIndex={-1}
+      onCancel={(event) => {
+        event.preventDefault();
+        onClose();
+      }}
+      onKeyDown={(event) => {
+        if (event.key !== "Tab") return;
+        const dialog = ref.current;
+        if (!dialog) return;
+        const targets = Array.from(
+          dialog.querySelectorAll<HTMLElement>(
+            'a[href], button, input, select, textarea, summary, [tabindex], [contenteditable="true"]',
+          ),
+        ).filter(
+          (target) =>
+            target.tabIndex >= 0 &&
+            !target.matches(":disabled") &&
+            !target.closest("[inert]") &&
+            target.getClientRects().length > 0 &&
+            getComputedStyle(target).visibility !== "hidden",
+        );
+        const first = targets[0],
+          last = targets.at(-1);
+        if (!first || !last) {
+          event.preventDefault();
+          dialog.focus();
+          return;
+        }
+        if (
+          event.shiftKey &&
+          (document.activeElement === first ||
+            document.activeElement === dialog)
+        ) {
+          event.preventDefault();
+          last.focus();
+        } else if (
+          !event.shiftKey &&
+          (document.activeElement === last || document.activeElement === dialog)
+        ) {
+          event.preventDefault();
+          first.focus();
+        }
+      }}
       onClick={(e) => {
         if (e.target === ref.current) {
           const r = ref.current.getBoundingClientRect();
