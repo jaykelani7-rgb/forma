@@ -57,6 +57,7 @@ import {
   nextDailyCheckDelay,
 } from "@/lib/daily-workspace";
 import { withPracticeSession } from "@/lib/practice-session";
+import type { TrackContext } from "@/lib/tracks-types";
 import {
   operationIsCurrent,
   readSettledWorkspace,
@@ -83,13 +84,19 @@ interface Workspace {
   storagePending: boolean;
   workspaceKey: WorkspaceKey;
   update: (fn: (data: Data) => Data) => Promise<boolean>;
+  retryLocalSave: (fn?: (data: Data) => Data) => Promise<boolean>;
   setTheme: (theme: Theme) => void;
   setMode: (mode: Mode) => void;
   notify: (message: string) => void;
-  startSession: (problem: Problem, duration?: Duration) => Promise<boolean>;
+  startSession: (
+    problem: Problem,
+    duration?: Duration,
+    context?: TrackContext,
+  ) => Promise<boolean>;
   startFreshSession: (
     problem: Problem,
     duration?: Duration,
+    context?: TrackContext,
   ) => Promise<boolean>;
   guardWorkspace: () => () => boolean;
   localDay: string;
@@ -152,6 +159,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const channel = useRef<BroadcastChannel | null>(null);
   const [workspaceKey, setWorkspaceKey] = useState<WorkspaceKey>("personal");
   const [localDay, setLocalDay] = useState("");
+  useEffect(() => {
+    document.documentElement.dataset.textSize =
+      bundle.data.settings.textSize ?? "comfortable";
+  }, [bundle.data.settings.textSize]);
   const practiceLock = useRef(false);
   const keyRef = useRef<WorkspaceKey>("personal");
   function captureOperation() {
@@ -190,13 +201,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     current.current = value;
     setBundle(value);
   }
-  function persist(proposed: Data, replace = false) {
+  function persist(proposed: Data, replace = false, baseline?: Data) {
     const isCurrent = guardWorkspace();
     editVersion.current++;
     const base = record.current;
     const key = keyRef.current;
     const mode = current.current.mode;
-    const before = current.current.data;
+    const before = baseline ?? current.current.data;
     showBundle({ ...current.current, data: proposed });
     if (key.startsWith("account:"))
       setCloudStatus(navigator.onLine ? "pending" : "offline");
@@ -245,6 +256,31 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const operationVersion = useRef(0);
   const syncAbort = useRef<AbortController | null>(null);
   const [addOpen, setAddOpen] = useState(false);
+  const retryLock = useRef(false);
+  async function retryLocalSave(fn?: (data: Data) => Data) {
+    if (retryLock.current || !current.current.ready) return false;
+    const isCurrent = guardWorkspace();
+    retryLock.current = true;
+    try {
+      await queue.current;
+      if (!isCurrent() || !record.current) return false;
+      const proposed = fn ? fn(current.current.data) : current.current.data;
+      if (!persistBlocked.current) return await update(() => proposed);
+      // Retry the entire unsaved proposal against its last durable revision.
+      // Normal CAS merging still rejects conflicts and retains recovery copies.
+      const baseline = record.current.data;
+      persistBlocked.current = false;
+      setStorageError(null);
+      const saved = await persist(proposed, false, baseline);
+      if (saved && isCurrent()) {
+        volatile.current.delete(keyRef.current);
+        if (keyRef.current.startsWith("account:")) setCloudError(null);
+      }
+      return saved && isCurrent();
+    } finally {
+      retryLock.current = false;
+    }
+  }
   const notify = useCallback((message: string) => setToast(message), []);
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout>;
@@ -780,10 +816,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     // Auth changes invalidate the active account cache without discarding it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  async function startSession(
+  async function startPractice(
     problem: Problem,
     duration = current.current.data.settings.defaultDuration,
     fresh = false,
+    context?: TrackContext,
   ) {
     if (practiceLock.current || !current.current.ready) return false;
     const isCurrent = guardWorkspace();
@@ -803,7 +840,15 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       await queue.current;
       if (!isCurrent() || persistBlocked.current) return false;
       const saved = await update((data) =>
-        withPracticeSession(data, problem, duration, Date.now(), uid(), fresh),
+        withPracticeSession(
+          data,
+          problem,
+          duration,
+          Date.now(),
+          uid(),
+          fresh,
+          context,
+        ),
       );
       if (!saved || !isCurrent()) return false;
       router.push("/session");
@@ -820,8 +865,19 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       practiceLock.current = false;
     }
   }
-  async function startFreshSession(problem: Problem, duration?: Duration) {
-    return startSession(problem, duration, true);
+  async function startSession(
+    problem: Problem,
+    duration?: Duration,
+    context?: TrackContext,
+  ) {
+    return startPractice(problem, duration, false, context);
+  }
+  async function startFreshSession(
+    problem: Problem,
+    duration?: Duration,
+    context?: TrackContext,
+  ) {
+    return startPractice(problem, duration, true, context);
   }
   async function replaceData(data: Data) {
     operationVersion.current++;
@@ -1063,6 +1119,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         syncAccount,
         migratePersonal,
         update,
+        retryLocalSave,
         setTheme,
         setMode,
         notify,

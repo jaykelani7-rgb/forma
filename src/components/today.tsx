@@ -22,7 +22,6 @@ import {
   reviewQueue,
   shortDate,
   visibleProblems,
-  suggestion,
   weekActivity,
   skipRecommendation,
 } from "@/lib/model";
@@ -31,6 +30,7 @@ import { FreshDiscovery } from "./discovery";
 import { TodayActivity } from "./codeforces";
 import { SectionHeading } from "./ui";
 import styles from "./today-discovery.module.css";
+import { todayPractice } from "@/lib/today-practice";
 
 function PracticeIllustration({ empty = false }: { empty?: boolean }) {
   return (
@@ -81,7 +81,7 @@ function PracticeIllustration({ empty = false }: { empty?: boolean }) {
           y="184"
           textAnchor="middle"
           fill="currentColor"
-          fontSize="8"
+          fontSize="12"
           fontFamily="monospace"
           letterSpacing="2"
           opacity=".6"
@@ -168,6 +168,7 @@ export function Today() {
     mode,
     setMode,
     startSession,
+    startFreshSession,
     setAddOpen,
     update,
     guardWorkspace,
@@ -180,18 +181,17 @@ export function Today() {
     data.settings.defaultDuration,
   );
   const active = data.session;
-  const activeProblem = data.problems.find(
-    (problem) => problem.id === active?.problemId,
-  );
-  const recommended =
-    active && activeProblem
-      ? {
-          problem: activeProblem,
-          reason: "Your notes and timer are ready when you are.",
-          focusFallback: false,
-          revisit: true,
-        }
-      : suggestion(data);
+  const recommended = todayPractice(data);
+  const trackContext = recommended?.trackContext;
+  const stageHref =
+    trackContext &&
+    data.trackStages?.some(
+      (stage) =>
+        stage.id === trackContext.stageId &&
+        stage.trackId === trackContext.trackId,
+    )
+      ? `/tracks/${encodeURIComponent(trackContext.trackId)}/stages/${encodeURIComponent(trackContext.stageId)}`
+      : null;
   const upcoming = reviewQueue(data).slice(0, 3);
   const breakthrough = breakthroughs(data)[0];
   const now = new Date();
@@ -202,7 +202,9 @@ export function Today() {
     setBusy(true);
     setActionError("");
     try {
-      const saved = await startSession(problem, duration);
+      const saved = await (
+        recommended?.fresh ? startFreshSession : startSession
+      )(problem, duration, recommended?.trackContext);
       if (isCurrent() && !saved)
         setActionError(
           "The session could not be saved. Review the storage message and recovery copies in Settings before trying again.",
@@ -227,7 +229,18 @@ export function Today() {
     setActionError("");
     try {
       const saved = await update((current) =>
-        skipRecommendation(current, recommended.problem.id),
+        skipRecommendation(
+          recommended.fresh &&
+            !current.problems.some(
+              (problem) => problem.id === recommended.problem.id,
+            )
+            ? {
+                ...current,
+                problems: [...current.problems, recommended.problem],
+              }
+            : current,
+          recommended.problem.id,
+        ),
       );
       if (isCurrent() && !saved)
         setActionError(
@@ -361,6 +374,27 @@ export function Today() {
                         )}
                       </div>
                       <p className="suggestion-reason">{recommended.reason}</p>
+                      {recommended.trackContext && (
+                        <div className="today-track-context">
+                          {stageHref ? (
+                            <Link className="text-link" href={stageHref}>
+                              {recommended.trackContext.trackTitle} ·{" "}
+                              {recommended.trackContext.stageTitle}
+                            </Link>
+                          ) : (
+                            <p className="small muted">
+                              {recommended.trackContext.trackTitle} ·{" "}
+                              {recommended.trackContext.stageTitle}
+                            </p>
+                          )}
+                          {recommended.position && (
+                            <p className="small muted">
+                              Problem {recommended.position.index} of{" "}
+                              {recommended.position.total} in this stage
+                            </p>
+                          )}
+                        </div>
+                      )}
                       {recommended.problem.tags.length > 0 && (
                         <details
                           className={`discovery-tags ${styles.savedTags}`}

@@ -352,8 +352,8 @@ test("fresh discovery excludes accepted history, hides approach tags and retains
         };
       }),
     );
-    expect(targets.length).toBe(5);
-    expect(new Set(targets.map((target) => target.top)).size).toBe(1);
+    expect(targets.length).toBe(6);
+    expect(new Set(targets.map((target) => target.top)).size).toBe(2);
     expect(
       targets.every((target) => target.width >= 44 && target.height >= 44),
     ).toBe(true);

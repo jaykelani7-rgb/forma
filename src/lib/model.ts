@@ -22,6 +22,14 @@ import {
   defaultReminder,
   validateReminder,
 } from "./reminders";
+import {
+  Track,
+  TrackStage,
+  TrackEntry,
+  TrackContext,
+  validateTrackContext,
+  validateTracks,
+} from "./tracks-types";
 // Rename the product here; navigation, exports, and metadata use this value.
 export const BRAND = "Forma";
 export const OUTCOMES = {
@@ -73,6 +81,7 @@ export interface Attempt {
   difficulty: Difficulty | null;
   takeaway: string;
   notes: string;
+  trackContext?: TrackContext;
 }
 export interface Session {
   id: string;
@@ -84,6 +93,7 @@ export interface Session {
   notes: string;
   timerVisible: boolean;
   phase: "focus" | "reflection";
+  trackContext?: TrackContext;
 }
 export interface Settings {
   displayName: string;
@@ -92,6 +102,7 @@ export interface Settings {
   focus: Focus;
   reviewDays: ReviewDays;
   reminder?: ReminderPreferences;
+  textSize?: "comfortable" | "large";
 }
 export interface Data {
   schemaVersion: 2;
@@ -102,6 +113,10 @@ export interface Data {
   settings: Settings;
   learningLinks?: LearningLink[];
   discovery?: DiscoveryPreferences;
+  tracks?: Track[];
+  trackStages?: TrackStage[];
+  trackEntries?: TrackEntry[];
+  activeTrackId?: string | null;
 }
 export const emptyData = (): Data => ({
   schemaVersion: 2,
@@ -111,6 +126,10 @@ export const emptyData = (): Data => ({
   session: null,
   learningLinks: [],
   discovery: defaultDiscovery(),
+  tracks: [],
+  trackStages: [],
+  trackEntries: [],
+  activeTrackId: null,
   settings: {
     displayName: "",
     weeklyGoal: 4,
@@ -118,6 +137,7 @@ export const emptyData = (): Data => ({
     focus: "mixed",
     reviewDays: { ...DEFAULT_REVIEW_DAYS },
     reminder: defaultReminder(),
+    textSize: "comfortable",
   },
 });
 export const uid = () => crypto.randomUUID();
@@ -815,6 +835,7 @@ export function validateData(input: unknown): Data {
         "An attempt has invalid fields or refers to a missing problem.",
       );
     attemptIds.add(a.id);
+    validateTrackContext(a.trackContext);
   }
   const s = input.settings;
   if (
@@ -826,6 +847,13 @@ export function validateData(input: unknown): Data {
     !["cp", "placement", "mixed"].includes(s.focus as string)
   )
     return fail("The settings in this file are invalid.");
+  if (
+    !(
+      s.textSize === undefined ||
+      ["comfortable", "large"].includes(s.textSize as string)
+    )
+  )
+    return fail("The text size preference in this file is invalid.");
   const days = input.schemaVersion === 1 ? DEFAULT_REVIEW_DAYS : s.reviewDays;
   if (
     !record(days) ||
@@ -854,6 +882,7 @@ export function validateData(input: unknown): Data {
       (session.phase === "reflection" && session.runningSince !== null))
   )
     return fail("The active session in this file is invalid.");
+  if (record(session)) validateTrackContext(session.trackContext);
   // Reconstruct only known fields, discarding unknown imported properties.
   const problems: Problem[] = input.problems.map((p) => ({
     id: p.id,
@@ -900,12 +929,16 @@ export function validateData(input: unknown): Data {
     difficulty: a.difficulty,
     takeaway: a.takeaway,
     notes: a.notes,
+    ...(a.trackContext !== undefined
+      ? { trackContext: validateTrackContext(a.trackContext) }
+      : {}),
   }));
   return {
     schemaVersion: 2,
     codeforces,
     problems,
     attempts,
+    ...validateTracks(input, problems),
     learningLinks: validateLearningLinks(
       input.learningLinks,
       problems,
@@ -924,6 +957,7 @@ export function validateData(input: unknown): Data {
         hint: days.hint,
       },
       reminder: validateReminder(s.reminder),
+      textSize: s.textSize ?? "comfortable",
     } as Settings,
     session:
       session === null
@@ -938,6 +972,9 @@ export function validateData(input: unknown): Data {
             notes: session.notes,
             timerVisible: session.timerVisible,
             phase: session.phase,
+            ...(session.trackContext !== undefined
+              ? { trackContext: validateTrackContext(session.trackContext) }
+              : {}),
           } as Session),
   };
 }

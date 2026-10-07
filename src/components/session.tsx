@@ -33,10 +33,20 @@ import {
 import { useWorkspace, pauseSession } from "./provider";
 import { BrandMark, FocusBack } from "./shell";
 import { EmptyState, Modal, ProblemLink } from "./ui";
+import type { TrackContext } from "@/lib/tracks-types";
+import { nextTrackEntry, trackContextForEntry } from "@/lib/tracks";
 
 export function FocusedSession() {
-  const { data, update, notify, storageError, storagePending, guardWorkspace } =
-    useWorkspace();
+  const {
+    data,
+    update,
+    notify,
+    storageError,
+    storagePending,
+    guardWorkspace,
+    startSession,
+    startFreshSession,
+  } = useWorkspace();
   const router = useRouter();
   const [closingDraft, setClosingDraft] = useState<{
     session: Session;
@@ -64,7 +74,53 @@ export function FocusedSession() {
     title: string;
     milestone: boolean;
     reviewAt: string | null;
+    trackContext?: TrackContext;
   } | null>(null);
+  const [nextBusy, setNextBusy] = useState(false);
+  const nextLock = useRef(false);
+  const next = completed?.trackContext
+    ? (nextTrackEntry(
+        data,
+        completed.trackContext.trackId,
+        new Date(),
+        completed.trackContext.stageId,
+      ) ?? nextTrackEntry(data, completed.trackContext.trackId))
+    : null;
+  const currentEntry = data.trackEntries?.find(
+    (entry) => entry.id === session?.trackContext?.entryId,
+  );
+  const stageExists = (context: TrackContext) =>
+    data.trackStages?.some(
+      (stage) =>
+        stage.id === context.stageId && stage.trackId === context.trackId,
+    );
+  async function startNext() {
+    if (!next || nextLock.current) return;
+    const isCurrent = guardWorkspace();
+    nextLock.current = true;
+    setNextBusy(true);
+    const context = trackContextForEntry(data, next.entry.id) ?? undefined;
+    const saved = await (next.fresh ? startFreshSession : startSession)(
+      next.problem,
+      undefined,
+      context,
+    );
+    nextLock.current = false;
+    if (!isCurrent()) return;
+    setNextBusy(false);
+    if (saved) {
+      setCompleted(null);
+      setOutcome(null);
+      setDifficulty(null);
+      setTakeaway("");
+      setReviewDate(undefined);
+      attemptIdentity.current = null;
+      setError("");
+    } else
+      setError(
+        "The next session could not be saved. Your reflection is saved; review saving in Settings before trying again.",
+      );
+  }
   const successRef = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
@@ -142,6 +198,7 @@ export function FocusedSession() {
       difficulty,
       takeaway: takeaway.trim(),
       notes: session.notes,
+      ...(session.trackContext ? { trackContext: session.trackContext } : {}),
     };
     const isCurrent = guardWorkspace();
     closing.current = true;
@@ -186,6 +243,7 @@ export function FocusedSession() {
         title: problem.title,
         milestone,
         reviewAt: review.reviewAt,
+        ...(session.trackContext ? { trackContext: session.trackContext } : {}),
       });
       setClosingDraft(null);
       notify(
@@ -360,6 +418,23 @@ export function FocusedSession() {
           </div>
         )}
         <div className="completion-actions">
+          {next && (
+            <button
+              className="button primary"
+              disabled={nextBusy || storagePending}
+              onClick={() => void startNext()}
+            >
+              Next problem <ArrowRight size={16} />
+            </button>
+          )}
+          {completed.trackContext && stageExists(completed.trackContext) && (
+            <Link
+              className="button secondary"
+              href={`/tracks/${completed.trackContext.trackId}/stages/${completed.trackContext.stageId}`}
+            >
+              Return to stage
+            </Link>
+          )}
           <Link href="/" className="button primary">
             Back to Today
             <ArrowRight size={16} />
@@ -369,6 +444,17 @@ export function FocusedSession() {
             <ArrowRight size={16} />
           </Link>
         </div>
+        {next && (
+          <p className="small muted">
+            Next: {next.entry.title} · {next.stage.title}. Start whenever you’re
+            ready.
+          </p>
+        )}
+        {error && (
+          <p className="form-error" role="alert">
+            {error}
+          </p>
+        )}
       </div>
     );
   if (!session || !problem)
@@ -398,6 +484,22 @@ export function FocusedSession() {
         <FocusBack />
       </header>
       <div className="focus-content">
+        {session.trackContext && (
+          <div className="session-track-context">
+            <p className="small muted">
+              {session.trackContext.trackTitle} ·{" "}
+              {session.trackContext.stageTitle}
+            </p>
+            {stageExists(session.trackContext) && (
+              <Link
+                className="text-link"
+                href={`/tracks/${session.trackContext.trackId}/stages/${session.trackContext.stageId}`}
+              >
+                Return to stage
+              </Link>
+            )}
+          </div>
+        )}
         <div className="focus-eyebrow">
           <span className="eyebrow">
             {session.phase === "reflection"
@@ -418,6 +520,12 @@ export function FocusedSession() {
           </div>
           <ProblemLink problem={problem} />
         </div>
+        {currentEntry?.pattern && session.phase === "focus" && (
+          <details className="session-pattern">
+            <summary>Reveal pattern hint</summary>
+            <p>{currentEntry.pattern}</p>
+          </details>
+        )}
         {session.phase === "focus" ? (
           <>
             <div className="focus-timer-area">
