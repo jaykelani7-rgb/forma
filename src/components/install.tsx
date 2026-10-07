@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { Bell, Check, Download, RefreshCw, WifiOff, X } from "lucide-react";
@@ -172,12 +172,14 @@ export function InstallSupport() {
 }
 
 export function DailyAccessSettings() {
-  const { data, update, notify } = useWorkspace();
+  const { data, update, notify, guardWorkspace } = useWorkspace();
   const reminder = data.settings.reminder ?? defaultReminder();
   const [prompt, setPrompt] = useState<InstallPrompt | null>(null);
   const [installed, setInstalled] = useState(false);
   const [time, setTime] = useState(reminder.time);
   const [error, setError] = useState<string | null>(null);
+  const saving = useRef(false);
+  const [savingTime, setSavingTime] = useState(false);
   useEffect(() => {
     const query = window.matchMedia("(display-mode: standalone)");
     const installedState = () =>
@@ -216,17 +218,31 @@ export function DailyAccessSettings() {
       );
     }
   }
-  function saveTime() {
+  async function saveTime() {
+    if (saving.current) return;
+    const isCurrent = guardWorkspace();
+    saving.current = true;
+    setSavingTime(true);
     try {
       const preference = validateReminder({ ...reminder, time });
-      update((current) => ({
+      const saved = await update((current) => ({
         ...current,
         settings: { ...current.settings, reminder: preference },
       }));
+      if (!isCurrent()) return;
+      if (!saved) {
+        setError(
+          "The reminder time could not be saved. Keep your chosen time and review saving and recovery in Settings before retrying.",
+        );
+        return;
+      }
       setError(null);
       notify("In-app reminder time saved.");
     } catch {
-      setError("Choose a valid reminder time.");
+      if (isCurrent()) setError("Choose a valid reminder time.");
+    } finally {
+      saving.current = false;
+      if (isCurrent()) setSavingTime(false);
     }
   }
   return (
@@ -296,15 +312,15 @@ export function DailyAccessSettings() {
               type="time"
               value={time}
               onChange={(event) => setTime(event.target.value)}
-              disabled={!reminder.enabled}
+              disabled={!reminder.enabled || savingTime}
             />
           </label>
           <button
             className="button secondary"
             onClick={saveTime}
-            disabled={!reminder.enabled}
+            disabled={!reminder.enabled || savingTime}
           >
-            Save reminder time
+            {savingTime ? "Saving reminder time…" : "Save reminder time"}
           </button>
         </div>
         <p className="field-help">

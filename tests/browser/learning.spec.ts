@@ -331,6 +331,9 @@ test("fresh discovery excludes accepted history, hides approach tags and retains
   const discovery = page.getByRole("region", {
     name: "Choose your next problem",
   });
+  await page
+    .getByText("Fresh practice & discovery filters", { exact: true })
+    .click();
   await expect(
     discovery.getByRole("heading", { name: titles.fresh, exact: true }),
   ).toBeVisible();
@@ -368,6 +371,9 @@ test("fresh discovery excludes accepted history, hides approach tags and retains
   await page.goto("/settings");
   await page.getByRole("button", { name: "Warm paper", exact: true }).click();
   await page.goto("/");
+  await page
+    .getByText("Fresh practice & discovery filters", { exact: true })
+    .click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
   await expect(
     discovery.getByRole("heading", { name: titles.fresh, exact: true }),
@@ -392,6 +398,9 @@ test("fresh discovery excludes accepted history, hides approach tags and retains
     )
     .toBe(true);
   await page.reload();
+  await page
+    .getByText("Fresh practice & discovery filters", { exact: true })
+    .click();
   await expect(
     discovery.getByRole("heading", { name: titles.alternate, exact: true }),
   ).toBeVisible();
@@ -413,17 +422,23 @@ test("duration changes practice composition and fresh practice becomes a recover
   const discovery = page.getByRole("region", {
     name: "Choose your next problem",
   });
+  await page
+    .getByText("Fresh practice & discovery filters", { exact: true })
+    .click();
   const durations = page.getByRole("group", { name: "Session duration" });
   await expect(
     discovery.getByRole("heading", { name: titles.fresh, exact: true }),
   ).toBeVisible();
   await durations.getByRole("button", { name: "15 min", exact: true }).click();
   await expect(
-    discovery.getByRole("heading", { name: titles.assisted, exact: true }),
+    page.getByRole("region", { name: `Revisit ${titles.assisted}` }),
   ).toBeVisible();
   await expect(
-    discovery.getByRole("button", { name: "Start this revisit", exact: true }),
+    discovery.getByRole("heading", { name: titles.fresh, exact: true }),
   ).toBeVisible();
+  await expect(
+    page.locator(".today-primary .button.primary:visible"),
+  ).toHaveCount(1);
   await durations.getByRole("button", { name: "60 min", exact: true }).click();
   await expect(discovery).toContainText(
     `Suggested order: revisit ${titles.assisted}, then this fresh problem if time remains.`,

@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   ArrowRight,
@@ -20,6 +21,8 @@ import {
   Difficulty,
   OUTCOMES,
   Outcome,
+  Problem,
+  Session,
   elapsed,
   clockTime,
   nextReview,
@@ -32,9 +35,17 @@ import { BrandMark, FocusBack } from "./shell";
 import { EmptyState, Modal, ProblemLink } from "./ui";
 
 export function FocusedSession() {
-  const { data, update, notify, storageError, storagePending } = useWorkspace();
-  const session = data.session;
-  const problem = data.problems.find((p) => p.id === session?.problemId);
+  const { data, update, notify, storageError, storagePending, guardWorkspace } =
+    useWorkspace();
+  const router = useRouter();
+  const [closingDraft, setClosingDraft] = useState<{
+    session: Session;
+    problem: Problem;
+  } | null>(null);
+  const session = closingDraft?.session ?? data.session;
+  const problem =
+    closingDraft?.problem ??
+    data.problems.find((p) => p.id === session?.problemId);
   const [now, setNow] = useState(() => Date.now());
   const [outcome, setOutcome] = useState<Outcome | null>(null);
   const [difficulty, setDifficulty] = useState<Difficulty | null>(null);
@@ -44,6 +55,11 @@ export function FocusedSession() {
   const [takeaway, setTakeaway] = useState("");
   const [error, setError] = useState("");
   const [discard, setDiscard] = useState(false);
+  const [pending, setPending] = useState<"save" | "discard" | "restore" | null>(
+    null,
+  );
+  const closing = useRef(false);
+  const attemptIdentity = useRef<string | null>(null);
   const [completed, setCompleted] = useState<{
     title: string;
     milestone: boolean;
@@ -57,32 +73,40 @@ export function FocusedSession() {
   useEffect(() => {
     if (completed) successRef.current?.focus();
   }, [completed]);
+  function changeSession(change: (current: Session) => Session) {
+    if (!session || closing.current) return;
+    if (closingDraft)
+      setClosingDraft((draft) =>
+        draft ? { ...draft, session: change(draft.session) } : draft,
+      );
+    void update((d) =>
+      d.session && d.session.id !== session.id
+        ? d
+        : { ...d, session: change(d.session ?? session) },
+    );
+  }
   function pause() {
-    update((d) => (d.session ? { ...d, session: pauseSession(d.session) } : d));
+    changeSession(pauseSession);
   }
   function resume() {
     setNow(Date.now());
-    update((d) =>
-      d.session
-        ? { ...d, session: { ...d.session, runningSince: Date.now() } }
-        : d,
-    );
+    changeSession((current) => ({ ...current, runningSince: Date.now() }));
   }
   function reflect() {
-    update((d) =>
-      d.session
-        ? { ...d, session: { ...pauseSession(d.session), phase: "reflection" } }
-        : d,
-    );
+    changeSession((current) => ({
+      ...pauseSession(current),
+      phase: "reflection",
+    }));
   }
   async function save(e: React.FormEvent) {
     e.preventDefault();
+    if (closing.current) return;
     if (!outcome || !session || !problem) {
       setError("Choose the reflection that fits this attempt.");
       return;
     }
     const review = nextReview(
-      problem,
+      closingDraft?.problem ?? problem,
       outcome,
       new Date(),
       data.settings.reviewDays,
@@ -92,16 +116,24 @@ export function FocusedSession() {
     );
     if (reviewDate === null) review.reviewAt = null;
     else if (submitted) review.reviewAt = String(submitted);
+    const priorLearning = attemptIdentity.current
+      ? {
+          ...data,
+          attempts: data.attempts.filter(
+            (a) => a.id !== attemptIdentity.current,
+          ),
+        }
+      : data;
     const milestone =
       outcome === "independent" &&
-      problemLearningHistory(data, problem.id).some(
+      problemLearningHistory(priorLearning, problem.id).some(
         (a) => a.outcome !== null && a.outcome !== "independent",
       ) &&
-      !problemLearningHistory(data, problem.id).some(
+      !problemLearningHistory(priorLearning, problem.id).some(
         (a) => a.outcome === "independent",
       );
     const attempt: Attempt = {
-      id: uid(),
+      id: attemptIdentity.current ?? (attemptIdentity.current = uid()),
       problemId: problem.id,
       startedAt: session.startedAt,
       completedAt: new Date().toISOString(),
@@ -111,40 +143,178 @@ export function FocusedSession() {
       takeaway: takeaway.trim(),
       notes: session.notes,
     };
-    const saved = await update((d) => ({
-      ...d,
-      session: null,
-      attempts: [...d.attempts, attempt],
-      problems: d.problems.map((p) =>
-        p.id === problem.id
-          ? {
-              ...p,
-              ...review,
-              reviewManual: reviewDate !== undefined,
-              ...(p.cfHandle ? { reviewAttemptId: undefined } : {}),
-              ...(reviewDate === null && p.reviewAt
-                ? { reviewCompletedAt: attempt.completedAt }
-                : {}),
-            }
-          : p,
-      ),
-    }));
-    if (!saved) {
-      setError(
-        "Reflection was not committed. Review the storage message and recovery copies.",
+    const isCurrent = guardWorkspace();
+    closing.current = true;
+    setPending("save");
+    setError("");
+    setClosingDraft(closingDraft ?? { session, problem });
+    try {
+      const saved = await update((d) => {
+        if (d.session && d.session.id !== session.id)
+          throw new Error(
+            "Another session is now active. Review your recovery copy before saving this reflection.",
+          );
+        return {
+          ...d,
+          session: null,
+          attempts: d.attempts.some((a) => a.id === attempt.id)
+            ? d.attempts.map((a) => (a.id === attempt.id ? attempt : a))
+            : [...d.attempts, attempt],
+          problems: d.problems.map((p) =>
+            p.id === problem.id
+              ? {
+                  ...p,
+                  ...review,
+                  reviewManual: reviewDate !== undefined,
+                  ...(p.cfHandle ? { reviewAttemptId: undefined } : {}),
+                  ...(reviewDate === null && p.reviewAt
+                    ? { reviewCompletedAt: attempt.completedAt }
+                    : {}),
+                }
+              : p,
+          ),
+        };
+      });
+      if (!isCurrent()) return;
+      if (!saved) {
+        setError(
+          "Reflection was not committed. Your reflection and session notes are still here. Review the storage message and recovery copies in Settings, then retry.",
+        );
+        return;
+      }
+      setCompleted({
+        title: problem.title,
+        milestone,
+        reviewAt: review.reviewAt,
+      });
+      setClosingDraft(null);
+      notify(
+        milestone
+          ? "A meaningful step: you solved it your own way."
+          : "Reflection saved. A little sharper than before.",
       );
+    } catch (failure) {
+      if (isCurrent())
+        setError(
+          failure instanceof Error
+            ? failure.message
+            : "Reflection was not committed. Keep your input and retry after reviewing the storage message.",
+        );
+    } finally {
+      closing.current = false;
+      if (isCurrent()) setPending(null);
+    }
+  }
+  async function discardSession() {
+    if (closing.current || !session || !problem) return;
+    const isCurrent = guardWorkspace();
+    closing.current = true;
+    setPending("discard");
+    setError("");
+    setClosingDraft({ session, problem });
+    try {
+      const saved = await update((d) => {
+        if (d.session && d.session.id !== session.id)
+          throw new Error(
+            "Another session is now active. Review your recovery copy before discarding this one.",
+          );
+        return { ...d, session: null };
+      });
+      if (!isCurrent()) return;
+      if (!saved) {
+        setError(
+          "The session was not discarded. Your timer and notes are still here. Review the storage message and recovery copies in Settings, then retry.",
+        );
+        return;
+      }
+      setDiscard(false);
+      setClosingDraft(null);
+      notify("Session ended without adding an attempt.");
+      router.push("/");
+    } catch (failure) {
+      if (isCurrent())
+        setError(
+          failure instanceof Error
+            ? failure.message
+            : "The session was not discarded. Review the storage message and retry.",
+        );
+    } finally {
+      closing.current = false;
+      if (isCurrent()) setPending(null);
+    }
+  }
+  async function restoreFocus() {
+    if (closing.current || !session || !problem) return;
+    const isCurrent = guardWorkspace();
+    closing.current = true;
+    setPending("restore");
+    try {
+      const saved = await update((d) => {
+        if (d.session && d.session.id !== session.id)
+          throw new Error(
+            "Another session is now active. Review your recovery copy before continuing this one.",
+          );
+        const hadTentativeAttempt =
+          !!attemptIdentity.current &&
+          d.attempts.some((a) => a.id === attemptIdentity.current);
+        return {
+          ...d,
+          session: { ...(d.session ?? session), phase: "focus" },
+          attempts: d.attempts.filter((a) => a.id !== attemptIdentity.current),
+          problems:
+            hadTentativeAttempt && closingDraft
+              ? d.problems.map((p) =>
+                  p.id === problem.id
+                    ? {
+                        ...p,
+                        reviewAt: closingDraft.problem.reviewAt,
+                        reviewCount: closingDraft.problem.reviewCount,
+                        reviewManual: closingDraft.problem.reviewManual,
+                        reviewAttemptId: closingDraft.problem.reviewAttemptId,
+                        reviewCompletedAt:
+                          closingDraft.problem.reviewCompletedAt,
+                      }
+                    : p,
+                )
+              : d.problems,
+        };
+      });
+      if (!isCurrent()) return;
+      // A failed commit still restores the draft into the provider's explicit
+      // unsaved memory state, so edited notes remain editable and exportable.
+      setClosingDraft(
+        saved
+          ? null
+          : {
+              session: { ...session, phase: "focus" },
+              problem: closingDraft?.problem ?? problem,
+            },
+      );
+      setDiscard(false);
+      setError(
+        saved
+          ? ""
+          : "Your session is kept in this tab. Local saving has not completed; export your data or review recovery copies in Settings before closing, then restore saving and retry.",
+      );
+    } catch (failure) {
+      if (isCurrent())
+        setError(
+          failure instanceof Error
+            ? failure.message
+            : "Your session could not be restored. Keep this draft and review recovery copies in Settings.",
+        );
+    } finally {
+      closing.current = false;
+      if (isCurrent()) setPending(null);
+    }
+  }
+  async function keepSession() {
+    if (closing.current) return;
+    if (closingDraft) {
+      await restoreFocus();
       return;
     }
-    setCompleted({
-      title: problem.title,
-      milestone,
-      reviewAt: review.reviewAt,
-    });
-    notify(
-      milestone
-        ? "A meaningful step: you solved it your own way."
-        : "Reflection saved. A little sharper than before.",
-    );
+    setDiscard(false);
   }
   if (completed)
     return (
@@ -290,17 +460,10 @@ export function FocusedSession() {
                     session.timerVisible ? "Hide timer" : "Show timer"
                   }
                   onClick={() =>
-                    update((d) =>
-                      d.session
-                        ? {
-                            ...d,
-                            session: {
-                              ...d.session,
-                              timerVisible: !d.session.timerVisible,
-                            },
-                          }
-                        : d,
-                    )
+                    changeSession((current) => ({
+                      ...current,
+                      timerVisible: !current.timerVisible,
+                    }))
                   }
                 >
                   {session.timerVisible ? (
@@ -321,7 +484,7 @@ export function FocusedSession() {
                 <label htmlFor="session-notes">A place for your thoughts</label>
                 <span className="tiny muted">
                   <span className="status-dot" />
-                  {storageError
+                  {storageError || closingDraft
                     ? "Kept in this tab"
                     : storagePending
                       ? "Saving notes…"
@@ -330,30 +493,35 @@ export function FocusedSession() {
               </div>
               <textarea
                 id="session-notes"
+                disabled={pending !== null}
                 maxLength={50000}
                 value={session.notes}
-                onChange={(e) =>
-                  update((d) =>
-                    d.session
-                      ? {
-                          ...d,
-                          session: { ...d.session, notes: e.target.value },
-                        }
-                      : d,
-                  )
-                }
+                onChange={(e) => {
+                  const notes = e.target.value;
+                  changeSession((current) => ({ ...current, notes }));
+                }}
                 placeholder="An approach to try. An edge case. A question for later…"
                 rows={6}
               />
             </section>
+            {error && !discard && (
+              <p role="alert" className="form-error">
+                {error}
+              </p>
+            )}
             <div className="focus-bottom">
               <button
                 className="text-link muted"
+                disabled={pending !== null}
                 onClick={() => setDiscard(true)}
               >
                 End without saving
               </button>
-              <button className="button primary" onClick={reflect}>
+              <button
+                className="button primary"
+                onClick={reflect}
+                disabled={pending !== null}
+              >
                 Finish session
                 <Check size={17} />
               </button>
@@ -374,6 +542,7 @@ export function FocusedSession() {
                   <button
                     key={key}
                     type="button"
+                    disabled={pending !== null}
                     className={outcome === key ? "selected" : ""}
                     aria-pressed={outcome === key}
                     onClick={() => {
@@ -399,6 +568,7 @@ export function FocusedSession() {
                 {Object.entries(DIFFICULTIES).map(([key, label]) => (
                   <button
                     type="button"
+                    disabled={pending !== null}
                     key={key}
                     aria-pressed={difficulty === key}
                     className={difficulty === key ? "selected" : ""}
@@ -417,6 +587,7 @@ export function FocusedSession() {
               One thing to remember <span className="optional">optional</span>
               <input
                 value={takeaway}
+                disabled={pending !== null}
                 onChange={(e) => setTakeaway(e.target.value)}
                 maxLength={300}
                 placeholder="Next time, I’ll…"
@@ -435,6 +606,7 @@ export function FocusedSession() {
                 >
                   <button
                     type="button"
+                    disabled={pending !== null}
                     className={
                       (reviewDate === undefined
                         ? nextReview(
@@ -462,6 +634,7 @@ export function FocusedSession() {
                   </button>
                   <button
                     type="button"
+                    disabled={pending !== null}
                     className={reviewDate === null ? "selected" : ""}
                     onClick={() => setReviewDate(null)}
                   >
@@ -491,6 +664,7 @@ export function FocusedSession() {
                             ).reviewAt
                           : reviewDate) ?? ""
                       }
+                      disabled={pending !== null}
                       onChange={(e) => setReviewDate(e.target.value)}
                       required
                     />
@@ -517,19 +691,18 @@ export function FocusedSession() {
               <button
                 type="button"
                 className="text-link"
-                onClick={() =>
-                  update((d) =>
-                    d.session
-                      ? { ...d, session: { ...d.session, phase: "focus" } }
-                      : d,
-                  )
-                }
+                disabled={pending !== null}
+                onClick={restoreFocus}
               >
                 <ArrowLeft size={15} />
                 Back to the session
               </button>
-              <button type="submit" className="button primary">
-                Save reflection
+              <button
+                type="submit"
+                className="button primary"
+                disabled={pending !== null}
+              >
+                {pending === "save" ? "Saving…" : "Save reflection"}
                 <Check size={17} />
               </button>
             </div>
@@ -537,30 +710,32 @@ export function FocusedSession() {
         )}
       </div>
       {discard && (
-        <Modal title="Close this chapter?" onClose={() => setDiscard(false)}>
+        <Modal title="Close this chapter?" onClose={keepSession}>
           <div className="form-stack">
             <p className="muted">
               This session’s timer and notes will be discarded. Your problem and
               previous attempts will stay in your notebook.
             </p>
+            {error && (
+              <p role="alert" className="form-error">
+                {error}
+              </p>
+            )}
             <div className="form-actions">
               <button
                 className="button secondary"
-                onClick={() => setDiscard(false)}
+                disabled={pending !== null}
+                onClick={keepSession}
               >
                 Keep practising
               </button>
-              <Link
-                href="/"
+              <button
                 className="button primary"
-                onClick={() => {
-                  update((d) => ({ ...d, session: null }));
-                  setDiscard(false);
-                  notify("Session ended without adding an attempt.");
-                }}
+                disabled={pending !== null}
+                onClick={discardSession}
               >
-                Discard session
-              </Link>
+                {pending === "discard" ? "Discarding…" : "Discard session"}
+              </button>
             </div>
           </div>
         </Modal>

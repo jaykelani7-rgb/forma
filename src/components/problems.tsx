@@ -1,5 +1,5 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   ArrowDown,
   ArrowRight,
@@ -38,12 +38,16 @@ import {
 } from "./ui";
 
 export function Problems() {
-  const { data, setAddOpen, startSession, update } = useWorkspace();
+  const { data, setAddOpen, startSession, update, guardWorkspace } =
+    useWorkspace();
   const [query, setQuery] = useState("");
   const [topic, setTopic] = useState("");
   const [outcome, setOutcome] = useState("");
   const [selected, setSelected] = useState<Problem | null>(null);
   const [editing, setEditing] = useState<Problem | null>(null);
+  const [startPending, setStartPending] = useState(false);
+  const [historyError, setHistoryError] = useState("");
+  const starting = useRef(false);
   const learning = useMemo(() => learningByProblem(data), [data]);
   const available = visibleProblems(data);
   const topics = [...new Set(available.flatMap((p) => p.tags))].sort();
@@ -60,6 +64,32 @@ export function Problems() {
     setQuery("");
     setTopic("");
     setOutcome("");
+  }
+  async function startSelected() {
+    if (!selected || starting.current) return;
+    const isCurrent = guardWorkspace();
+    starting.current = true;
+    setStartPending(true);
+    setHistoryError("");
+    try {
+      const saved = await startSession(selected);
+      if (!isCurrent()) return;
+      if (saved) setSelected(null);
+      else
+        setHistoryError(
+          "The session was not started. Review the storage message and recovery copies in Settings, then retry.",
+        );
+    } catch (failure) {
+      if (isCurrent())
+        setHistoryError(
+          failure instanceof Error
+            ? failure.message
+            : "The session was not started. Review the storage message and retry.",
+        );
+    } finally {
+      starting.current = false;
+      if (isCurrent()) setStartPending(false);
+    }
   }
   return (
     <div className="page-enter">
@@ -154,7 +184,10 @@ export function Problems() {
                     <td>
                       <button
                         className="problem-title-button"
-                        onClick={() => setSelected(problem)}
+                        onClick={() => {
+                          setHistoryError("");
+                          setSelected(problem);
+                        }}
                       >
                         {problem.title}
                       </button>
@@ -244,7 +277,9 @@ export function Problems() {
       {selected && (
         <Modal
           title={selected.title}
-          onClose={() => setSelected(null)}
+          onClose={() => {
+            if (!starting.current) setSelected(null);
+          }}
           className="history-modal"
         >
           <div className="history-meta">
@@ -259,6 +294,7 @@ export function Problems() {
             </div>
             <button
               className="text-link"
+              disabled={startPending}
               onClick={() => {
                 setEditing(selected);
                 setSelected(null);
@@ -405,15 +441,18 @@ export function Problems() {
               </p>
             )}
           </div>
+          {historyError && (
+            <p role="alert" className="form-error">
+              {historyError}
+            </p>
+          )}
           <div className="form-actions">
             <button
               className="button primary"
-              onClick={() => {
-                startSession(selected);
-                setSelected(null);
-              }}
+              disabled={startPending}
+              onClick={startSelected}
             >
-              Start a fresh attempt
+              {startPending ? "Starting…" : "Start a fresh attempt"}
               <ArrowRight size={16} />
             </button>
           </div>

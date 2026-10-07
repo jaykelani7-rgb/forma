@@ -820,6 +820,8 @@ test("legacy unbounded inbox flags migrate to five daily tasks without deleting 
     ...data,
     codeforces: {
       ...data.codeforces,
+      // Legacy backups predate the immutable per-day membership ledger too.
+      reflectionBatches: undefined,
       practiceAttempts: data.codeforces.practiceAttempts.map((attempt) => {
         const { batchDate, ...legacy } = attempt;
         void batchDate;
