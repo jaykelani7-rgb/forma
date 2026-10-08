@@ -6,3 +6,6 @@ out/
 *.tsbuildinfo
 test-results/
 playwright-report/
+
+# Recreated from pinned dependencies for local PDF and OCR imports
+public/import-assets/

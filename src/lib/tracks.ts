@@ -3,7 +3,12 @@ import { sharedPracticeState } from "./practice-state";
 import type { Data, Problem } from "./model";
 import { learningHistory } from "./learning";
 import type { LearningRecord } from "./learning";
-import { normalizeCodeforcesIdentity } from "./codeforces-identity";
+import {
+  canonicalProblemIdentity,
+  normalizeCodeforcesIdentity,
+} from "./codeforces-identity";
+import { entryNeedsReview, trackEntryIdentity } from "./track-studio";
+import { validateTrackEntrySource } from "./tracks-types";
 import type {
   Track,
   TrackContext,
@@ -34,6 +39,9 @@ export function trackDraft(data: Data, trackId: string): TrackImportDraft {
     title: track.title,
     sourceName: track.sourceName,
     sourceFingerprint: track.sourceFingerprint,
+    ...(track.sourceNotes !== undefined
+      ? { sourceNotes: track.sourceNotes }
+      : {}),
     stages: track.stageIds.map((id) => {
       const stage = stages.get(id)!;
       return {
@@ -41,6 +49,9 @@ export function trackDraft(data: Data, trackId: string): TrackImportDraft {
         title: stage.title,
         description: stage.description,
         suggestedTime: stage.suggestedTime,
+        ...(stage.sourceNotes !== undefined
+          ? { sourceNotes: stage.sourceNotes }
+          : {}),
         entries: stageEntries(data, id).map((entry) => ({
           id: entry.id,
           title: entry.title,
@@ -48,6 +59,9 @@ export function trackDraft(data: Data, trackId: string): TrackImportDraft {
           code: entry.code,
           rating: entry.rating,
           pattern: entry.pattern,
+          ...(entry.source !== undefined
+            ? { source: validateTrackEntrySource(entry.source), reviewed: true }
+            : {}),
         })),
       };
     }),
@@ -90,18 +104,7 @@ function sameIdentity(problem: Problem, key: string): boolean {
   return problemIdentity(problem) === key;
 }
 function problemIdentity(problem: Problem): string | undefined {
-  const normalized = normalizeCodeforcesIdentity({
-    url: problem.url,
-    code:
-      problem.platform.toLowerCase() === "codeforces"
-        ? problem.problemCode
-        : "",
-  });
-  // Old notebook records are retained even if their platform metadata disagrees.
-  // An inconsistent identity cannot supply reuse or track-learning credit.
-  if (problem.cfKey && normalized && problem.cfKey !== normalized.key)
-    return undefined;
-  return problem.cfKey ?? normalized?.key;
+  return canonicalProblemIdentity(problem);
 }
 function profileAvailable(data: Data, problem: Problem): boolean {
   return (
@@ -149,13 +152,6 @@ function newPersonalProblem(
 }
 function normalizeDraft(draft: TrackImportDraft): TrackImportDraft {
   if (
-    !draft.stages.length ||
-    draft.stages.reduce((sum, stage) => sum + stage.entries.length, 0) === 0
-  )
-    throw new Error(
-      "Keep at least one stage and problem before saving the track.",
-    );
-  if (
     draft.stages.length > 100 ||
     draft.stages.reduce((sum, stage) => sum + stage.entries.length, 0) > 1000
   )
@@ -163,27 +159,49 @@ function normalizeDraft(draft: TrackImportDraft): TrackImportDraft {
       "A practice sheet supports up to 100 stages and 1,000 problems.",
     );
   return {
-    ...draft,
+    id: draft.id,
     title: draft.title.trim(),
+    sourceName: draft.sourceName,
+    sourceFingerprint: draft.sourceFingerprint,
+    ...(draft.sourceNotes !== undefined
+      ? { sourceNotes: draft.sourceNotes }
+      : {}),
     stages: draft.stages.map((stage) => ({
-      ...stage,
+      id: stage.id,
       title: stage.title.trim(),
-      entries: stage.entries.map((entry) => {
-        const identity = normalizeCodeforcesIdentity({
-          url: entry.url,
-          code: entry.code,
-        });
-        if (!identity)
-          throw new Error(
-            "Correct each unresolved Codeforces problem before saving the track.",
-          );
-        return {
-          ...entry,
-          title: entry.title.trim(),
-          url: identity.url,
-          code: identity.code,
-        };
-      }),
+      description: stage.description,
+      suggestedTime: stage.suggestedTime,
+      ...(stage.sourceNotes !== undefined
+        ? { sourceNotes: stage.sourceNotes }
+        : {}),
+      entries: stage.entries
+        .filter((entry) => !entry.excluded)
+        .map((entry) => {
+          const identity = trackEntryIdentity(entry);
+          if (!identity)
+            throw new Error(
+              "Correct each unresolved Codeforces problem before saving the track. Enter a recognised ID or supported URL, and make sure both identify the same problem.",
+            );
+          if (!entry.title.trim())
+            throw new Error(
+              "Enter a title for each included problem, or explicitly exclude it from this track.",
+            );
+          if (entryNeedsReview(entry))
+            throw new Error(
+              "Review each flagged source entry before saving. Check its identity against the source and mark it reviewed, correct its identity, or explicitly exclude it.",
+            );
+          return {
+            id: entry.id,
+            title: entry.title.trim(),
+            url: identity.url,
+            code: identity.code,
+            rating: entry.rating,
+            pattern: entry.pattern,
+            ...(entry.source !== undefined
+              ? { source: validateTrackEntrySource(entry.source) }
+              : {}),
+          };
+        }),
     })),
   };
 }
@@ -238,6 +256,9 @@ function applyDraft(
       title: stage.title,
       description: stage.description,
       suggestedTime: stage.suggestedTime,
+      ...(stage.sourceNotes !== undefined
+        ? { sourceNotes: stage.sourceNotes }
+        : {}),
       entryIds: stage.entries.map((entry) => entry.id),
     };
   });
@@ -248,6 +269,9 @@ function applyDraft(
     sourceFingerprint: existing?.sourceFingerprint ?? draft.sourceFingerprint,
     createdAt,
     stageIds: stages.map((stage) => stage.id),
+    ...(draft.sourceNotes !== undefined
+      ? { sourceNotes: draft.sourceNotes }
+      : {}),
   };
   return validateData({
     ...data,
@@ -279,7 +303,7 @@ export function importTrack(
   const existing = data.tracks?.find((track) => track.id === draft.id);
   if (existing) {
     if (
-      JSON.stringify(trackDraft(data, draft.id)) ===
+      JSON.stringify(normalizeDraft(trackDraft(data, draft.id))) ===
       JSON.stringify(normalizeDraft(draft))
     )
       return data;

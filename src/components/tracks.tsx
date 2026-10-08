@@ -26,7 +26,7 @@ import {
   trackProgress,
 } from "@/lib/tracks";
 import { useWorkspace } from "./provider";
-import { TrackImport } from "./track-import";
+import { TrackImport, type TrackStudioEntryPoint } from "./track-import";
 import { EmptyState, Modal, PageHeader } from "./ui";
 import styles from "./tracks.module.css";
 
@@ -100,7 +100,9 @@ function TracksWorkspace({
     startFreshSession,
   } = useWorkspace();
   const router = useRouter();
-  const [importing, setImporting] = useState(false);
+  const [importing, setImporting] = useState<TrackStudioEntryPoint | null>(
+    null,
+  );
   const [editing, setEditing] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [pending, setPending] = useState(false);
@@ -255,24 +257,38 @@ function TracksWorkspace({
             action={
               <button
                 className="button primary"
-                onClick={() => setImporting(true)}
+                onClick={() => setImporting("upload")}
               >
                 <FileUp size={18} />
                 Import practice sheet
               </button>
             }
           />
+          <div className={styles.actions}>
+            <button
+              className="button secondary"
+              onClick={() => setImporting("paste")}
+            >
+              Paste Codeforces links or IDs
+            </button>
+            <button
+              className="button secondary"
+              onClick={() => setImporting("manual")}
+            >
+              Create manually
+            </button>
+          </div>
           {!tracks.length ? (
             <EmptyState
               title="A path you can make your own."
-              description="Import a DOCX practice sheet with Codeforces links, then review its stages and problems before saving."
+              description="Upload a DOCX, PDF or image, paste Codeforces links and IDs, or build your own track. Review its stages and problems before saving."
               icon={<Layers3 size={30} />}
               action={
                 <button
                   className="button secondary"
-                  onClick={() => setImporting(true)}
+                  onClick={() => setImporting("upload")}
                 >
-                  Choose a DOCX
+                  Choose a practice sheet
                 </button>
               }
             />
@@ -666,7 +682,12 @@ function TracksWorkspace({
           )}
         </>
       )}
-      {importing && <TrackImport onClose={() => setImporting(false)} />}
+      {importing && (
+        <TrackImport
+          entryPoint={importing}
+          onClose={() => setImporting(null)}
+        />
+      )}
       {editDraft && (
         <TrackImport
           initialDraft={editDraft}

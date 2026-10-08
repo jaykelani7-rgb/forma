@@ -8,6 +8,7 @@ import {
   WorkspaceValidationError,
 } from "../src/lib/workspace-proposal";
 import { encodeBackup, decodeBackup } from "../src/lib/concurrency";
+import { parsePastedProblems } from "../src/lib/track-studio";
 const data = importTrack(emptyData(), {
   id: "track",
   title: "Track",
@@ -115,4 +116,62 @@ test("track editor can replace membership while retaining original problem histo
   assert.notEqual(changed.trackEntries![0].problemId, data.problems[0].id);
   assert.ok(changed.problems.some((p) => p.id === data.problems[0].id));
   assert.doesNotThrow(() => validateWorkspaceProposal(changed));
+});
+
+test("recorded Gym metadata edits retain a plain code while explicit namespace or identity changes stay locked", () => {
+  const gym = importTrack(
+    emptyData(),
+    parsePastedProblems("https://codeforces.com/gym/381/problem/A"),
+  );
+  const original = gym.problems[0];
+  for (const problemCode of [
+    original.problemCode,
+    "381a",
+    "381 A",
+    "Gym 381A",
+  ]) {
+    const proposed = {
+      ...original,
+      title: "Updated Gym title",
+      rating: 1200,
+      problemCode,
+    };
+    assert.doesNotThrow(() => assertSafeProblemEdit(gym, original, proposed));
+    const saved = validateWorkspaceProposal({ ...gym, problems: [proposed] });
+    assert.equal(
+      decodeBackup(encodeBackup(saved)).trackEntries![0].problemId,
+      original.id,
+    );
+    assert.equal(saved.problems[0].url, original.url);
+  }
+  for (const problemCode of ["381A1", "38IA", "CF 381A", "Codeforces381A"]) {
+    assert.throws(
+      () => assertSafeProblemEdit(gym, original, { ...original, problemCode }),
+      /original Codeforces ID/,
+    );
+  }
+  assert.throws(
+    () =>
+      assertSafeProblemEdit(gym, original, {
+        ...original,
+        url: "https://codeforces.com/contest/381/problem/A",
+      }),
+    /recorded practice/,
+  );
+  const contest = data.problems[0];
+  assert.throws(
+    () =>
+      assertSafeProblemEdit(data, contest, {
+        ...contest,
+        problemCode: "Gym 381A",
+      }),
+    /original Codeforces ID/,
+  );
+  assert.doesNotThrow(() =>
+    assertSafeProblemEdit(data, contest, {
+      ...contest,
+      problemCode: "CF381A",
+      title: "Updated contest title",
+    }),
+  );
 });

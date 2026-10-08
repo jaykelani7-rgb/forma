@@ -1,5 +1,18 @@
 import type { Problem } from "./model";
-import { normalizeCodeforcesIdentity } from "./codeforces-identity";
+import {
+  canonicalProblemIdentity,
+  normalizeCodeforcesIdentity,
+} from "./codeforces-identity";
+
+export type TrackSourceKind = "docx" | "pdf-text" | "ocr" | "paste" | "manual";
+export interface TrackEntrySource {
+  kind: TrackSourceKind;
+  page?: number;
+  location: string;
+  text: string;
+  confidence?: number;
+  reviewReasons?: string[];
+}
 
 export interface TrackContext {
   trackId: string;
@@ -15,6 +28,7 @@ export interface Track {
   sourceFingerprint: string;
   createdAt: string;
   stageIds: string[];
+  sourceNotes?: string;
 }
 export interface TrackStage {
   id: string;
@@ -23,6 +37,7 @@ export interface TrackStage {
   description: string;
   suggestedTime: string;
   entryIds: string[];
+  sourceNotes?: string;
 }
 export interface TrackEntry {
   id: string;
@@ -35,6 +50,7 @@ export interface TrackEntry {
   code: string;
   rating: number | null;
   pattern: string;
+  source?: TrackEntrySource;
 }
 export interface TrackImportEntry {
   id: string;
@@ -43,6 +59,10 @@ export interface TrackImportEntry {
   code: string;
   rating: number | null;
   pattern: string;
+  source?: TrackEntrySource;
+  /** Only an explicit exclusion removes a detected candidate from saved membership. */
+  excluded?: boolean;
+  reviewed?: boolean;
 }
 export interface TrackImportStage {
   id: string;
@@ -50,6 +70,7 @@ export interface TrackImportStage {
   description: string;
   suggestedTime: string;
   entries: TrackImportEntry[];
+  sourceNotes?: string;
 }
 export interface TrackImportDraft {
   id: string;
@@ -57,6 +78,7 @@ export interface TrackImportDraft {
   sourceName: string;
   sourceFingerprint: string;
   stages: TrackImportStage[];
+  sourceNotes?: string;
 }
 
 const record = (value: unknown): value is Record<string, unknown> =>
@@ -83,6 +105,52 @@ const fail = (): never => {
     "Track records have invalid fields, duplicate IDs, or broken stage/problem relationships.",
   );
 };
+
+export function validateTrackEntrySource(
+  value: unknown,
+): TrackEntrySource | undefined {
+  if (value === undefined) return undefined;
+  if (
+    !record(value) ||
+    !["docx", "pdf-text", "ocr", "paste", "manual"].includes(
+      value.kind as string,
+    ) ||
+    !text(value.location, 500, 1) ||
+    !text(value.text, 10000) ||
+    !(
+      value.page === undefined ||
+      (Number.isInteger(value.page) &&
+        Number(value.page) >= 1 &&
+        Number(value.page) <= 10000)
+    ) ||
+    !(
+      value.confidence === undefined ||
+      (typeof value.confidence === "number" &&
+        Number.isFinite(value.confidence) &&
+        value.confidence >= 0 &&
+        value.confidence <= 100)
+    ) ||
+    !(
+      value.reviewReasons === undefined ||
+      (Array.isArray(value.reviewReasons) &&
+        value.reviewReasons.length <= 20 &&
+        value.reviewReasons.every((reason) => text(reason, 500, 1)))
+    )
+  )
+    return fail();
+  return {
+    kind: value.kind as TrackSourceKind,
+    location: value.location,
+    text: value.text,
+    ...(value.page !== undefined ? { page: value.page as number } : {}),
+    ...(value.confidence !== undefined
+      ? { confidence: value.confidence as number }
+      : {}),
+    ...(value.reviewReasons !== undefined
+      ? { reviewReasons: [...value.reviewReasons] as string[] }
+      : {}),
+  };
+}
 
 // A historical snapshot deliberately remains valid after a track is removed.
 export function validateTrackContext(value: unknown): TrackContext | undefined {
@@ -135,7 +203,7 @@ export function validateTracks(
       !text(value.sourceFingerprint, 200, 1) ||
       !stamp(value.createdAt) ||
       !ids(value.stageIds, 2000) ||
-      !value.stageIds.length
+      !(value.sourceNotes === undefined || text(value.sourceNotes, 5000))
     )
       return fail();
     return {
@@ -145,6 +213,9 @@ export function validateTracks(
       sourceFingerprint: value.sourceFingerprint,
       createdAt: new Date(value.createdAt).toISOString(),
       stageIds: [...value.stageIds],
+      ...(value.sourceNotes !== undefined
+        ? { sourceNotes: value.sourceNotes as string }
+        : {}),
     };
   });
   const trackStages: TrackStage[] = rawStages.map((value) => {
@@ -155,7 +226,8 @@ export function validateTracks(
       !text(value.title, 240, 1) ||
       !text(value.description, 5000) ||
       !text(value.suggestedTime, 240) ||
-      !ids(value.entryIds, 10000)
+      !ids(value.entryIds, 10000) ||
+      !(value.sourceNotes === undefined || text(value.sourceNotes, 5000))
     )
       return fail();
     return {
@@ -165,6 +237,9 @@ export function validateTracks(
       description: value.description,
       suggestedTime: value.suggestedTime,
       entryIds: [...value.entryIds],
+      ...(value.sourceNotes !== undefined
+        ? { sourceNotes: value.sourceNotes as string }
+        : {}),
     };
   });
   const problemMap = new Map(problems.map((problem) => [problem.id, problem]));
@@ -189,22 +264,12 @@ export function validateTracks(
       code: value.code,
     });
     const problem = problemMap.get(value.problemId)!;
-    const normalizedProblem = normalizeCodeforcesIdentity({
-      url: problem.url,
-      code:
-        problem.platform.toLowerCase() === "codeforces"
-          ? problem.problemCode
-          : "",
-    });
-    const problemKey = problem.cfKey ?? normalizedProblem?.key;
+    const problemKey = canonicalProblemIdentity(problem);
     if (
       !identity ||
       identity.url !== value.url ||
       identity.code !== value.code ||
-      identity.key !== problemKey ||
-      (!!problem.cfKey &&
-        !!normalizedProblem &&
-        problem.cfKey !== normalizedProblem.key)
+      identity.key !== problemKey
     )
       return fail();
     return {
@@ -217,6 +282,9 @@ export function validateTracks(
       code: value.code,
       rating: value.rating as number | null,
       pattern: value.pattern,
+      ...(value.source !== undefined
+        ? { source: validateTrackEntrySource(value.source) }
+        : {}),
     };
   });
   const trackMap = new Map(tracks.map((value) => [value.id, value]));

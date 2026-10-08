@@ -9,16 +9,24 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test tests/*.test.ts",
-    "test:browser": "playwright test"
+    "test:browser": "playwright test",
+    "prepare:imports": "node scripts/prepare-import-assets.mjs",
+    "postinstall": "npm run prepare:imports",
+    "prebuild": "npm run prepare:imports",
+    "predev": "npm run prepare:imports"
   },
   "dependencies": {
     "@supabase/supabase-js": "2.117.2",
+    "@tesseract.js-data/eng": "1.0.0",
     "fast-xml-parser": "5.11.2",
     "fflate": "0.8.3",
     "lucide-react": "^0.468.0",
     "next": "^16.1.0",
+    "pdfjs-dist": "6.4.299",
     "react": "^19.2.0",
-    "react-dom": "^19.2.0"
+    "react-dom": "^19.2.0",
+    "tesseract.js": "7.0.0",
+    "tesseract.js-core": "7.0.0"
   },
   "devDependencies": {
     "@electric-sql/pglite": "0.5.8",

@@ -62,6 +62,31 @@ const simple = () =>
         ]),
       ]),
   );
+
+test("DOCX uncertain rows retain their exact extracted source and table location for correction", async () => {
+  const draft = await parse(
+    sheet(
+      paragraph("A source notebook") +
+        stage("Foundation") +
+        table([
+          row([
+            text("1"),
+            text("38IA — Ambiguous indexing problem"),
+            text(""),
+            text("Watch boundaries"),
+          ]),
+        ]),
+    ),
+  );
+  const entry = draft.stages[0].entries[0];
+  assert.equal(entry.code, "");
+  assert.equal(entry.url, "");
+  assert.equal(entry.source?.kind, "docx");
+  assert.match(entry.source!.location, /table row 2/);
+  assert.match(entry.source!.text, /38IA — Ambiguous indexing problem/);
+  assert.match(entry.source!.text, /Watch boundaries/);
+  assert.equal(entry.source!.reviewReasons!.length, 1);
+});
 function directory(bytes: Uint8Array) {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   for (let offset = bytes.length - 22; offset >= 0; offset--) {
