@@ -17,6 +17,7 @@ import {
   Plus,
   ShieldCheck,
   Layers3,
+  Timer,
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { BRAND } from "@/lib/model";
@@ -28,6 +29,7 @@ const navigation = [
   { href: "/", label: "Today", icon: CalendarDays },
   { href: "/problems", label: "Problems", icon: BookOpen },
   { href: "/tracks", label: "Tracks", icon: Layers3 },
+  { href: "/contests", label: "Contest Lab", icon: Timer },
   { href: "/revisit", label: "Revisit", icon: RotateCcw },
   { href: "/activity", label: "Activity", icon: Activity },
   { href: "/progress", label: "Progress", icon: BarChart3 },
@@ -51,11 +53,13 @@ export function BrandMark({ small = false }: { small?: boolean }) {
 }
 export function Shell({ children }: { children: ReactNode }) {
   const path = usePathname();
-  const activePath = path.startsWith("/tracks/")
-    ? "/tracks"
-    : path.startsWith("/problems/")
-      ? "/problems"
-      : path;
+  const activePath = path.startsWith("/contests/")
+    ? "/contests"
+    : path.startsWith("/tracks/")
+      ? "/tracks"
+      : path.startsWith("/problems/")
+        ? "/problems"
+        : path;
   const {
     data,
     ready,
@@ -167,6 +171,13 @@ export function Shell({ children }: { children: ReactNode }) {
                 <span>{BRAND.toLowerCase()}.</span>
               </Link>
               <div>
+                <Link
+                  href="/contests"
+                  className="icon-button"
+                  aria-label="Contest Lab"
+                >
+                  <Timer size={19} />
+                </Link>
                 <button
                   className="icon-button"
                   onClick={() =>
@@ -257,17 +268,19 @@ export function Shell({ children }: { children: ReactNode }) {
               </span>
             </footer>
             <nav className="mobile-nav" aria-label="Mobile navigation">
-              {navigation.map(({ href, label, icon: Icon }) => (
-                <Link
-                  key={href}
-                  href={href}
-                  className={activePath === href ? "active" : ""}
-                  aria-current={activePath === href ? "page" : undefined}
-                >
-                  <Icon size={20} />
-                  <span>{label}</span>
-                </Link>
-              ))}
+              {navigation
+                .filter((item) => item.href !== "/contests")
+                .map(({ href, label, icon: Icon }) => (
+                  <Link
+                    key={href}
+                    href={href}
+                    className={activePath === href ? "active" : ""}
+                    aria-current={activePath === href ? "page" : undefined}
+                  >
+                    <Icon size={20} />
+                    <span>{label}</span>
+                  </Link>
+                ))}
             </nav>
           </>
         )}

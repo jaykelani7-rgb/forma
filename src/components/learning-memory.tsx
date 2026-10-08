@@ -22,6 +22,7 @@ import {
 import type { LearningRecord } from "@/lib/learning";
 import { trackContextForEntry } from "@/lib/tracks";
 import { normalizeCodeforcesIdentity } from "@/lib/codeforces-identity";
+import { practiceIdentity } from "@/lib/practice-state";
 import { sharedPracticeState } from "@/lib/practice-state";
 import {
   learningEvidenceProfile,
@@ -47,7 +48,7 @@ function returnDestination(from?: string) {
     const url = new URL(from, "https://forma.local");
     if (
       url.origin !== "https://forma.local" ||
-      !/^\/(today|problems|activity|revisit|progress|tracks)(?:\/[^?#]*)?$/.test(
+      !/^\/(today|problems|activity|revisit|progress|tracks|contests)(?:\/[^?#]*)?$/.test(
         url.pathname,
       )
     )
@@ -316,6 +317,21 @@ export function LearningMemory({
       ? { handle: problem.cfHandle }
       : undefined;
   const memory = problemMemory(data, problem.id, memoryScope);
+  const contestMemory = (data.contests ?? [])
+    .filter(
+      (c) =>
+        !c.handle ||
+        c.handle.toLowerCase() ===
+          (memoryScope?.handle === undefined
+            ? data.codeforces.connectedHandle
+            : memoryScope.handle
+          )?.toLowerCase(),
+    )
+    .flatMap((c) =>
+      c.problems
+        .filter((p) => p.identity === practiceIdentity(problem) && !!c.endedAt)
+        .map((p) => ({ c, p })),
+    );
   const timedSources = new Map(data.attempts.map((item) => [item.id, item]));
   const importedSources = new Map(
     data.codeforces.practiceAttempts.map((item) => [item.id, item]),
@@ -646,6 +662,13 @@ export function LearningMemory({
       <div className={styles.grid}>
         <section className={styles.card} aria-labelledby="memory-evidence">
           <h2 id="memory-evidence">What your records show</h2>
+          {!!contestMemory.length && (
+            <p className={styles.meta}>
+              This summary covers timed practice, imported reflections, and
+              written recall. Original contest reflections appear separately
+              below.
+            </p>
+          )}
           <dl className={styles.evidence}>
             <div>
               <dt>Platform acceptance</dt>
@@ -772,6 +795,44 @@ export function LearningMemory({
           {error}
         </p>
       )}
+      {contestMemory.map(({ c, p }) => (
+        <section className={styles.card} key={p.id}>
+          <h2>Contest reflection · {c.name}</h2>
+          <p className={styles.meta}>
+            Original contest record. Whole-contest time does not measure this
+            problem’s working time.
+          </p>
+          <p>
+            {p.reflection
+              ? OUTCOMES[p.reflection.outcome]
+              : "No contest reflection saved yet."}
+          </p>
+          {p.reflection?.takeaway && (
+            <p className={styles.quote}>{p.reflection.takeaway}</p>
+          )}
+          {p.reflection?.approach && (
+            <p className={styles.quote}>{p.reflection.approach}</p>
+          )}
+          {p.reflection?.mistakeNote && (
+            <p className={styles.quote}>{p.reflection.mistakeNote}</p>
+          )}
+          {p.reflection?.mistakes?.length ? (
+            <ul className={styles.list}>
+              {p.reflection.mistakes.map((k) => (
+                <li key={k}>{MISTAKES[k]}</li>
+              ))}
+            </ul>
+          ) : null}
+          <Link className="text-link" href={`/contests/${c.id}`}>
+            Review contest and evidence
+          </Link>
+          {p.upsolve?.completionId && (
+            <p className={styles.meta}>
+              Later upsolve has its own timed record below.
+            </p>
+          )}
+        </section>
+      ))}
       <section className={styles.card} aria-labelledby="memory-history">
         <h2 id="memory-history">Your learning history</h2>
         <p className={styles.meta}>

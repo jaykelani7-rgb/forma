@@ -1,3 +1,5 @@
+import { activeContest, eligibleUpsolves, editContest } from "./contest-lab";
+import { practiceIdentity } from "./practice-state";
 import type { Data, Problem, Session } from "./model";
 import type { TrackContext } from "./tracks-types";
 import { normalizeCodeforcesIdentity } from "./codeforces-identity";
@@ -12,9 +14,14 @@ export function withPracticeSession(
   id: string,
   fresh = false,
   context?: TrackContext,
+  upsolveRowId?: string,
 ): Data {
   if (!Number.isInteger(duration) || duration < 1 || duration > 180)
     throw new Error("Choose an attempt timebox from 1 to 180 minutes.");
+  if (activeContest(data))
+    throw new Error(
+      "Finish or abandon your active contest before starting timed practice.",
+    );
   if (data.session) throw new Error("A session is already open.");
   const saved = data.problems.find((value) => value.id === problem.id);
   if (!saved && !fresh)
@@ -65,9 +72,29 @@ export function withPracticeSession(
     phase: "focus",
     ...(context ? { trackContext: context } : {}),
   };
-  return {
+  let next: Data = {
     ...data,
     problems: saved ? data.problems : [...data.problems, problem],
     session,
   };
+  const queued = eligibleUpsolves(data, new Date(now)).find(
+    (v) =>
+      (!upsolveRowId || v.row.id === upsolveRowId) &&
+      v.row.identity ===
+        practiceIdentity(problem),
+  );
+  if (upsolveRowId && !queued)
+    throw new Error(
+      "This upsolve is not eligible today. Check its coding date and practice exclusions.",
+    );
+  if (queued)
+    next = editContest(next, queued.contest.id, (c) => ({
+      ...c,
+      problems: c.problems.map((p) =>
+        p.id === queued.row.id
+          ? { ...p, upsolve: { ...p.upsolve!, sessionId: id } }
+          : p,
+      ),
+    }));
+  return next;
 }

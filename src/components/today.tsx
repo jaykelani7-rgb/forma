@@ -448,6 +448,18 @@ export function Today() {
 
   return (
     <div className="today-page page-enter">
+      {data.contests?.some((c) => c.state === "active") && (
+        <section className="settings-card">
+          <h2>Your contest is in progress</h2>
+          <p>Finish or abandon it before starting another timed session.</p>
+          <Link
+            className="button primary"
+            href={`/contests/${data.contests.find((c) => c.state === "active")!.id}`}
+          >
+            Resume contest
+          </Link>
+        </section>
+      )}
       <header
         className={`today-header ${data.problems.length ? "returning" : ""}`}
       >
