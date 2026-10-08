@@ -1,0 +1,78 @@
+.insights {
+  margin-top: 2rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--line);
+}
+.heading h2 {
+  font-size: 1.25rem;
+  line-height: 1.4;
+}
+.heading p {
+  margin: 0.5rem 0 1.25rem;
+}
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  align-items: start;
+}
+.card {
+  padding: 1.1rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  min-width: 0;
+}
+.card h3 {
+  font-size: 1rem;
+  line-height: 1.45;
+  margin-bottom: 0.6rem;
+}
+.scope,
+.recordMeta,
+.note {
+  font-size: 0.82rem;
+  color: var(--muted);
+  line-height: 1.6;
+}
+.scope {
+  margin: 0.6rem 0;
+}
+.card details {
+  border-top: 1px solid var(--line);
+  margin: 0.8rem 0;
+  padding-top: 0.8rem;
+}
+.card summary {
+  cursor: pointer;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.card summary span {
+  color: var(--muted);
+}
+.card ul {
+  list-style: none;
+  padding: 0;
+  margin: 0.75rem 0;
+}
+.card li {
+  margin: 0.8rem 0;
+  overflow-wrap: anywhere;
+}
+.card a {
+  overflow-wrap: anywhere;
+  text-align: left;
+  justify-content: flex-start;
+}
+.recordMeta {
+  display: block;
+  margin-top: 0.25rem;
+}
+.note {
+  margin: 1rem 0 0;
+}
+@media (max-width: 700px) {
+  .grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

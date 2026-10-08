@@ -13,7 +13,9 @@ import {
 import { useWorkspace } from "./provider";
 import { CodeforcesProgress } from "./codeforces";
 import { LearningSummary } from "./learning-summary";
+import { LearningInsights } from "./learning-insights";
 import { EmptyState, PageHeader, SectionHeading } from "./ui";
+import styles from "./progress.module.css";
 
 export function Progress() {
   const { data } = useWorkspace();
@@ -37,8 +39,11 @@ export function Progress() {
     const end = addDays(date, 7);
     return {
       date,
-      count: data.attempts.filter(
-        (a) => new Date(a.completedAt) >= date && new Date(a.completedAt) < end,
+      count: stats.history.filter(
+        (a) =>
+          a.timedAttemptId &&
+          new Date(a.completedAt) >= date &&
+          new Date(a.completedAt) < end,
       ).length,
     };
   });
@@ -51,7 +56,7 @@ export function Progress() {
   const maxTopic = Math.max(1, ...topics.map((t) => t.count));
   const minutes = stats.measuredMinutes;
   return (
-    <div className="page-enter">
+    <div className={`page-enter ${styles.page}`}>
       <PageHeader
         eyebrow="EVIDENCE, NOT EXPECTATIONS"
         title="See what’s taking shape."
@@ -68,7 +73,12 @@ export function Progress() {
           </select>
         </label>
       )}
-      <LearningSummary handle={handle} />
+      <LearningSummary
+        handle={handle}
+        renderInsights={(from, to) => (
+          <LearningInsights data={data} handle={handle} from={from} to={to} />
+        )}
+      />
       {!stats.practiceAttempts ? (
         <EmptyState
           icon={<TrendingUp size={30} strokeWidth={1.4} />}

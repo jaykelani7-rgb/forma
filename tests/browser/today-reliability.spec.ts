@@ -227,6 +227,7 @@ test("fresh problem creation and session start wait for one atomic transaction",
 }) => {
   await seed(page, notebook(false));
   await page.goto("/");
+  await openDiscovery(page);
   const start = page.getByRole("button", {
     name: "Start fresh practice",
     exact: true,
@@ -236,9 +237,10 @@ test("fresh problem creation and session start wait for one atomic transaction",
   await start.click({ clickCount: 2 });
   await expect.poll(() => writes(page)).toBe(1);
   await expect(page).toHaveURL("/");
+  await expect(start).toBeDisabled();
   await expect(
-    page.getByRole("button", { name: "Continue session", exact: true }),
-  ).toBeDisabled();
+    page.getByRole("link", { name: "Continue session", exact: true }),
+  ).toHaveCount(0);
   await release(page);
   await expect(page).toHaveURL("/session");
   const stored = await durable(page);
@@ -253,6 +255,7 @@ test("a failed fresh transaction cannot create a durable dangling session", asyn
 }) => {
   await seed(page, notebook(false));
   await page.goto("/");
+  await openDiscovery(page);
   const start = page.getByRole("button", {
     name: "Start fresh practice",
     exact: true,
@@ -403,6 +406,7 @@ test("future saved work stays out of the primary recommendation on a narrow scre
   await seed(page, data);
   await page.setViewportSize({ width: 320, height: 780 });
   await page.goto("/");
+  await openDiscovery(page);
   await expect(
     page.getByRole("button", { name: "Start fresh practice", exact: true }),
   ).toBeEnabled();
@@ -428,6 +432,6 @@ test("future saved work stays out of the primary recommendation on a narrow scre
     page.getByRole("button", { name: "Start fresh practice", exact: true }),
   ).toBeVisible();
   await expect(
-    page.getByRole("link", { name: "Choose from my problems", exact: true }),
+    page.getByRole("link", { name: "Choose my own problem", exact: true }),
   ).toBeVisible();
 });

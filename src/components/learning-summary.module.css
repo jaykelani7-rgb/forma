@@ -18,7 +18,19 @@
   line-height: 1.25;
 }
 .heading label {
-  min-width: 10rem;
+  min-width: 0;
+  width: min(100%, 10rem);
+}
+.summary .dates {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.dates label {
+  min-width: 0;
+}
+.dates input {
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
 }
 .metrics {
   display: grid;
@@ -54,6 +66,9 @@
   overflow-wrap: anywhere;
 }
 @media (max-width: 600px) {
+  .summary .dates {
+    grid-template-columns: minmax(0, 1fr);
+  }
   .heading label {
     width: 100%;
   }

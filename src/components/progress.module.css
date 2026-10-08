@@ -1,0 +1,20 @@
+.page :global(.week-label) {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: center;
+}
+.page :global(.win-list strong),
+.page :global(.cf-metrics span) {
+  overflow-wrap: anywhere;
+}
+@media (max-width: 600px) {
+  .page :global(.cf-metrics) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .page :global(.cf-metrics > div) {
+    min-width: 0;
+    border-left: 0;
+    padding-left: 0;
+  }
+}

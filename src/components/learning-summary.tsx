@@ -4,10 +4,17 @@ import Link from "next/link";
 import { addDays, localDate, weekStart } from "@/lib/model";
 import { memoryPeriod } from "@/lib/memory";
 import { MISTAKES } from "@/lib/memory-types";
+import { learningEvidenceHref } from "@/lib/learning-insights";
 import { useWorkspace } from "./provider";
 import styles from "./learning-summary.module.css";
 
-export function LearningSummary({ handle }: { handle: string }) {
+export function LearningSummary({
+  handle,
+  renderInsights,
+}: {
+  handle: string;
+  renderInsights?: (from: string, to: string) => React.ReactNode;
+}) {
   const { data } = useWorkspace();
   const [period, setPeriod] = useState("this");
   const [from, setFrom] = useState(localDate(weekStart()));
@@ -45,7 +52,7 @@ export function LearningSummary({ handle }: { handle: string }) {
         </label>
       </div>
       {period === "custom" && (
-        <div className="form-row">
+        <div className={`form-row ${styles.dates}`}>
           <label>
             From
             <input
@@ -116,7 +123,12 @@ export function LearningSummary({ handle }: { handle: string }) {
                         <li key={attempt.id}>
                           <Link
                             className="text-link"
-                            href={`/problems/${encodeURIComponent(problem.id)}?from=%2Fprogress`}
+                            href={learningEvidenceHref(
+                              problem.id,
+                              "practice",
+                              attempt.id,
+                              attempt.handle,
+                            )}
                           >
                             {problem.title}
                           </Link>
@@ -155,7 +167,12 @@ export function LearningSummary({ handle }: { handle: string }) {
                           <li key={revision.id}>
                             <Link
                               className="text-link"
-                              href={`/problems/${encodeURIComponent(revision.problemId)}?from=%2Fprogress`}
+                              href={learningEvidenceHref(
+                                revision.problemId,
+                                "revision",
+                                revision.id,
+                                revision.handle,
+                              )}
                             >
                               {problem?.title ?? "Problem"}
                             </Link>
@@ -198,6 +215,7 @@ export function LearningSummary({ handle }: { handle: string }) {
                 )}
               </div>
             </div>
+            {renderInsights?.(from, to)}
           </>
         )
       )}

@@ -1,6 +1,6 @@
 # Forma
 
-A daily competitive-programming notebook with a clean light appearance and black-and-ivory **Ink**. Use Track Studio to upload a DOCX, PDF or image, paste Codeforces links/IDs, or build a manual track. Practice in Forma or on Codeforces, and use Learning Memory to revisit recorded approaches, mistakes and takeaways. Timed re-solves and written recall share a manageable revisit list. Comfortable and Large text preferences apply across the app and work alongside browser zoom.
+A daily competitive-programming notebook with a clean light appearance and black-and-ivory **Ink**. My Practice Plan keeps a small, explainable plan on Today from your availability, saved schedules and active track. Use Track Studio to upload a DOCX, PDF or image, paste Codeforces links/IDs, or build a manual track. Practice in Forma or on Codeforces, and use Learning Memory to revisit recorded approaches, mistakes and takeaways. Timed re-solves and written recall share a manageable revisit list. Comfortable and Large text preferences apply across the app and work alongside browser zoom.
 
 ## Run locally
 
@@ -23,25 +23,33 @@ Local mode needs no account or environment variables. Optional account setup is 
 ## Daily workflow
 
 1. Add a problem, create a track in Track Studio from a document/image, pasted Codeforces links/IDs or a manual plan, or connect a public Codeforces handle in Settings and import activity.
-2. Today gives an active session priority, then an appropriate due revisit, then unfinished work from your active track. Fresh alternatives and discovery filters remain available below it. Choose 15, 30, or 60 minutes; these intentions do not predict solving time.
+2. Choose **Today I have…** or keep your usual optional budget. Today saves a small plan with an unfinished session first, due coding/written recall, then eligible track work. Explanations link to evidence. Edit a timebox, deliberately replace/skip/defer a suggestion, or choose a problem manually. Allocations do not predict solving time; fresh alternatives stay below the main plan.
 3. Pause, hide the timer, and write notes. A saved session survives navigation and reload.
 4. Finish with an outcome, an optional difficulty, and a takeaway. Imported attempts support quick reflections without invented solving time.
-5. Complete, reschedule, or intentionally practice a revisit. Skip today's recommendation or archive a problem without deleting its history.
-6. Open Learning Memory from Problems, Tracks, Activity or Revisit. Optional mistake details stay collapsed in reflections. Explain an invariant or recall complexity and edge cases without counting the check as a new solve or timed session; Progress shows evidence from your selected period.
+5. Saved activity updates the plan; an unfinished attempt counts as participation with its actual outcome. End today's plan without creating a learning result, or explicitly continue with an optional extra. The full revision backlog remains available. Archives, skips and deferrals preserve history.
+6. Open Learning Memory from Problems, Tracks, Activity or Revisit. Optional mistake details stay collapsed in reflections. Explain an invariant or recall complexity and edge cases without counting the check as a new solve or timed session; Progress adds dated observations about explicitly recorded mistakes, later independent attempts, limited topic coverage and recall evidence, with supporting counts and history links.
 
 Demo, personal, and each verified account use separate workspaces. Demo exploration and restoration cannot replace personal records. The first-use state stays welcoming; returning users see a compact Today view with the next action higher on the page.
 
-| Route                   | Purpose                                                                                     |
-| ----------------------- | ------------------------------------------------------------------------------------------- |
-| `/` or `/today`         | Stable daily reflection batch, due revisit, fresh discovery, practice rhythm                |
-| `/problems`             | Collection, editing, sourced histories, explicit attempt links                              |
-| `/problems/[problemId]` | Learning Memory, original source records, editable reflections and revision checks          |
-| `/tracks`               | Track Studio upload/paste/manual preview, active track, stages and shared learning progress |
-| `/session`              | Persistent timer, notes, reflection                                                         |
-| `/revisit`              | Recommended batch, full queue, completion, rescheduling, undo                               |
-| `/progress`             | Shared learning outcomes, difficulties, topics, breakthroughs, measured time                |
-| `/activity`             | Handle-scoped submissions, grouped attempts, reflections, older history                     |
-| `/settings`             | Codeforces, optional account, preferences, appearance, backups, installation, reminders     |
+| Route                   | Purpose                                                                                        |
+| ----------------------- | ---------------------------------------------------------------------------------------------- |
+| `/` or `/today`         | Saved My Practice Plan, availability, explainable next action, optional discovery and rhythm   |
+| `/problems`             | Collection, editing, sourced histories, explicit attempt links                                 |
+| `/problems/[problemId]` | Learning Memory, original source records, editable reflections and revision checks             |
+| `/tracks`               | Track Studio upload/paste/manual preview, active track, stages and shared learning progress    |
+| `/session`              | Persistent timer, notes, reflection                                                            |
+| `/revisit`              | Recommended batch, full queue, completion, rescheduling, undo                                  |
+| `/progress`             | Shared learning outcomes, dated evidence-based observations, topics and measured time          |
+| `/activity`             | Handle-scoped submissions, grouped attempts, reflections, older history                        |
+| `/settings`             | Practice Plan preferences, Codeforces/account, appearance, backups, installation and reminders |
+
+## My Practice Plan
+
+Optional preferences cover your usual 5–180 minute budget, preferred practice days, active track, target date and room for track work versus due revision. Today's availability override keeps the usual preference unchanged. A target date supplies context and no readiness promise. Saved selections survive reload, use at most three pending activities and avoid selecting coding and recall for the same identity by default. Coding and recall keep independent due dates; the full backlog remains accessible.
+
+Pending choices are revalidated when actual practice, schedules, memberships or workspace revisions change. A stale item keeps a visible explanation. Saved attempts, quick reflections and written recall supply completion evidence; planning controls never fabricate a solve or learning result. Failed writes keep drafts recoverable and Today uses the last durable records for completion until retry succeeds. A calm fifteen-minute return offer is based on recorded practice history, with no penalty for missed days.
+
+See [docs/practice-plan.md](docs/practice-plan.md) for selection priorities and stable ties, honest time allocation, lifecycle and extras, overnight sessions, timezone/profile boundaries, recovery, Progress observations and limitations.
 
 ## Practice sheets and Tracks
 
@@ -108,6 +116,8 @@ Next.js App Router, React, strict TypeScript, Tailwind CSS, Lucide icons, and se
 - `src/lib/memory*.ts`, `practice-state.ts` and `workspace-proposal.ts`: scoped learning evidence, written revision, shared scheduling and pre-exposure validation.
 - `src/lib/document-import.ts`, `docx-import.ts`, `track-studio.ts`, `tracks*.ts` and `public/track-document*`: bounded local extraction/OCR, editable previews, track membership/progress and daily priorities.
 - `src/lib/catalogue.ts` and `discovery.ts`: catalogue and transparent selection rules.
+- `src/lib/practice-plan*.ts`: optional preferences, deterministic shared planning, saved selections and atomic planned session starts.
+- `src/lib/learning-insights.ts`: transparent observations, supporting records and profile-scoped history links.
 - `src/lib/cloud-*.ts` and `supabase/migrations`: optional verified account transport and durable storage.
 - `src/lib/reminders.ts`, manifest, and `public/sw.js`: daily access and safe offline behavior.
 
@@ -123,4 +133,6 @@ npm run test:browser
 
 The browser suite starts the production server on port 3002 and uses isolated fixtures, leaving the normal personal workspace untouched. CI runs these checks on pushes and pull requests.
 
-Latest local verification, **8 October 2026**: **221 unit/integration tests passed; 166 desktop/mobile browser tests passed; two hosted-account browser tests skipped** because disposable test credentials are absent. Lint, strict TypeScript and the Webpack production build passed. Real local OCR covered selectable, scanned, mixed and heading-overlay PDFs, forced OCR, PNG and JPEG. The existing 100-problem DOCX kept its five ordered stages. Upload/review/correction/save/practice, manual and pasted tracks, retained failed saves, retries, cancellation, worker cleanup, document errors and reload persistence were exercised. Track edits preserve original practice, reflections, written recall and source evidence, including separate Gym identities and unrelated profile history. Both themes, Large text, keyboard dialogs, reduced motion, long titles and narrow/200% reflow were checked, with inspected screenshots. Actual migration SQL was exercised in local PostgreSQL; these fixtures do not establish hosted account behavior. See [docs/track-studio.md](docs/track-studio.md) for formats, limits, English OCR and asset requirements, workflow details and screenshots. [docs/learning-memory.md](docs/learning-memory.md), [docs/tracks-and-readability.md](docs/tracks-and-readability.md), [docs/reliability-pass.md](docs/reliability-pass.md) and [docs/verification.md](docs/verification.md) preserve earlier verification.
+Latest My Practice Plan verification, **8 October 2026**: **274 unit/integration tests and 200 distinct desktop/mobile browser checks passed; two hosted-account checks skipped** for absent disposable credentials. The browser result combines the full regression run and a focused rerun of two corrected retry-button test selectors against the same final production build. Lint, strict TypeScript and the Webpack production build passed. Availability, real timed/recall completion, reload, Memory/Progress evidence, overnight sessions, cross-tab changes, failed saves and retries were exercised. Light and Ink desktop/mobile screenshots were inspected with Large text, keyboard focus, long titles, reduced motion and narrow/200% reflow. See [docs/practice-plan.md](docs/practice-plan.md) for exact checks, screenshots, selection/lifecycle rules and limitations. Hosted account/device operation is not established by local fixtures. No deployment was performed.
+
+Prior Track Studio verification, **8 October 2026**: **221 unit/integration tests passed; 166 desktop/mobile browser tests passed; two hosted-account browser tests skipped** because disposable test credentials are absent. Lint, strict TypeScript and the Webpack production build passed. Real local OCR covered selectable, scanned, mixed and heading-overlay PDFs, forced OCR, PNG and JPEG. The existing 100-problem DOCX kept its five ordered stages. Upload/review/correction/save/practice, manual and pasted tracks, retained failed saves, retries, cancellation, worker cleanup, document errors and reload persistence were exercised. Track edits preserve original practice, reflections, written recall and source evidence, including separate Gym identities and unrelated profile history. Both themes, Large text, keyboard dialogs, reduced motion, long titles and narrow/200% reflow were checked, with inspected screenshots. Actual migration SQL was exercised in local PostgreSQL; these fixtures do not establish hosted account behavior. See [docs/track-studio.md](docs/track-studio.md) for formats, limits, English OCR and asset requirements, workflow details and screenshots. [docs/learning-memory.md](docs/learning-memory.md), [docs/tracks-and-readability.md](docs/tracks-and-readability.md), [docs/reliability-pass.md](docs/reliability-pass.md) and [docs/verification.md](docs/verification.md) preserve earlier verification.

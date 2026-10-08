@@ -29,7 +29,6 @@ import {
   nextReview,
   localDate,
   addDays,
-  uid,
 } from "@/lib/model";
 import { useWorkspace, pauseSession } from "./provider";
 import { BrandMark, FocusBack } from "./shell";
@@ -214,7 +213,7 @@ export function FocusedSession() {
         problem.cfHandle ? { handle: problem.cfHandle } : undefined,
       ).history.some((a) => a.outcome === "independent");
     const attempt: Attempt = {
-      id: attemptIdentity.current ?? (attemptIdentity.current = uid()),
+      id: attemptIdentity.current ?? (attemptIdentity.current = session.id),
       problemId: problem.id,
       startedAt: session.startedAt,
       completedAt: new Date().toISOString(),
@@ -347,6 +346,25 @@ export function FocusedSession() {
           ...d,
           session: { ...(d.session ?? session), phase: "focus" },
           attempts: d.attempts.filter((a) => a.id !== attemptIdentity.current),
+          ...(d.practicePlans
+            ? {
+                practicePlans: d.practicePlans.map((plan) => ({
+                  ...plan,
+                  items: plan.items.map((item) => {
+                    if (
+                      item.completion?.type !== "attempt" ||
+                      item.completion.recordId !== attemptIdentity.current
+                    )
+                      return item;
+                    // Returning from an uncommitted reflection removes its
+                    // tentative attempt and the derived completion together.
+                    const pendingItem = { ...item, status: "pending" as const };
+                    delete pendingItem.completion;
+                    return pendingItem;
+                  }),
+                })),
+              }
+            : {}),
           problems:
             hadTentativeAttempt && closingDraft
               ? d.problems.map((p) =>
