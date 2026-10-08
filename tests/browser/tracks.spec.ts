@@ -672,9 +672,13 @@ test("Tracks is readable and keyboard accessible in both themes and large text",
   await page.goto("/settings");
   await page.getByRole("button", { name: "Ink", exact: true }).click();
   await page.getByRole("button", { name: "Large", exact: true }).click();
+  await expect
+    .poll(async () => (await durable(page)).settings.textSize)
+    .toBe("large");
   await page.goto("/tracks/browser-track/stages/browser-foundation");
   await page.reload();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await expect(page.locator("html")).toHaveAttribute("data-text-size", "large");
   expect(
     await page
       .getByRole("button", {

@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 import { useMemo, useRef, useState } from "react";
 import {
   ArrowDown,
@@ -202,6 +203,12 @@ export function Problems() {
                         {problem.rating !== null && (
                           <span className="mono">{problem.rating}</span>
                         )}
+                        <Link
+                          className="text-link"
+                          href={`/problems/${encodeURIComponent(problem.id)}?from=%2Fproblems`}
+                        >
+                          Learning Memory
+                        </Link>
                       </div>
                     </td>
                     <td>

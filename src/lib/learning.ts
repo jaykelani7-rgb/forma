@@ -4,6 +4,9 @@ import type {
   QuickReflection,
 } from "./codeforces-types";
 import type { Attempt, Data, Difficulty, Outcome, Problem } from "./model";
+import type { ReflectionMemory } from "./memory-types";
+import type { TrackContext } from "./tracks-types";
+import { practiceIdentity } from "./practice-state";
 
 export interface LearningLink {
   timedAttemptId: string;
@@ -15,7 +18,7 @@ export interface LearningLink {
 
 // A practice event can have several recorded sources. Linking is explicit and
 // affects learning credit only; measured time and original reflections survive.
-export interface LearningRecord {
+export interface LearningRecord extends ReflectionMemory {
   id: string;
   source: "timed" | "codeforces" | "linked";
   problemId: string;
@@ -35,6 +38,7 @@ export interface LearningRecord {
   accepted: boolean | null;
   reflectionPending: boolean;
   reflectionSource: "timed" | "codeforces" | null;
+  trackContext?: TrackContext;
 }
 
 export interface LearningScope {
@@ -48,17 +52,8 @@ export interface LearningScope {
 const lower = (value: string) => value.toLowerCase();
 
 export function codeforcesProblemKey(problem: Problem): string | null {
-  if (problem.cfKey) return problem.cfKey;
-  try {
-    const url = new URL(problem.url);
-    if (!/^(www\.)?codeforces\.com$/.test(url.hostname)) return null;
-    const match = url.pathname.match(
-      /^\/(?:problemset\/problem\/|(?:contest|gym)\/)(\d+)\/(?:problem\/)?([A-Za-z0-9]+)\/?$/,
-    );
-    return match ? `contest:${match[1]}:${match[2].toUpperCase()}` : null;
-  } catch {
-    return null;
-  }
+  const key = practiceIdentity(problem);
+  return key.startsWith("problem:") ? null : key;
 }
 
 function learningKey(problem: Problem, handle: string | null): string {
@@ -319,6 +314,16 @@ export function learningHistory(
       accepted: activity ? accepted(activity) : null,
       reflectionPending: false,
       reflectionSource: activity ? link!.reflectionSource : "timed",
+      ...(reflection.mistakes !== undefined
+        ? { mistakes: [...reflection.mistakes] }
+        : {}),
+      ...(reflection.mistakeNote !== undefined
+        ? { mistakeNote: reflection.mistakeNote }
+        : {}),
+      ...(reflection.approach !== undefined
+        ? { approach: reflection.approach }
+        : {}),
+      ...(attempt.trackContext ? { trackContext: attempt.trackContext } : {}),
     });
   }
   for (const attempt of imported.values()) {
@@ -346,6 +351,15 @@ export function learningHistory(
       accepted: accepted(attempt),
       reflectionPending: !reflection,
       reflectionSource: reflection ? "codeforces" : null,
+      ...(reflection?.mistakes !== undefined
+        ? { mistakes: [...reflection.mistakes] }
+        : {}),
+      ...(reflection?.mistakeNote !== undefined
+        ? { mistakeNote: reflection.mistakeNote }
+        : {}),
+      ...(reflection?.approach !== undefined
+        ? { approach: reflection.approach }
+        : {}),
     });
   }
   const handle = Object.hasOwn(scope, "handle")

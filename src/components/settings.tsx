@@ -23,6 +23,7 @@ import {
 } from "@/lib/concurrency";
 import { recoveriesFor, Recovery } from "@/lib/storage";
 import { DailyAccessSettings } from "./install";
+import { RecallDefaults } from "./recall-defaults";
 
 export function Settings() {
   const {
@@ -418,6 +419,7 @@ export function Settings() {
       </section>
       <CodeforcesConnection />
       <RevisitDefaults key={JSON.stringify(data.settings.reviewDays)} />
+      <RecallDefaults key={JSON.stringify(data.settings.recallDays)} />
       <section className="settings-section">
         <div className="settings-section-heading">
           <span className="mono">05</span>

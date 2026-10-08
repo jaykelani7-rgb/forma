@@ -1,6 +1,8 @@
 "use client";
 import { useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { revisitItems } from "@/lib/practice-state";
 import {
   ArrowRight,
   ArrowUpRight,
@@ -19,7 +21,6 @@ import {
   breakthroughs,
   localDate,
   reviewLabel,
-  reviewQueue,
   shortDate,
   visibleProblems,
   weekActivity,
@@ -192,7 +193,8 @@ export function Today() {
     )
       ? `/tracks/${encodeURIComponent(trackContext.trackId)}/stages/${encodeURIComponent(trackContext.stageId)}`
       : null;
-  const upcoming = reviewQueue(data).slice(0, 3);
+  const upcoming = revisitItems(data).slice(0, 3);
+  const router = useRouter();
   const breakthrough = breakthroughs(data)[0];
   const now = new Date();
   async function start(problem: Problem) {
@@ -202,9 +204,16 @@ export function Today() {
     setBusy(true);
     setActionError("");
     try {
+      const isRecommendation = recommended?.problem.id === problem.id;
       const saved = await (
-        recommended?.fresh ? startFreshSession : startSession
-      )(problem, duration, recommended?.trackContext);
+        isRecommendation && recommended?.fresh
+          ? startFreshSession
+          : startSession
+      )(
+        problem,
+        duration,
+        isRecommendation ? recommended?.trackContext : undefined,
+      );
       if (isCurrent() && !saved)
         setActionError(
           "The session could not be saved. Review the storage message and recovery copies in Settings before trying again.",
@@ -451,6 +460,14 @@ export function Today() {
                       <ArrowRight size={17} />
                     </Link>
                   )
+                ) : recommended?.activity ? (
+                  <Link
+                    className="button primary"
+                    href={`/problems/${encodeURIComponent(recommended.problem.id)}?from=%2F&revision=${recommended.activity}`}
+                  >
+                    Start recall check
+                    <ArrowRight size={17} />
+                  </Link>
                 ) : recommended ? (
                   <button
                     className="button primary"
@@ -562,32 +579,45 @@ export function Today() {
             />
             {upcoming.length ? (
               <div className="upcoming-list">
-                {upcoming.map((problem, index) => (
-                  <button
-                    className="upcoming-row"
-                    key={problem.id}
-                    onClick={() => void start(problem)}
-                    disabled={busy || storagePending || !!active}
-                  >
-                    <span className="upcoming-index mono">0{index + 1}</span>
-                    <div className="upcoming-problem">
-                      <strong>{problem.title}</strong>
-                      <span>
-                        {problem.platform}
-                        {problem.problemCode
-                          ? ` · #${problem.problemCode}`
-                          : ""}
-                      </span>
-                    </div>
-                    <span
-                      className={`review-time ${problem.reviewAt! <= localDate() ? "ready" : ""}`}
+                {upcoming.map(
+                  (
+                    { problem, codingAt, recallAt, recallActivity, dueAt },
+                    index,
+                  ) => (
+                    <button
+                      className="upcoming-row"
+                      key={problem.id}
+                      onClick={() =>
+                        recallAt && (!codingAt || recallAt < codingAt)
+                          ? router.push(
+                              `/problems/${encodeURIComponent(problem.id)}?from=%2F&revision=${recallActivity}`,
+                            )
+                          : void start(problem)
+                      }
+                      disabled={busy || storagePending || !!active}
                     >
-                      <span className="status-dot" />
-                      {reviewLabel(problem.reviewAt!)}
-                    </span>
-                    <ArrowUpRight size={17} />
-                  </button>
-                ))}
+                      <span className="upcoming-index mono">0{index + 1}</span>
+                      <div className="upcoming-problem">
+                        <strong>{problem.title}</strong>
+                        <span>
+                          {recallAt && (!codingAt || recallAt < codingAt)
+                            ? "Written recall"
+                            : problem.platform}
+                          {problem.problemCode
+                            ? ` · #${problem.problemCode}`
+                            : ""}
+                        </span>
+                      </div>
+                      <span
+                        className={`review-time ${dueAt! <= localDate() ? "ready" : ""}`}
+                      >
+                        <span className="status-dot" />
+                        {reviewLabel(dueAt!)}
+                      </span>
+                      <ArrowUpRight size={17} />
+                    </button>
+                  ),
+                )}
               </div>
             ) : (
               <div className="quiet-empty">

@@ -1,5 +1,6 @@
 "use client";
 import { useRef, useState } from "react";
+import Link from "next/link";
 import { Check, CalendarDays } from "lucide-react";
 import {
   DIFFICULTIES,
@@ -9,7 +10,11 @@ import {
   localDate,
 } from "@/lib/model";
 import { ImportedAttempt } from "@/lib/codeforces-types";
-import { preservesManualReview } from "@/lib/reflection-scheduling";
+import {
+  attemptAfterReviewCompletion,
+  preservesManualReview,
+} from "@/lib/reflection-scheduling";
+import { sharedPracticeState } from "@/lib/practice-state";
 import {
   latestSubmission,
   proposedReview,
@@ -21,6 +26,8 @@ import {
 } from "@/lib/codeforces";
 import { useWorkspace } from "./provider";
 import { Modal } from "./ui";
+import type { ReflectionMemory } from "@/lib/memory-types";
+import { ReflectionMemoryFields } from "./reflection-memory-fields";
 
 export const QUICK_OUTCOMES: Record<Outcome, string> = {
   independent: "Solved independently",
@@ -35,10 +42,22 @@ export function QuickReflectionDialog({
   attempt: ImportedAttempt;
   onClose: () => void;
 }) {
-  const { data, update, notify, guardWorkspace } = useWorkspace();
+  const { data, update, retryLocalSave, storageError, notify, guardWorkspace } =
+    useWorkspace();
   const problem = data.problems.find((p) => p.id === attempt.problemId)!;
   const previous = reflectionFor(data, attempt.id);
-  const keepManualSchedule = preservesManualReview(problem, attempt);
+  const linked = data.learningLinks?.find(
+    (link) => link.importedAttemptId === attempt.id,
+  );
+  const codingProblem =
+    sharedPracticeState(data, problem, new Date(), { handle: attempt.handle })
+      .codingProblem ?? problem;
+  const keepCompletedSchedule = !attemptAfterReviewCompletion(
+    codingProblem,
+    attempt,
+  );
+  const keepManualSchedule =
+    preservesManualReview(codingProblem, attempt) || keepCompletedSchedule;
   const [outcome, setOutcome] = useState<Outcome | null>(
     previous?.outcome ?? null,
   );
@@ -46,9 +65,20 @@ export function QuickReflectionDialog({
     previous?.difficulty ?? null,
   );
   const [takeaway, setTakeaway] = useState(previous?.takeaway ?? "");
+  const [memory, setMemory] = useState<ReflectionMemory>(() => ({
+    ...(previous?.mistakes !== undefined
+      ? { mistakes: previous.mistakes }
+      : {}),
+    ...(previous?.approach !== undefined
+      ? { approach: previous.approach }
+      : {}),
+    ...(previous?.mistakeNote !== undefined
+      ? { mistakeNote: previous.mistakeNote }
+      : {}),
+  }));
   const [date, setDate] = useState<string | null>(
-    keepManualSchedule || problem.reviewAttemptId === attempt.id
-      ? problem.reviewAt
+    keepManualSchedule || codingProblem.reviewAttemptId === attempt.id
+      ? codingProblem.reviewAt
       : previous
         ? proposedReview(data, problem, previous.outcome)
         : null,
@@ -67,12 +97,15 @@ export function QuickReflectionDialog({
   }
   async function save(event: React.FormEvent) {
     event.preventDefault();
+    await commit(event.currentTarget as HTMLFormElement);
+  }
+  async function commit(form: HTMLFormElement, retry = false) {
     if (saving.current) return;
     if (!outcome) {
       setError("Choose the reflection that fits this attempt.");
       return;
     }
-    const submitted = new FormData(event.currentTarget as HTMLFormElement);
+    const submitted = new FormData(form);
     const chosen =
       date === null ? null : String(submitted.get("reviewDate") ?? date);
     if (
@@ -88,11 +121,12 @@ export function QuickReflectionDialog({
     setPending("save");
     setError("");
     try {
-      const saved = await update((d) =>
+      const saved = await (retry ? retryLocalSave : update)((d) =>
         saveQuickReflection(d, attempt.id, {
           outcome,
           difficulty,
           takeaway,
+          ...memory,
           reviewAt: chosen,
           overrideSchedule: override || chosen !== date,
         }),
@@ -105,11 +139,13 @@ export function QuickReflectionDialog({
         return;
       }
       notify(
-        relevant
-          ? chosen
-            ? "Reflection saved. Your suggested revisit is in the queue."
-            : "Reflection saved. No new revisit needed."
-          : "Reflection saved. The newer attempt keeps its revisit date.",
+        relevant && keepManualSchedule && !override && chosen === date
+          ? "Reflection saved. Your existing coding revisit choice is kept."
+          : relevant
+            ? chosen
+              ? "Reflection saved. Your suggested revisit is in the queue."
+              : "Reflection saved. No new revisit needed."
+            : "Reflection saved. The newer attempt keeps its revisit date.",
       );
       onClose();
     } catch (failure) {
@@ -177,6 +213,20 @@ export function QuickReflectionDialog({
             Codeforces records the verdict. You tell the story of how you got
             there.
           </p>
+          {linked?.reflectionSource === "timed" && (
+            <p className="small muted">
+              This activity is linked to a timed attempt. Your imported
+              reflection is kept separately; the timed reflection supplies the
+              shared learning evidence. You can choose the reflection source in{" "}
+              <Link
+                className="text-link"
+                href={`/problems/${encodeURIComponent(problem.id)}?from=${encodeURIComponent("/activity")}`}
+              >
+                Learning Memory
+              </Link>
+              .
+            </p>
+          )}
           <fieldset>
             <legend>How did you solve it?</legend>
             <div className="outcome-options">
@@ -198,13 +248,16 @@ export function QuickReflectionDialog({
               ))}
             </div>
           </fieldset>
-          <details className="quick-optional" open={!!previous?.difficulty}>
-            <summary>
-              Where did you get stuck?{" "}
-              <span className="optional">optional</span>
-            </summary>
+          <ReflectionMemoryFields
+            className="quick-optional"
+            value={memory}
+            onChange={setMemory}
+            disabled={pending !== null}
+          >
             <fieldset className="difficulty-options">
-              <legend className="sr-only">Where did you get stuck?</legend>
+              <legend>
+                Broad difficulty <span className="optional">optional</span>
+              </legend>
               <div>
                 {Object.entries(DIFFICULTIES).map(([key, label]) => (
                   <button
@@ -224,7 +277,7 @@ export function QuickReflectionDialog({
                 ))}
               </div>
             </fieldset>
-          </details>
+          </ReflectionMemoryFields>
           <label>
             One thing to remember <span className="optional">optional</span>
             <input
@@ -234,6 +287,9 @@ export function QuickReflectionDialog({
               maxLength={300}
               placeholder="Next time, I’ll…"
             />
+            <span className="small muted">
+              What would you notice sooner next time?
+            </span>
           </label>
           {outcome && relevant && (
             <div className="schedule-preview">
@@ -244,7 +300,9 @@ export function QuickReflectionDialog({
               {keepManualSchedule && !override && (
                 <p className="small muted">
                   {date === null
-                    ? "Keeping your choice of no revisit."
+                    ? keepCompletedSchedule
+                      ? "Keeping your completed coding revisit."
+                      : "Keeping your choice of no revisit."
                     : "Keeping the revisit date you chose."}{" "}
                   Change it here only if you want to.
                 </p>
@@ -337,6 +395,19 @@ export function QuickReflectionDialog({
                 ? "Cancel"
                 : "Skip for now"}
           </button>
+          {storageError && (
+            <button
+              type="button"
+              className="button secondary"
+              disabled={pending !== null}
+              onClick={(event) => {
+                const form = event.currentTarget.form;
+                if (form?.reportValidity()) void commit(form, true);
+              }}
+            >
+              Retry saving reflection
+            </button>
+          )}
           <button
             type="submit"
             className="button primary"

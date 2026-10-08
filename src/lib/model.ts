@@ -30,6 +30,20 @@ import {
   validateTrackContext,
   validateTracks,
 } from "./tracks-types";
+import {
+  type ReflectionMemory,
+  type RevisionRecord,
+  type RecallDays,
+  DEFAULT_RECALL_DAYS,
+  validateReflectionMemory,
+  validateRevisions,
+  validateRecallDays,
+} from "./memory-types";
+import {
+  resolvedCodingQueue,
+  resolvedPracticeProblems,
+  sharedPracticeState,
+} from "./practice-state";
 // Rename the product here; navigation, exports, and metadata use this value.
 export const BRAND = "Forma";
 export const OUTCOMES = {
@@ -66,12 +80,14 @@ export interface Problem {
   reviewManual?: boolean;
   reviewAttemptId?: string;
   reviewCompletedAt?: string;
+  reviewUpdatedAt?: string;
+  revisionCue?: string;
   // Absent fields in older notebooks mean eligible for automatic practice.
   archived?: boolean;
   deferredUntil?: string | null;
   skippedOn?: string | null;
 }
-export interface Attempt {
+export interface Attempt extends ReflectionMemory {
   id: string;
   problemId: string;
   startedAt: string;
@@ -103,6 +119,7 @@ export interface Settings {
   reviewDays: ReviewDays;
   reminder?: ReminderPreferences;
   textSize?: "comfortable" | "large";
+  recallDays?: RecallDays;
 }
 export interface Data {
   schemaVersion: 2;
@@ -117,6 +134,7 @@ export interface Data {
   trackStages?: TrackStage[];
   trackEntries?: TrackEntry[];
   activeTrackId?: string | null;
+  revisions?: RevisionRecord[];
 }
 export const emptyData = (): Data => ({
   schemaVersion: 2,
@@ -130,6 +148,7 @@ export const emptyData = (): Data => ({
   trackStages: [],
   trackEntries: [],
   activeTrackId: null,
+  revisions: [],
   settings: {
     displayName: "",
     weeklyGoal: 4,
@@ -138,6 +157,7 @@ export const emptyData = (): Data => ({
     reviewDays: { ...DEFAULT_REVIEW_DAYS },
     reminder: defaultReminder(),
     textSize: "comfortable",
+    recallDays: { ...DEFAULT_RECALL_DAYS },
   },
 });
 export const uid = () => crypto.randomUUID();
@@ -214,10 +234,8 @@ export function latestReflection(
       }
     : undefined;
 }
-export function reviewQueue(data: Data): Problem[] {
-  return visibleProblems(data)
-    .filter((p) => !p.archived && p.reviewAt !== null)
-    .sort((a, b) => a.reviewAt!.localeCompare(b.reviewAt!));
+export function reviewQueue(data: Data, now = new Date()): Problem[] {
+  return resolvedCodingQueue(data, now);
 }
 export function automaticPracticeEligible(
   problem: Problem,
@@ -258,6 +276,7 @@ export function completeRevisit(
       reviewAt: null,
       reviewManual: true,
       reviewCompletedAt: now.toISOString(),
+      reviewUpdatedAt: now.toISOString(),
     };
   });
 }
@@ -265,12 +284,14 @@ export function rescheduleProblem(
   data: Data,
   problemId: string,
   day: string,
+  now = new Date(),
 ): Data {
   if (!date(day)) throw new Error("Choose a valid revisit date.");
   return changeProblem(data, problemId, (problem) => ({
     ...problem,
     reviewAt: day,
     reviewManual: true,
+    reviewUpdatedAt: now.toISOString(),
   }));
 }
 export function skipRecommendation(
@@ -370,8 +391,8 @@ export function suggestion(
   focusFallback: boolean;
   revisit: boolean;
 } | null {
-  const available = visibleProblems(data)
-    .filter((p) => automaticPracticeEligible(p, now))
+  const available = resolvedPracticeProblems(data, now)
+    .filter((p) => sharedPracticeState(data, p, now).eligible)
     .filter(
       (p) =>
         !p.cfHandle ||
@@ -801,6 +822,10 @@ export function validateData(input: unknown): Data {
       return fail("A problem has invalid automatic-practice preferences.");
     if (!(p.reviewCompletedAt === undefined || iso(p.reviewCompletedAt)))
       return fail("A problem has an invalid revisit completion timestamp.");
+    if (!(p.reviewUpdatedAt === undefined || iso(p.reviewUpdatedAt)))
+      return fail("A problem has an invalid revisit decision timestamp.");
+    if (!(p.revisionCue === undefined || str(p.revisionCue, 2000)))
+      return fail("A revision cue must be no longer than 2,000 characters.");
     if (input.schemaVersion === 2 && typeof p.cfHandle === "string") {
       const key = `${p.cfHandle.toLowerCase()}:${p.cfKey}`;
       if (platformIds.has(key))
@@ -836,6 +861,7 @@ export function validateData(input: unknown): Data {
       );
     attemptIds.add(a.id);
     validateTrackContext(a.trackContext);
+    validateReflectionMemory(a);
   }
   const s = input.settings;
   if (
@@ -855,6 +881,7 @@ export function validateData(input: unknown): Data {
   )
     return fail("The text size preference in this file is invalid.");
   const days = input.schemaVersion === 1 ? DEFAULT_REVIEW_DAYS : s.reviewDays;
+  const recallDays = validateRecallDays(s.recallDays);
   if (
     !record(days) ||
     !["unsolved", "editorial", "hint"].every(
@@ -914,6 +941,10 @@ export function validateData(input: unknown): Data {
     ...(p.reviewCompletedAt !== undefined
       ? { reviewCompletedAt: new Date(p.reviewCompletedAt).toISOString() }
       : {}),
+    ...(p.reviewUpdatedAt !== undefined
+      ? { reviewUpdatedAt: new Date(p.reviewUpdatedAt).toISOString() }
+      : {}),
+    ...(p.revisionCue !== undefined ? { revisionCue: p.revisionCue } : {}),
   }));
   const codeforces =
     input.schemaVersion === 1
@@ -929,6 +960,7 @@ export function validateData(input: unknown): Data {
     difficulty: a.difficulty,
     takeaway: a.takeaway,
     notes: a.notes,
+    ...validateReflectionMemory(a),
     ...(a.trackContext !== undefined
       ? { trackContext: validateTrackContext(a.trackContext) }
       : {}),
@@ -938,6 +970,11 @@ export function validateData(input: unknown): Data {
     codeforces,
     problems,
     attempts,
+    revisions: validateRevisions(
+      input.revisions,
+      problems,
+      codeforces.profiles.map((profile) => profile.handle),
+    ),
     ...validateTracks(input, problems),
     learningLinks: validateLearningLinks(
       input.learningLinks,
@@ -958,6 +995,7 @@ export function validateData(input: unknown): Data {
       },
       reminder: validateReminder(s.reminder),
       textSize: s.textSize ?? "comfortable",
+      recallDays,
     } as Settings,
     session:
       session === null

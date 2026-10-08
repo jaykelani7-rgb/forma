@@ -1,4 +1,5 @@
-import { automaticPracticeEligible, localDate, validateData } from "./model";
+import { localDate, validateData } from "./model";
+import { sharedPracticeState } from "./practice-state";
 import type { Data, Problem } from "./model";
 import { learningHistory } from "./learning";
 import type { LearningRecord } from "./learning";
@@ -380,16 +381,11 @@ export function trackProblem(
   now = new Date(),
 ): { problem: Problem; fresh: boolean } {
   const candidates = matchingProblems(data, entry);
-  const due = candidates
-    .filter(
-      (problem) =>
-        problem.reviewAt &&
-        problem.reviewAt <= localDate(now) &&
-        automaticPracticeEligible(problem, now),
-    )
-    .sort((a, b) => a.reviewAt!.localeCompare(b.reviewAt!))[0];
+  const decision =
+    candidates[0] &&
+    sharedPracticeState(data, candidates[0], now).codingProblem;
   const problem =
-    due ??
+    decision ??
     candidates.find((value) => value.id === entry.problemId) ??
     candidates.find((value) => !value.cfHandle) ??
     candidates[0];
@@ -428,11 +424,9 @@ export function trackEntryProgress(
   const key = entryKey(entry);
   const history = progressIndex(data).history.get(key) ?? [];
   const latest = history.find((record) => record.outcome !== null);
-  const reviewAt =
-    matchingProblems(data, entry)
-      .filter((problem) => !problem.archived && problem.reviewAt)
-      .map((problem) => problem.reviewAt!)
-      .sort()[0] ?? null;
+  const anchor = matchingProblems(data, entry)[0];
+  const state = anchor && sharedPracticeState(data, anchor, now);
+  const reviewAt = state && !state.archived ? state.codingAt : null;
   return {
     attempted: history.length > 0,
     notStarted: history.length === 0,
@@ -531,7 +525,7 @@ export function nextTrackEntry(
       progress: trackEntryProgress(data, entry, now),
       ...trackProblem(data, entry, now),
     }))
-    .filter(({ problem }) => automaticPracticeEligible(problem, now));
+    .filter(({ problem }) => sharedPracticeState(data, problem, now).eligible);
   const due = candidates
     .filter(({ progress }) => progress.revisitDue)
     .sort((a, b) =>
