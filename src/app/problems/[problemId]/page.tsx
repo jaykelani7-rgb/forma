@@ -8,6 +8,7 @@ export default async function ProblemMemoryPage({
   searchParams: Promise<{
     from?: string | string[];
     revision?: string | string[];
+    profile?: string | string[];
   }>;
 }) {
   const { problemId: segment } = await params;
@@ -20,11 +21,14 @@ export default async function ProblemMemoryPage({
   const query = await searchParams;
   return (
     <LearningMemory
-      key={`${problemId}:${query.revision ?? ""}`}
+      key={`${problemId}:${query.revision ?? ""}:${query.profile ?? "default"}`}
       problemId={problemId}
       from={typeof query.from === "string" ? query.from : undefined}
       initialRevision={
         typeof query.revision === "string" ? query.revision : undefined
+      }
+      profile={
+        Array.isArray(query.profile) ? query.profile.join(",") : query.profile
       }
     />
   );

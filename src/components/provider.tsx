@@ -14,7 +14,6 @@ import { validateWorkspaceProposal } from "@/lib/workspace-proposal";
 import { Check, X } from "lucide-react";
 import {
   Data,
-  Duration,
   Problem,
   Session,
   Theme,
@@ -58,6 +57,12 @@ import {
   nextDailyCheckDelay,
 } from "@/lib/daily-workspace";
 import { withPracticeSession } from "@/lib/practice-session";
+import {
+  currentPracticePlan,
+  reconcilePracticePlan,
+  resolvePlanProblem,
+} from "@/lib/practice-plan";
+import { withPlannedPracticeSession } from "@/lib/practice-plan-session";
 import type { TrackContext } from "@/lib/tracks-types";
 import {
   operationIsCurrent,
@@ -77,6 +82,7 @@ import {
 
 interface Workspace {
   data: Data;
+  savedData: Data;
   ready: boolean;
   mode: Mode;
   theme: Theme;
@@ -91,14 +97,15 @@ interface Workspace {
   notify: (message: string) => void;
   startSession: (
     problem: Problem,
-    duration?: Duration,
+    duration?: number,
     context?: TrackContext,
   ) => Promise<boolean>;
   startFreshSession: (
     problem: Problem,
-    duration?: Duration,
+    duration?: number,
     context?: TrackContext,
   ) => Promise<boolean>;
+  startPlanSession: (itemId: string) => Promise<boolean>;
   guardWorkspace: () => () => boolean;
   localDay: string;
   replaceData: (data: Data) => Promise<boolean>;
@@ -189,7 +196,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   async function reconcileCurrentDay(now = new Date()) {
     setLocalDay(localDate(now));
     if (!current.current.ready || persistBlocked.current) return;
-    const next = reconcileWorkspaceDay(current.current.data, now);
+    const next = reconcilePracticePlan(
+      reconcileWorkspaceDay(current.current.data, now),
+      now,
+    );
     if (next !== current.current.data) await persist(next);
   }
   function invalidateCloud() {
@@ -204,6 +214,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   }
   function persist(proposed: Data, replace = false, baseline?: Data) {
     proposed = validateWorkspaceProposal(proposed);
+    const planned = reconcilePracticePlan(proposed);
+    if (planned !== proposed) proposed = validateWorkspaceProposal(planned);
     const isCurrent = guardWorkspace();
     editVersion.current++;
     const base = record.current;
@@ -435,6 +447,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   function update(fn: (data: Data) => Data) {
     return persist(fn(current.current.data));
   }
+  useEffect(() => {
+    if (!bundle.ready || storagePending || persistBlocked.current) return;
+    // Recheck compatible cross-tab merges once their transaction has settled.
+    void reconcileCurrentDay();
+    // Live refs keep this check within the active workspace and save queue.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bundle.data, bundle.ready, storagePending]);
   function setTheme(value: Theme) {
     setThemeState(value);
     try {
@@ -822,7 +841,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   }, []);
   async function startPractice(
     problem: Problem,
-    duration = current.current.data.settings.defaultDuration,
+    duration: number = current.current.data.settings.defaultDuration,
     fresh = false,
     context?: TrackContext,
   ) {
@@ -871,17 +890,66 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   }
   async function startSession(
     problem: Problem,
-    duration?: Duration,
+    duration?: number,
     context?: TrackContext,
   ) {
     return startPractice(problem, duration, false, context);
   }
   async function startFreshSession(
     problem: Problem,
-    duration?: Duration,
+    duration?: number,
     context?: TrackContext,
   ) {
     return startPractice(problem, duration, true, context);
+  }
+  async function startPlanSession(itemId: string) {
+    if (practiceLock.current || !current.current.ready) return false;
+    const isCurrent = guardWorkspace();
+    practiceLock.current = true;
+    try {
+      await queue.current;
+      if (!isCurrent() || persistBlocked.current) return false;
+      const now = new Date();
+      const data = reconcilePracticePlan(current.current.data, now);
+      const plan = currentPracticePlan(data, now);
+      const item = plan?.items.find(
+        (value) => value.id === itemId && value.status === "pending",
+      );
+      if (!item || item.activity !== "coding")
+        throw new Error(
+          "This planned activity changed. Return to Today and choose the current activity.",
+        );
+      const choice = resolvePlanProblem(data, item);
+      if (!choice)
+        throw new Error(
+          "This problem is no longer available in your plan. Return to Today to choose another.",
+        );
+      if (data.session) {
+        if (data.session.problemId !== choice.problem.id)
+          throw new Error(
+            "A session is already open. Resume or finish it before starting another.",
+          );
+        router.push("/session");
+        return true;
+      }
+      const id = uid();
+      const saved = await update((latest) =>
+        withPlannedPracticeSession(latest, itemId, now.getTime(), id),
+      );
+      if (!saved || !isCurrent()) return false;
+      router.push("/session");
+      return true;
+    } catch (error) {
+      if (isCurrent())
+        notify(
+          error instanceof Error
+            ? error.message
+            : "Practice could not start. Your plan remains available for recovery in Settings.",
+        );
+      return false;
+    } finally {
+      practiceLock.current = false;
+    }
   }
   async function replaceData(data: Data) {
     operationVersion.current++;
@@ -1110,6 +1178,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     <Context.Provider
       value={{
         ...bundle,
+        savedData: record.current?.data ?? emptyData(),
         theme,
         resolvedTheme,
         storageError,
@@ -1129,6 +1198,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         notify,
         startSession,
         startFreshSession,
+        startPlanSession,
         guardWorkspace,
         localDay,
         replaceData,

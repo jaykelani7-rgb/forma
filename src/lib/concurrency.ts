@@ -34,6 +34,39 @@ function identity(v: unknown): string | null {
   if (typeof v.key === "string") return v.key;
   return null;
 }
+// Two tabs may create the same deterministic day plan before either has a
+// baseline. Equivalent automatic selections adopt the earlier saved snapshot;
+// different choices still use the existing explicit conflict/recovery flow.
+function equivalentInitialPlans(
+  a: Record<string, unknown>,
+  b: Record<string, unknown>,
+): boolean {
+  const initial = (value: Record<string, unknown>) => {
+    if (
+      !Array.isArray(value.items) ||
+      !value.items.every(
+        (item) =>
+          object(item) &&
+          item.status === "pending" &&
+          !item.deliberate &&
+          item.decisionAt === undefined,
+      )
+    )
+      return null;
+    const out = { ...value };
+    delete out.createdAt;
+    delete out.updatedAt;
+    out.items = value.items.map((item) => {
+      const clean = { ...(item as Record<string, unknown>) };
+      delete clean.selectedAt;
+      return clean;
+    });
+    return out;
+  };
+  const left = initial(a),
+    right = initial(b);
+  return left !== null && right !== null && equal(left, right);
+}
 export interface MergeResult {
   data: Data;
   conflicts: string[];
@@ -47,6 +80,21 @@ export function mergeWorkspaces(
 ): MergeResult {
   const conflicts: string[] = [];
   function merge(b: unknown, l: unknown, r: unknown, path: string): unknown {
+    if (
+      path === "workspace.practicePlans" &&
+      b === undefined &&
+      Array.isArray(l) &&
+      Array.isArray(r)
+    )
+      b = [];
+    if (
+      b === undefined &&
+      /^workspace\.practicePlans\[[^\]]+\]$/.test(path) &&
+      object(l) &&
+      object(r) &&
+      equivalentInitialPlans(l, r)
+    )
+      return String(l.createdAt) < String(r.createdAt) ? l : r;
     if (equal(l, b)) return r;
     if (equal(r, b) || equal(l, r)) return l;
     if (object(b) && object(l) && object(r)) {

@@ -23,6 +23,10 @@ import type { LearningRecord } from "@/lib/learning";
 import { trackContextForEntry } from "@/lib/tracks";
 import { normalizeCodeforcesIdentity } from "@/lib/codeforces-identity";
 import { sharedPracticeState } from "@/lib/practice-state";
+import {
+  learningEvidenceProfile,
+  memoryRecordAnchor,
+} from "@/lib/learning-insights";
 import { verdictLabel } from "@/lib/codeforces";
 import { useWorkspace } from "./provider";
 import { EmptyState, Modal, PageHeader, ProblemLink } from "./ui";
@@ -249,10 +253,12 @@ export function LearningMemory({
   problemId,
   from,
   initialRevision,
+  profile,
 }: {
   problemId: string;
   from?: string;
   initialRevision?: string;
+  profile?: string;
 }) {
   const { data, update, retryLocalSave, guardWorkspace, notify, startSession } =
     useWorkspace();
@@ -271,7 +277,8 @@ export function LearningMemory({
   const [timedEditing, setTimedEditing] = useState<Attempt | null>(null);
   const [importedEditing, setImportedEditing] = useState<string | null>(null);
   const [revision, setRevision] = useState<RevisionRecord["activity"] | null>(
-    initialRevision === "explain" || initialRevision === "complexity"
+    profile === undefined &&
+      (initialRevision === "explain" || initialRevision === "complexity")
       ? initialRevision
       : null,
   );
@@ -299,11 +306,16 @@ export function LearningMemory({
         />
       </div>
     );
-  const memory = problemMemory(
-    data,
-    problem.id,
-    problem.cfHandle ? { handle: problem.cfHandle } : undefined,
-  );
+  const profileView = profile !== undefined;
+  const evidenceProfile = profileView
+    ? learningEvidenceProfile(data, profile)
+    : null;
+  const memoryScope = evidenceProfile?.valid
+    ? { handle: evidenceProfile.handle }
+    : problem.cfHandle
+      ? { handle: problem.cfHandle }
+      : undefined;
+  const memory = problemMemory(data, problem.id, memoryScope);
   const timedSources = new Map(data.attempts.map((item) => [item.id, item]));
   const importedSources = new Map(
     data.codeforces.practiceAttempts.map((item) => [item.id, item]),
@@ -343,17 +355,12 @@ export function LearningMemory({
     ? (trackContextForEntry(data, sourceContext.id) ?? undefined)
     : undefined;
   const accepted = memory.history.some((record) => record.accepted === true);
-  const practice = sharedPracticeState(
-    data,
-    problem,
-    new Date(),
-    problem.cfHandle ? { handle: problem.cfHandle } : undefined,
-  );
+  const practice = sharedPracticeState(data, problem, new Date(), memoryScope);
   const importedAttempt = importedEditing
     ? importedSources.get(importedEditing)
     : undefined;
   async function resolveAgain(selected: Problem) {
-    if (practiceLock.current) return;
+    if (profileView || practiceLock.current) return;
     const isCurrent = guardWorkspace();
     practiceLock.current = true;
     setStartPending(true);
@@ -374,6 +381,7 @@ export function LearningMemory({
     source: "timed" | "codeforces",
   ) {
     if (
+      profileView ||
       sourceLock.current ||
       !record.timedAttemptId ||
       !record.importedAttemptId
@@ -472,6 +480,7 @@ export function LearningMemory({
             {timed.takeaway && <p className={styles.quote}>{timed.takeaway}</p>}
             <button
               className="button secondary"
+              disabled={profileView}
               onClick={() => setTimedEditing(timed)}
             >
               Edit timed source
@@ -537,6 +546,7 @@ export function LearningMemory({
             </Link>
             <button
               className="button secondary"
+              disabled={profileView}
               onClick={() => setImportedEditing(imported.id)}
             >
               Edit imported source
@@ -556,7 +566,7 @@ export function LearningMemory({
             <div className={styles.actions}>
               <button
                 className="button secondary"
-                disabled={sourcePending}
+                disabled={profileView || sourcePending}
                 aria-pressed={record.reflectionSource === "timed"}
                 onClick={() => void selectReflectionSource(record, "timed")}
               >
@@ -564,7 +574,7 @@ export function LearningMemory({
               </button>
               <button
                 className="button secondary"
-                disabled={sourcePending || !importedReflection}
+                disabled={profileView || sourcePending || !importedReflection}
                 aria-pressed={record.reflectionSource === "codeforces"}
                 onClick={() =>
                   void selectReflectionSource(record, "codeforces")
@@ -608,6 +618,13 @@ export function LearningMemory({
         <p className={styles.notice}>
           You are viewing the archived {problem.cfHandle} profile explicitly.
           Its imported history is kept separate from your current profile.
+        </p>
+      )}
+      {profileView && (
+        <p className={styles.notice}>
+          {evidenceProfile?.valid
+            ? `Read-only evidence for ${evidenceProfile.handle ?? "personal practice"}. The connected profile is unchanged.`
+            : "The requested learning profile is not saved in this workspace. Showing this problem’s usual history in a read-only view."}
         </p>
       )}
       {memberships.length > 0 && (
@@ -723,19 +740,21 @@ export function LearningMemory({
           <div className={styles.actions}>
             <button
               className="button"
-              disabled={startPending}
+              disabled={profileView || startPending}
               onClick={() => void resolveAgain(problem)}
             >
               {startPending ? "Starting…" : "Re-solve the problem"}
             </button>
             <button
               className="button secondary"
+              disabled={profileView}
               onClick={() => setRevision("explain")}
             >
               Explain the approach or invariant
             </button>
             <button
               className="button secondary"
+              disabled={profileView}
               onClick={() => setRevision("complexity")}
             >
               Recall complexity and edge cases
@@ -774,7 +793,11 @@ export function LearningMemory({
                   a.id.localeCompare(b.id),
               )
               .map((event) => (
-                <li className={styles.event} key={`${event.type}:${event.id}`}>
+                <li
+                  className={styles.event}
+                  key={`${event.type}:${event.id}`}
+                  id={memoryRecordAnchor(event.type, event.record.id)}
+                >
                   {event.type === "practice" ? (
                     <>
                       <div className={styles.eventHeader}>
@@ -867,6 +890,7 @@ export function LearningMemory({
                       <div className={styles.actions}>
                         <button
                           className="button secondary"
+                          disabled={profileView}
                           onClick={() => {
                             if (
                               event.record.reflectionSource === "codeforces" ||

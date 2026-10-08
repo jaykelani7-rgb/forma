@@ -24,6 +24,7 @@ import {
 import { recoveriesFor, Recovery } from "@/lib/storage";
 import { DailyAccessSettings } from "./install";
 import { RecallDefaults } from "./recall-defaults";
+import { PracticePlanPreferences } from "./practice-plan-preferences";
 
 export function Settings() {
   const {
@@ -347,6 +348,7 @@ export function Settings() {
           </div>
         </section>
       </form>
+      <PracticePlanPreferences />
       <section className="settings-section">
         <div className="settings-section-heading">
           <span className="mono">02</span>

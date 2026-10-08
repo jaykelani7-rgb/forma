@@ -40,6 +40,12 @@ import {
   validateRecallDays,
 } from "./memory-types";
 import {
+  validatePracticePlans,
+  validatePracticePreferences,
+  type PracticePlan,
+  type PracticePreferences,
+} from "./practice-plan-types";
+import {
   resolvedCodingQueue,
   resolvedPracticeProblems,
   sharedPracticeState,
@@ -105,7 +111,7 @@ export interface Session {
   startedAt: string;
   runningSince: number | null;
   elapsedMs: number;
-  targetMinutes: Duration;
+  targetMinutes: number;
   notes: string;
   timerVisible: boolean;
   phase: "focus" | "reflection";
@@ -120,6 +126,7 @@ export interface Settings {
   reminder?: ReminderPreferences;
   textSize?: "comfortable" | "large";
   recallDays?: RecallDays;
+  practicePreferences?: PracticePreferences;
 }
 export interface Data {
   schemaVersion: 2;
@@ -135,6 +142,7 @@ export interface Data {
   trackEntries?: TrackEntry[];
   activeTrackId?: string | null;
   revisions?: RevisionRecord[];
+  practicePlans?: PracticePlan[];
 }
 export const emptyData = (): Data => ({
   schemaVersion: 2,
@@ -902,7 +910,10 @@ export function validateData(input: unknown): Data {
         num(session.runningSince, 0, 8640000000000000)
       ) ||
       !num(session.elapsedMs, 0, 31536000000) ||
-      ![15, 30, 60].includes(session.targetMinutes as number) ||
+      !(
+        num(session.targetMinutes, 1, 180) &&
+        Number.isInteger(session.targetMinutes)
+      ) ||
       !str(session.notes, 50000) ||
       typeof session.timerVisible !== "boolean" ||
       !["focus", "reflection"].includes(session.phase as string) ||
@@ -965,23 +976,36 @@ export function validateData(input: unknown): Data {
       ? { trackContext: validateTrackContext(a.trackContext) }
       : {}),
   }));
+  const revisions = validateRevisions(
+    input.revisions,
+    problems,
+    codeforces.profiles.map((profile) => profile.handle),
+  );
+  const learningLinks = validateLearningLinks(
+    input.learningLinks,
+    problems,
+    attempts,
+    codeforces,
+  );
   return {
     schemaVersion: 2,
     codeforces,
     problems,
     attempts,
-    revisions: validateRevisions(
-      input.revisions,
-      problems,
-      codeforces.profiles.map((profile) => profile.handle),
-    ),
+    ...(input.practicePlans !== undefined
+      ? {
+          practicePlans: validatePracticePlans(input.practicePlans, {
+            problems,
+            attempts,
+            revisions,
+            codeforces,
+            learningLinks,
+          }),
+        }
+      : {}),
+    revisions,
     ...validateTracks(input, problems),
-    learningLinks: validateLearningLinks(
-      input.learningLinks,
-      problems,
-      attempts,
-      codeforces,
-    ),
+    learningLinks,
     discovery: validateDiscovery(input.discovery),
     settings: {
       displayName: s.displayName,
@@ -996,6 +1020,13 @@ export function validateData(input: unknown): Data {
       reminder: validateReminder(s.reminder),
       textSize: s.textSize ?? "comfortable",
       recallDays,
+      ...(s.practicePreferences !== undefined
+        ? {
+            practicePreferences: validatePracticePreferences(
+              s.practicePreferences,
+            ),
+          }
+        : {}),
     } as Settings,
     session:
       session === null

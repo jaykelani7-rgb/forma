@@ -1,4 +1,4 @@
-import type { Data, Duration, Problem, Session } from "./model";
+import type { Data, Problem, Session } from "./model";
 import type { TrackContext } from "./tracks-types";
 import { normalizeCodeforcesIdentity } from "./codeforces-identity";
 
@@ -7,12 +7,14 @@ import { normalizeCodeforcesIdentity } from "./codeforces-identity";
 export function withPracticeSession(
   data: Data,
   problem: Problem,
-  duration: Duration,
+  duration: number,
   now: number,
   id: string,
   fresh = false,
   context?: TrackContext,
 ): Data {
+  if (!Number.isInteger(duration) || duration < 1 || duration > 180)
+    throw new Error("Choose an attempt timebox from 1 to 180 minutes.");
   if (data.session) throw new Error("A session is already open.");
   const saved = data.problems.find((value) => value.id === problem.id);
   if (!saved && !fresh)

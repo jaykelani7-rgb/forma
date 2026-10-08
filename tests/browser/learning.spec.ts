@@ -414,7 +414,7 @@ test("fresh discovery excludes accepted history, hides approach tags and retains
   await expect(discovery).not.toContainText("Generic match");
 });
 
-test("duration changes practice composition and fresh practice becomes a recoverable timed session", async ({
+test("availability changes the plan allocation and a deliberate fresh alternative becomes a recoverable timed session", async ({
   page,
 }) => {
   await seed(page, importedFixture());
@@ -425,25 +425,32 @@ test("duration changes practice composition and fresh practice becomes a recover
   await page
     .getByText("Fresh practice & discovery filters", { exact: true })
     .click();
-  const durations = page.getByRole("group", { name: "Session duration" });
   await expect(
     discovery.getByRole("heading", { name: titles.fresh, exact: true }),
   ).toBeVisible();
-  await durations.getByRole("button", { name: "15 min", exact: true }).click();
-  await expect(
-    page.getByRole("region", { name: `Revisit ${titles.assisted}` }),
-  ).toBeVisible();
+  await page.locator('input[name="availableMinutes"]').fill("15");
+  await page
+    .getByRole("button", { name: "Apply today’s time", exact: true })
+    .click();
+  await expect(page.locator(".session-card")).toContainText(titles.assisted);
   await expect(
     discovery.getByRole("heading", { name: titles.fresh, exact: true }),
   ).toBeVisible();
   await expect(
     page.locator(".today-primary .button.primary:visible"),
   ).toHaveCount(1);
-  await durations.getByRole("button", { name: "60 min", exact: true }).click();
+  await page.locator('input[name="availableMinutes"]').fill("60");
+  await page
+    .getByRole("button", { name: "Apply today’s time", exact: true })
+    .click();
+  await expect(page.locator(".session-card")).toContainText(titles.assisted);
   await expect(discovery).toContainText(
-    `Suggested order: revisit ${titles.assisted}, then this fresh problem if time remains.`,
+    "A fresh alternative for after your revisit, if time remains.",
   );
-  await durations.getByRole("button", { name: "30 min", exact: true }).click();
+  await page.locator('input[name="availableMinutes"]').fill("30");
+  await page
+    .getByRole("button", { name: "Apply today’s time", exact: true })
+    .click();
   await expect(
     discovery.getByRole("heading", { name: titles.fresh, exact: true }),
   ).toBeVisible();

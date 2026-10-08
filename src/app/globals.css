@@ -5393,3 +5393,35 @@ html[data-text-size="large"] .sidebar-note {
 .today-track-context .text-link {
   text-align: left;
 }
+
+/* At narrow widths, activity copy and navigation labels keep their own space. */
+@media (max-width: 600px) {
+  .cf-first-use {
+    display: grid;
+    grid-template-columns: 20px minmax(0, 1fr);
+    align-items: start;
+    gap: 12px;
+  }
+  .cf-first-use > div {
+    width: 100%;
+  }
+  .cf-first-use > .text-link {
+    grid-column: 2;
+    margin-left: 0;
+    justify-self: start;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+}
+@media (max-width: 450px) {
+  .mobile-nav > a {
+    flex-direction: column;
+    gap: 3px;
+  }
+  .mobile-nav > a > svg {
+    flex-shrink: 0;
+  }
+  .mobile-nav > a > span {
+    white-space: nowrap;
+  }
+}
