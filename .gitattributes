@@ -1,0 +1,2 @@
+# Preserve PDF byte offsets and avoid text/line-ending conversion in fixtures.
+tests/fixtures/documents/*.pdf binary

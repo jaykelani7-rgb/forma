@@ -1,4 +1,5 @@
 import { Data, Outcome, Problem, addDays, localDate } from "./model";
+import { normalizeCodeforcesIdentity } from "./codeforces-identity";
 import {
   attemptAfterReviewCompletion,
   preservesManualReview,
@@ -172,16 +173,7 @@ export function platformProblemId(handle: string, key: string) {
   return `cf:${handleKey(handle)}:${key}`;
 }
 export function codeforcesIdentity(url: string): string | null {
-  try {
-    const u = new URL(url);
-    if (!/^(www\.)?codeforces\.com$/.test(u.hostname)) return null;
-    const match = u.pathname.match(
-      /^\/(?:problemset\/problem\/|(?:contest|gym)\/)(\d+)\/(?:problem\/)?([A-Za-z0-9]+)\/?$/,
-    );
-    return match ? `contest:${match[1]}:${match[2].toUpperCase()}` : null;
-  } catch {
-    return null;
-  }
+  return normalizeCodeforcesIdentity({ url })?.key ?? null;
 }
 
 // Apply a complete fetched transaction only. The caller collects all required pages

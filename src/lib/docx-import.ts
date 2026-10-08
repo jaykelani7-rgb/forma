@@ -648,7 +648,9 @@ export async function parsePracticeSheet(
     const timings: Timing[] = [];
     let title = "",
       current: TrackImportStage | undefined,
-      totalEntries = 0;
+      totalEntries = 0,
+      sourceLocation = "Document",
+      sourceText = "";
     const getStage = () => {
       if (!current) {
         current = {
@@ -676,11 +678,27 @@ export async function parsePracticeSheet(
         );
         if (timing) stage.suggestedTime = timing.text;
       }
-      stage.entries.push(entry);
+      stage.entries.push({
+        ...entry,
+        source: {
+          kind: "docx",
+          location: sourceLocation,
+          text: bounded(sourceText, 10000, "source row"),
+          ...(!entry.code
+            ? {
+                reviewReasons: [
+                  "No single supported Codeforces identity was recovered. Enter the identity or exclude this row.",
+                ],
+              }
+            : {}),
+        },
+      });
     };
     for (let blockIndex = 0; blockIndex < body.children.length; blockIndex++) {
       const block = body.children[blockIndex],
         name = localName(block.name);
+      sourceLocation = `Document block ${blockIndex + 1}`;
+      sourceText = clean(visibleText(block));
       if (name === "p") {
         const text = clean(visibleText(block));
         if (!text) continue;
@@ -760,9 +778,14 @@ export async function parsePracticeSheet(
       } else if (name === "tbl") {
         timings.push(...extractTimings(block));
         let columns: TableColumns | null = null;
-        for (const row of children(block, "tr")) {
+        for (const [rowIndex, row] of children(block, "tr").entries()) {
           const cells = children(row, "tc"),
             values = cells.map(cellText);
+          sourceLocation = `Document block ${blockIndex + 1}, table row ${rowIndex + 1}`;
+          sourceText = [
+            values.join(" | "),
+            ...linksIn(row, relationships).map((link) => link.target),
+          ].join("\n");
           const header = tableColumns(values);
           if (header) {
             columns = header;

@@ -56,7 +56,16 @@ export function assertSafeProblemEdit(
   // A valid URL must not hide a contradictory manually entered Codeforces ID.
   if (before && proposed.problemCode) {
     const code = normalizeCodeforcesIdentity({ code: proposed.problemCode });
-    if (code?.key !== before.key)
+    const explicitNamespace = /^(?:CF|Codeforces|Gym)(?=\s|\d)/i.test(
+      proposed.problemCode.trim(),
+    );
+    // Bare codes do not encode a Gym/contest namespace; the unchanged URL does.
+    // An explicit namespace still must agree, and a changed index never does.
+    if (
+      !code ||
+      code.code !== before.code ||
+      (explicitNamespace && code.key !== before.key)
+    )
       throw new WorkspaceValidationError(
         "Keep the original Codeforces ID for this recorded problem. To change a track entry, use Edit track. Your draft is still here.",
       );

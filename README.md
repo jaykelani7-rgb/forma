@@ -1,6 +1,6 @@
 # Forma
 
-A daily competitive-programming notebook with a clean light appearance and black-and-ivory **Ink**. Import a DOCX practice sheet into Tracks, practice in Forma or on Codeforces, and use Learning Memory to revisit recorded approaches, mistakes and takeaways. Timed re-solves and written recall share a manageable revisit list. Comfortable and Large text preferences apply across the app and work alongside browser zoom.
+A daily competitive-programming notebook with a clean light appearance and black-and-ivory **Ink**. Use Track Studio to upload a DOCX, PDF or image, paste Codeforces links/IDs, or build a manual track. Practice in Forma or on Codeforces, and use Learning Memory to revisit recorded approaches, mistakes and takeaways. Timed re-solves and written recall share a manageable revisit list. Comfortable and Large text preferences apply across the app and work alongside browser zoom.
 
 ## Run locally
 
@@ -14,7 +14,7 @@ npm run dev
 Open [localhost:3001](http://localhost:3001). For production:
 
 ```sh
-npm run build
+npm run build -- --webpack
 npm run start -- --port 3001
 ```
 
@@ -22,7 +22,7 @@ Local mode needs no account or environment variables. Optional account setup is 
 
 ## Daily workflow
 
-1. Add a problem, import a DOCX sheet in Tracks, or connect a public Codeforces handle in Settings and import activity.
+1. Add a problem, create a track in Track Studio from a document/image, pasted Codeforces links/IDs or a manual plan, or connect a public Codeforces handle in Settings and import activity.
 2. Today gives an active session priority, then an appropriate due revisit, then unfinished work from your active track. Fresh alternatives and discovery filters remain available below it. Choose 15, 30, or 60 minutes; these intentions do not predict solving time.
 3. Pause, hide the timer, and write notes. A saved session survives navigation and reload.
 4. Finish with an outcome, an optional difficulty, and a takeaway. Imported attempts support quick reflections without invented solving time.
@@ -31,27 +31,29 @@ Local mode needs no account or environment variables. Optional account setup is 
 
 Demo, personal, and each verified account use separate workspaces. Demo exploration and restoration cannot replace personal records. The first-use state stays welcoming; returning users see a compact Today view with the next action higher on the page.
 
-| Route           | Purpose                                                                                 |
-| --------------- | --------------------------------------------------------------------------------------- |
-| `/` or `/today` | Stable daily reflection batch, due revisit, fresh discovery, practice rhythm            |
-| `/problems`     | Collection, editing, sourced histories, explicit attempt links                          |
-| `/problems/[problemId]` | Learning Memory, original source records, editable reflections and revision checks |
-| `/tracks`       | DOCX preview/import, active track, unlocked stages, shared learning progress            |
-| `/session`      | Persistent timer, notes, reflection                                                     |
-| `/revisit`      | Recommended batch, full queue, completion, rescheduling, undo                           |
-| `/progress`     | Shared learning outcomes, difficulties, topics, breakthroughs, measured time            |
-| `/activity`     | Handle-scoped submissions, grouped attempts, reflections, older history                 |
-| `/settings`     | Codeforces, optional account, preferences, appearance, backups, installation, reminders |
+| Route                   | Purpose                                                                                     |
+| ----------------------- | ------------------------------------------------------------------------------------------- |
+| `/` or `/today`         | Stable daily reflection batch, due revisit, fresh discovery, practice rhythm                |
+| `/problems`             | Collection, editing, sourced histories, explicit attempt links                              |
+| `/problems/[problemId]` | Learning Memory, original source records, editable reflections and revision checks          |
+| `/tracks`               | Track Studio upload/paste/manual preview, active track, stages and shared learning progress |
+| `/session`              | Persistent timer, notes, reflection                                                         |
+| `/revisit`              | Recommended batch, full queue, completion, rescheduling, undo                               |
+| `/progress`             | Shared learning outcomes, difficulties, topics, breakthroughs, measured time                |
+| `/activity`             | Handle-scoped submissions, grouped attempts, reflections, older history                     |
+| `/settings`             | Codeforces, optional account, preferences, appearance, backups, installation, reminders     |
 
 ## Practice sheets and Tracks
 
-Choose **Tracks → Import practice sheet** and upload a `.docx` containing Codeforces links or explicit problem IDs. Parsing takes place in your browser. The editable preview lets you correct identifiers, titles, ratings, hints and stage assignments, rename/reorder/remove stages, and reorder/remove problems. Counts disclose unresolved identities and duplicate memberships. Cancelling the preview creates no records. Confirmation saves the track, its stages/memberships and any new problems in one revision; a failed save retains the preview and supports a safe retry with the same IDs.
+Choose **Tracks → Import practice sheet**, **Paste Codeforces links or IDs**, or **Create manually**. DOCX, selectable-text PDFs, scanned/mixed PDFs and PNG/JPEG images all lead to the same editable preview. PDF text and hyperlink annotations are read first; scanned pages and images use local OCR, with an explicit all-page OCR option. Workers keep document processing off ordinary practice pages, and **Cancel processing** stops work without saving records. PDF/OCR engines are loaded only when requested. Their first use downloads application-owned assets from Forma’s origin; failed downloads can be retried. Offline document import is not claimed.
 
-The supplied two-pointers sheet was verified against the real file: **100 problems in five ordered stages of 20, zero unresolved identities and zero duplicates**. Source titles, ratings, pattern hints, descriptions and suggested practice times are preserved. The sheet provides links and titles; **Open on Codeforces** opens full statements externally. Hints stay hidden until requested. PDF, OCR and older `.doc` imports are not supported. DOCX uploads are limited to 8 MiB with additional ZIP/XML resource limits.
+The preview shows unresolved, duplicate, review-required, excluded and included counts. Search and filter large tracks, collapse stages and open compact rows only when editing is needed. Correct titles, IDs, URLs, source ratings/hints, stage assignments and order; edit stage descriptions, suggested times and source notes. Add an individual problem, pasted batch or stage, and save an empty track if you want to plan later. Keyboard move controls remain available. Removing a stage moves its candidates to **Ungrouped**; explicit exclusion keeps candidates visible until confirmation. OCR source text, page/location, confidence and review reasons remain available for checking. Recognized ID format does not verify problem existence, and titles alone never supply an identity.
 
-All stages are unlocked. Set a track as active to use it on Today, or start any stage problem explicitly. After saving a focused reflection, choose **Next problem** or **Return to stage**; the next timer starts only when requested. Tracks reuse canonical Codeforces problems and the existing reflection/revisit history. Acceptance on the current connected handle and independent solving are separate dimensions. Independent reflections complete the track's learning progress; assisted and unsolved work still needs revision. Future revisit dates, skips, deferrals and archives remain respected by automatic selection.
+The supplied two-pointers DOCX fixture retains **100 problems in five ordered stages of 20, zero unresolved identities and zero duplicates**. Source titles, ratings, pattern hints, descriptions and suggested practice times remain intact. Full statements open externally through **Open on Codeforces**. DOCX uploads are limited to 8 MiB; PDFs/images to 20 MiB, PDFs to 40 pages and input images to 20 million pixels/8,000 pixels per side. Additional processing, extraction and parser limits are documented in [docs/track-studio.md](docs/track-studio.md). Older `.doc`, HEIC and other formats require conversion. English OCR works best with clear printed text; ambiguous characters and missing links need your review rather than guessed corrections.
 
-Re-importing the same file offers the existing track or a deliberate copy; copies share problem history. Removing a track preserves its underlying problems, attempts, notes and revisit dates. Older backups receive empty track collections and Comfortable text defaults. See [docs/tracks-and-readability.md](docs/tracks-and-readability.md) for source acceptance, resource boundaries and verification.
+All stages are unlocked. Set a track as active to use it on Today, or start any stage problem explicitly. After saving a focused reflection, choose **Next problem** or **Return to stage**; the next timer starts only when requested. Tracks reuse appropriate canonical Codeforces problems while keeping profile evidence separate. Contest and Gym namespaces, as well as split indices such as A1/A2, remain distinct. Existing shared coding dates and separate written-recall dates continue to apply. Acceptance on the current connected handle and independent learning progress remain separate.
+
+Edit existing tracks in the same Studio. Unchanged stages and memberships keep stable IDs. Identity replacement reuses or creates the appropriate membership without assigning the previous problem’s history to it; removing memberships/tracks preserves underlying attempts, reflections, recall records and historical context snapshots. Unsaved edits require explicit discard. Failed validation or storage writes retain the draft for a safe retry with the same IDs. Re-importing the same file offers the existing track or a deliberate copy. Optional source notes/evidence extend schema 2 without changing account setup or SQL migrations. See [docs/track-studio.md](docs/track-studio.md) for workflows, dependency assets, limits and verification; [docs/tracks-and-readability.md](docs/tracks-and-readability.md) preserves the original DOCX acceptance results.
 
 ## Learning and scheduling
 
@@ -97,14 +99,14 @@ Reminders are opt-in, gentle, and **in-app only**. They appear on Today at the c
 
 ## Implementation and verification
 
-Next.js App Router, React, strict TypeScript, Tailwind CSS, Lucide icons, and self-hosted Geist/Geist Mono/Instrument Serif. Font licenses are in `public/fonts`.
+Next.js App Router, React, strict TypeScript, Tailwind CSS, Lucide icons, and self-hosted Geist/Geist Mono/Instrument Serif. Font licenses are in `public/fonts`. Pinned PDF/OCR assets are prepared by `npm run prepare:imports`, also run automatically during installation, development startup and production builds; see [Track Studio dependency notes](docs/track-studio.md#dependency-preparation).
 
 - `src/lib/model.ts`: domain types, strict validation, timer, base scheduling.
 - `src/lib/concurrency.ts` and `storage.ts`: capacity, three-way merge, transactional revisions, recovery.
 - `src/lib/codeforces*.ts`: import boundaries, grouping, reflection batches, profile freshness.
 - `src/lib/learning.ts`: derived sourced history and explicit linking.
 - `src/lib/memory*.ts`, `practice-state.ts` and `workspace-proposal.ts`: scoped learning evidence, written revision, shared scheduling and pre-exposure validation.
-- `src/lib/docx-import.ts`, `tracks*.ts` and `today-practice.ts`: bounded DOCX parsing, track membership/progress and daily priorities.
+- `src/lib/document-import.ts`, `docx-import.ts`, `track-studio.ts`, `tracks*.ts` and `public/track-document*`: bounded local extraction/OCR, editable previews, track membership/progress and daily priorities.
 - `src/lib/catalogue.ts` and `discovery.ts`: catalogue and transparent selection rules.
 - `src/lib/cloud-*.ts` and `supabase/migrations`: optional verified account transport and durable storage.
 - `src/lib/reminders.ts`, manifest, and `public/sw.js`: daily access and safe offline behavior.
@@ -114,11 +116,11 @@ npm run lint
 npx next typegen
 npm run typecheck
 npm test
-npm run build
+npm run build -- --webpack
 npx playwright install chromium
 npm run test:browser
 ```
 
 The browser suite starts the production server on port 3002 and uses isolated fixtures, leaving the normal personal workspace untouched. CI runs these checks on pushes and pull requests.
 
-Latest local verification, **8 October 2026**: **188 unit/integration tests passed; 136 desktop/mobile browser tests passed; two hosted-account browser tests skipped** because disposable test credentials are absent. Lint, strict TypeScript, and the supported Webpack production build passed. Shared scheduling and identity-edit regressions, Learning Memory, both written recall activities, reflection editing, configurable intervals, selected-period summaries, failed saves and retries were exercised alongside the existing DOCX, backup, recovery and daily practice workflows. Both themes, keyboard dialogs, saved Large text, long names and narrow/reflow layouts were checked. Actual migration SQL was exercised in local PostgreSQL, including ownership, revisions and retry safety; these local fixtures do not establish hosted account behavior. See [docs/learning-memory.md](docs/learning-memory.md) for current results, screenshots and boundaries. [docs/tracks-and-readability.md](docs/tracks-and-readability.md), [docs/reliability-pass.md](docs/reliability-pass.md) and [docs/verification.md](docs/verification.md) preserve earlier verification.
+Latest local verification, **8 October 2026**: **221 unit/integration tests passed; 166 desktop/mobile browser tests passed; two hosted-account browser tests skipped** because disposable test credentials are absent. Lint, strict TypeScript and the Webpack production build passed. Real local OCR covered selectable, scanned, mixed and heading-overlay PDFs, forced OCR, PNG and JPEG. The existing 100-problem DOCX kept its five ordered stages. Upload/review/correction/save/practice, manual and pasted tracks, retained failed saves, retries, cancellation, worker cleanup, document errors and reload persistence were exercised. Track edits preserve original practice, reflections, written recall and source evidence, including separate Gym identities and unrelated profile history. Both themes, Large text, keyboard dialogs, reduced motion, long titles and narrow/200% reflow were checked, with inspected screenshots. Actual migration SQL was exercised in local PostgreSQL; these fixtures do not establish hosted account behavior. See [docs/track-studio.md](docs/track-studio.md) for formats, limits, English OCR and asset requirements, workflow details and screenshots. [docs/learning-memory.md](docs/learning-memory.md), [docs/tracks-and-readability.md](docs/tracks-and-readability.md), [docs/reliability-pass.md](docs/reliability-pass.md) and [docs/verification.md](docs/verification.md) preserve earlier verification.

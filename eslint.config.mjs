@@ -4,5 +4,5 @@ import nextTs from "eslint-config-next/typescript";
 export default defineConfig([
   ...nextVitals, ...nextTs,
   { rules: { "react-hooks/set-state-in-effect": "off" } },
-  globalIgnores([".next/**", "node_modules/**", "test-results/**", "playwright-report/**"]),
+  globalIgnores([".next/**", "node_modules/**", "test-results/**", "playwright-report/**", "public/import-assets/**"]),
 ]);

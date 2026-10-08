@@ -451,3 +451,154 @@
     flex: 1;
   }
 }
+
+/* Track Studio keeps the overview small and opens fields only on request. */
+.entryPoints {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+.studioToolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.9rem;
+  padding: 0.75rem 0;
+}
+.studioToolbar label:first-child {
+  flex: 1 1 15rem;
+}
+.studioToolbar label {
+  min-width: min(100%, 12rem);
+}
+.studioToolbar input,
+.studioToolbar select,
+.upload textarea,
+.studioNotes textarea,
+.batchPanel textarea {
+  font-size: 1rem;
+}
+.studioNotes > summary,
+.stageSettings > summary {
+  cursor: pointer;
+  min-height: 2.75rem;
+  display: flex;
+  align-items: center;
+  color: var(--accent);
+  font-size: 0.9375rem;
+}
+.studioNotes label {
+  margin-top: 0.5rem;
+}
+.stageSettings {
+  margin-top: 0.35rem;
+}
+.stageFields .wide {
+  grid-column: 1 / -1;
+}
+.saveSummary {
+  color: var(--muted);
+  font-size: 0.875rem;
+  line-height: 1.65;
+  margin: 0;
+}
+.editorEntry {
+  padding: 0;
+}
+.entrySummary {
+  cursor: pointer;
+  display: grid;
+  grid-template-columns: 2rem minmax(0, 1fr) auto;
+  gap: 0.65rem;
+  align-items: start;
+  min-height: 3rem;
+  padding: 0.9rem 0;
+  list-style: none;
+}
+.entrySummary::-webkit-details-marker {
+  display: none;
+}
+.entrySummary:hover .entryName,
+.editorEntry[open] .editCue {
+  color: var(--accent);
+}
+.entryName {
+  min-width: 0;
+  font-size: 1rem;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.entryStatus {
+  display: block;
+  color: var(--muted);
+  font-size: 0.8125rem;
+  margin-top: 0.25rem;
+  line-height: 1.65;
+}
+.editCue {
+  border: 1px solid var(--line);
+  padding: 0.2rem 0.5rem;
+  border-radius: 3px;
+  font-size: 0.8125rem;
+  margin-top: 0.15rem;
+}
+.entryBody {
+  padding: 0.35rem 0 0.8rem;
+}
+.excludedEntry .entryStatus {
+  color: var(--review);
+}
+.evidence {
+  padding: 0.85rem;
+  background: var(--soft);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  margin-top: 1rem;
+  font-size: 0.875rem;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+.evidence p:last-child {
+  margin-bottom: 0;
+}
+.evidence ul {
+  padding-left: 1.15rem;
+}
+.extractedText {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--text);
+  margin-top: 0.5rem;
+}
+.batchPanel {
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  margin-top: 1rem;
+  background: var(--soft);
+}
+.footerCounts {
+  flex-basis: 100%;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--muted);
+  margin: 0;
+}
+@media (max-width: 760px) {
+  .studioToolbar {
+    align-items: stretch;
+  }
+  .studioToolbar label {
+    width: 100%;
+  }
+  .entrySummary {
+    grid-template-columns: 1.5rem minmax(0, 1fr) auto;
+    gap: 0.5rem;
+  }
+  .stageFields .wide {
+    grid-column: auto;
+  }
+  .batchPanel {
+    padding: 0.8rem;
+  }
+}

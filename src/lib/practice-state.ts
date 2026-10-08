@@ -1,5 +1,5 @@
 import type { Data, Problem } from "./model";
-import { normalizeCodeforcesIdentity } from "./codeforces-identity";
+import { canonicalProblemIdentity } from "./codeforces-identity";
 
 export interface PracticeScope {
   handle?: string | null;
@@ -59,16 +59,7 @@ function indexFor(data: Data): PracticeIndex {
   return index;
 }
 export function practiceIdentity(problem: Problem): string {
-  const identity = normalizeCodeforcesIdentity({
-    url: problem.url,
-    code:
-      problem.platform.toLowerCase() === "codeforces"
-        ? problem.problemCode
-        : "",
-  });
-  if (problem.cfKey && identity && problem.cfKey !== identity.key)
-    return `problem:${problem.id}`;
-  return problem.cfKey ?? identity?.key ?? `problem:${problem.id}`;
+  return canonicalProblemIdentity(problem) ?? `problem:${problem.id}`;
 }
 function day(now: Date) {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;

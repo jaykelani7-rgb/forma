@@ -41,11 +41,12 @@ export function normalizeCodeforcesIdentity(
     const rawCode =
       typeof input === "string" ? input.trim() : (input.code?.trim() ?? "");
     const match = rawCode.match(
-      /^(?:(?:CF|Codeforces)\s*)?(\d{1,9})[\s\/-]*([A-Za-z]\d*)$/i,
+      /^(?:(CF|Codeforces|Gym)\s*)?(\d{1,9})[\s\/-]*([A-Za-z]\d*)$/i,
     );
     if (!match) return null;
-    contest = match[1];
-    index = match[2].toUpperCase();
+    gym = match[1]?.toLowerCase() === "gym";
+    contest = match[2];
+    index = match[3].toUpperCase();
   }
   const numeric = Number(contest);
   if (
@@ -57,10 +58,35 @@ export function normalizeCodeforcesIdentity(
     return null;
   contest = String(numeric);
   return {
-    key: `contest:${contest}:${index}`,
+    key: `${gym ? "gym" : "contest"}:${contest}:${index}`,
     code: `${contest}${index}`,
     url: gym
       ? `https://codeforces.com/gym/${contest}/problem/${index}`
       : `https://codeforces.com/problemset/problem/${contest}/${index}`,
   };
+}
+
+/** Resolve legacy Gym keys from their explicit URL without rewriting saved records. */
+export function canonicalProblemIdentity(problem: {
+  platform: string;
+  url: string;
+  problemCode?: string;
+  cfKey?: string;
+}): string | undefined {
+  const identity = normalizeCodeforcesIdentity({
+    url: problem.url,
+    code:
+      problem.platform.toLowerCase() === "codeforces"
+        ? problem.problemCode
+        : "",
+  });
+  if (problem.cfKey && identity && problem.cfKey !== identity.key) {
+    if (
+      identity.key.startsWith("gym:") &&
+      problem.cfKey === identity.key.replace(/^gym:/, "contest:")
+    )
+      return identity.key;
+    return undefined;
+  }
+  return identity?.key ?? problem.cfKey;
 }

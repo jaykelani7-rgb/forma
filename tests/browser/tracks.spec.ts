@@ -148,7 +148,7 @@ async function upload(page: Page, unresolved = false) {
     .getByRole("button", { name: "Import practice sheet", exact: true })
     .click();
   await page
-    .getByLabel("Practice sheet (.docx)")
+    .getByLabel("Practice sheet (DOCX, PDF, PNG or JPEG)")
     .setInputFiles(sheet(unresolved));
   const dialog = page.getByRole("dialog");
   await expect(dialog.getByLabel("Track title")).toHaveValue(title);
@@ -167,7 +167,9 @@ test("the supplied DOCX previews 100 entries in five ordered stages without chan
   await page
     .getByRole("button", { name: "Import practice sheet", exact: true })
     .click();
-  await page.getByLabel("Practice sheet (.docx)").setInputFiles(actualSheet);
+  await page
+    .getByLabel("Practice sheet (DOCX, PDF, PNG or JPEG)")
+    .setInputFiles(actualSheet);
   const dialog = page.getByRole("dialog");
   await expect(dialog.getByLabel("Preview counts")).toContainText(
     "100 detected problems",
@@ -176,8 +178,17 @@ test("the supplied DOCX previews 100 entries in five ordered stages without chan
   await expect(dialog.getByLabel("Preview counts")).toContainText(
     "0 unresolved entries",
   );
-  const headings = await dialog.locator("details > summary").allTextContents();
-  expect(headings.map((value) => value.replace(/\s+/g, " ").trim())).toEqual([
+  const headings = await dialog
+    .locator("[data-studio-stage] > summary")
+    .allTextContents();
+  expect(
+    headings.map((value) =>
+      value
+        .replace(/\s+/g, " ")
+        .replace(/\s*·\s*/g, " · ")
+        .trim(),
+    ),
+  ).toEqual([
     "1. Foundation · 20 problems",
     "2. Core Patterns · 20 problems",
     "3. Intermediate · 20 problems",
@@ -187,12 +198,17 @@ test("the supplied DOCX previews 100 entries in five ordered stages without chan
   expect((await durable(page)).tracks).toEqual([]);
   expect((await durable(page)).problems).toEqual([]);
   await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+  await dialog
+    .getByRole("button", { name: "Discard draft", exact: true })
+    .click();
   await expect(dialog).toHaveCount(0);
   expect((await durable(page)).tracks).toEqual([]);
   await page
     .getByRole("button", { name: "Import practice sheet", exact: true })
     .click();
-  await page.getByLabel("Practice sheet (.docx)").setInputFiles(actualSheet);
+  await page
+    .getByLabel("Practice sheet (DOCX, PDF, PNG or JPEG)")
+    .setInputFiles(actualSheet);
   await page
     .getByRole("dialog")
     .getByRole("button", { name: "Confirm import", exact: true })
@@ -297,14 +313,23 @@ test("uncertain entries can be corrected and reordered in a preview before an at
   await expect(
     dialog.getByRole("button", { name: "Confirm import", exact: true }),
   ).toBeDisabled();
+  for (const summary of await dialog
+    .locator("[data-studio-stage]")
+    .first()
+    .locator("[data-studio-entry] > summary")
+    .all())
+    await summary.click();
   await dialog
     .getByLabel("Codeforces ID", { exact: true })
     .nth(1)
     .fill("3300C2");
   await dialog.getByLabel("Problem 2 title", { exact: true }).fill(secondTitle);
   await dialog
+    .getByLabel("I reviewed this extracted entry", { exact: true })
+    .check();
+  await dialog
     .getByRole("button", {
-      name: "Remove problem 3 from Foundation",
+      name: "Exclude problem 3 from Foundation",
       exact: true,
     })
     .click();
@@ -318,6 +343,7 @@ test("uncertain entries can be corrected and reordered in a preview before an at
     .getByLabel("Stage assignment", { exact: true })
     .first()
     .selectOption({ label: "Core Patterns" });
+  await dialog.getByText("Edit stage details", { exact: true }).first().click();
   await dialog.getByLabel("Stage 1 title", { exact: true }).fill("Basics");
   await dialog
     .getByRole("button", { name: "Move stage 1 down", exact: true })
@@ -364,43 +390,50 @@ test("parsing cancellation and malformed or unsupported uploads leave workspace 
 }) => {
   await seed(page);
   await page.addInitScript(() => {
-    const original = File.prototype.arrayBuffer;
-    File.prototype.arrayBuffer = async function () {
-      await new Promise((resolve) => setTimeout(resolve, 400));
-      return original.call(this);
+    const original = Worker.prototype.postMessage;
+    Worker.prototype.postMessage = function (...args) {
+      if (args[0]?.type === "import") {
+        setTimeout(() => Reflect.apply(original, this, args), 600);
+        return;
+      }
+      Reflect.apply(original, this, args);
     };
   });
   await page.goto("/tracks");
   await page
     .getByRole("button", { name: "Import practice sheet", exact: true })
     .click();
-  await page.getByLabel("Practice sheet (.docx)").setInputFiles(sheet());
-  const dialog = page.getByRole("dialog");
-  await expect(dialog.getByRole("status")).toContainText(
-    "Reading practice sheet",
-  );
-  await dialog
-    .getByRole("button", { name: "Cancel import", exact: true })
-    .click();
-  await expect(dialog).toHaveCount(0);
   await page
-    .getByRole("button", { name: "Import practice sheet", exact: true })
+    .getByLabel("Practice sheet (DOCX, PDF, PNG or JPEG)")
+    .setInputFiles(sheet());
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByRole("status")).toContainText("Reading file");
+  await dialog
+    .getByRole("button", { name: "Cancel processing", exact: true })
     .click();
-  await page.getByLabel("Practice sheet (.docx)").setInputFiles({
-    name: "broken.docx",
-    mimeType,
-    buffer: Buffer.from("Not a DOCX"),
-  });
+  await expect(dialog.getByRole("status")).toHaveCount(0);
+  await expect(
+    dialog.getByLabel("Practice sheet (DOCX, PDF, PNG or JPEG)"),
+  ).toBeEnabled();
+  await page
+    .getByLabel("Practice sheet (DOCX, PDF, PNG or JPEG)")
+    .setInputFiles({
+      name: "broken.docx",
+      mimeType,
+      buffer: Buffer.from("Not a DOCX"),
+    });
   await expect(page.getByRole("dialog").getByRole("alert")).toContainText(
     "damaged",
   );
-  await page.getByLabel("Practice sheet (.docx)").setInputFiles({
-    name: "sheet.pdf",
-    mimeType: "application/pdf",
-    buffer: Buffer.from("unsupported"),
-  });
+  await page
+    .getByLabel("Practice sheet (DOCX, PDF, PNG or JPEG)")
+    .setInputFiles({
+      name: "sheet.doc",
+      mimeType: "application/msword",
+      buffer: Buffer.from("unsupported"),
+    });
   await expect(page.getByRole("dialog").getByRole("alert")).toContainText(
-    "PDF, images, and older .doc files are not supported",
+    "DOCX, PDF, PNG, or JPEG",
   );
   expect((await durable(page)).tracks).toEqual([]);
   expect((await durable(page)).problems).toEqual([]);
@@ -494,7 +527,7 @@ test("a failed import retains its corrected preview and retries one stable opera
           "QuotaExceededError",
         );
       }
-      return original.apply(this, args);
+      return Reflect.apply(original, this, args);
     };
   });
   await page.goto("/tracks");
@@ -513,10 +546,9 @@ test("a failed import retains its corrected preview and retries one stable opera
     "Keep this corrected preview",
   );
   await expect(
-    page.getByText(
-      "Practice sheet imported. Choose a stage and make it your own.",
-      { exact: true },
-    ),
+    page.getByText("Track saved. Choose a stage and make it your own.", {
+      exact: true,
+    }),
   ).toHaveCount(0);
   expect((await durable(page)).tracks).toEqual([]);
   await dialog.getByLabel("Track title").fill("Refined after the failed write");
