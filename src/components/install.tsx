@@ -79,6 +79,7 @@ export function InstallSupport() {
   const safeToActivate =
     ready &&
     !data.session &&
+    !data.contests?.some((c) => c.state === "active") &&
     !storagePending &&
     !storageError &&
     !sync.busy &&
@@ -117,7 +118,7 @@ export function InstallSupport() {
             <p>
               {safeToActivate
                 ? "Activate it when convenient. This page stays open; new app code loads next time."
-                : "Finish your active session and save or sync pending changes before activating it."}
+                : "Finish your active session or contest and save or sync pending changes before activating it."}
             </p>
             <button
               className="text-link"

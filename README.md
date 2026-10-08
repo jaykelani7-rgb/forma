@@ -1,6 +1,6 @@
 # Forma
 
-A daily competitive-programming notebook with a clean light appearance and black-and-ivory **Ink**. My Practice Plan keeps a small, explainable plan on Today from your availability, saved schedules and active track. Use Track Studio to upload a DOCX, PDF or image, paste Codeforces links/IDs, or build a manual track. Practice in Forma or on Codeforces, and use Learning Memory to revisit recorded approaches, mistakes and takeaways. Timed re-solves and written recall share a manageable revisit list. Comfortable and Large text preferences apply across the app and work alongside browser zoom.
+A daily competitive-programming notebook with a clean light appearance and black-and-ivory **Ink**. Contest Lab adds chosen practice contests, accurate submission evidence, optional reviews and deliberate upsolves. My Practice Plan keeps a small, explainable plan on Today from your availability, saved schedules and active track. Use Track Studio to upload a DOCX, PDF or image, paste Codeforces links/IDs, or build a manual track. Practice in Forma or on Codeforces, and use Learning Memory to revisit recorded approaches, mistakes and takeaways. Timed re-solves and written recall share a manageable revisit list. Comfortable and Large text preferences apply across the app and work alongside browser zoom.
 
 ## Run locally
 
@@ -31,17 +31,22 @@ Local mode needs no account or environment variables. Optional account setup is 
 
 Demo, personal, and each verified account use separate workspaces. Demo exploration and restoration cannot replace personal records. The first-use state stays welcoming; returning users see a compact Today view with the next action higher on the page.
 
-| Route                   | Purpose                                                                                        |
-| ----------------------- | ---------------------------------------------------------------------------------------------- |
-| `/` or `/today`         | Saved My Practice Plan, availability, explainable next action, optional discovery and rhythm   |
-| `/problems`             | Collection, editing, sourced histories, explicit attempt links                                 |
-| `/problems/[problemId]` | Learning Memory, original source records, editable reflections and revision checks             |
-| `/tracks`               | Track Studio upload/paste/manual preview, active track, stages and shared learning progress    |
-| `/session`              | Persistent timer, notes, reflection                                                            |
-| `/revisit`              | Recommended batch, full queue, completion, rescheduling, undo                                  |
-| `/progress`             | Shared learning outcomes, dated evidence-based observations, topics and measured time          |
-| `/activity`             | Handle-scoped submissions, grouped attempts, reflections, older history                        |
-| `/settings`             | Practice Plan preferences, Codeforces/account, appearance, backups, installation and reminders |
+| Route                                   | Purpose                                                                                        |
+| --------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `/` or `/today`                         | Saved My Practice Plan, availability, explainable next action, optional discovery and rhythm   |
+| `/problems`                             | Collection, editing, sourced histories, explicit attempt links                                 |
+| `/problems/[problemId]`                 | Learning Memory, original source records, editable reflections and revision checks             |
+| `/tracks`                               | Track Studio upload/paste/manual preview, active track, stages and shared learning progress    |
+| `/contests` and `/contests/[contestId]` | Create/resume practice contests, window-scoped evidence, reviews and upsolve queue             |
+| `/session`                              | Persistent timer, notes, reflection                                                            |
+| `/revisit`                              | Recommended batch, full queue, completion, rescheduling, undo                                  |
+| `/progress`                             | Shared learning outcomes, dated evidence-based observations, topics and measured time          |
+| `/activity`                             | Handle-scoped submissions, grouped attempts, reflections, older history                        |
+| `/settings`                             | Practice Plan preferences, Codeforces/account, appearance, backups, installation and reminders |
+
+## Contest Lab
+
+Create a contest from saved library/track problems or the existing Codeforces catalogue. Review and edit the set before starting; hints stay hidden by default. Persisted deadlines survive reload and tab closure. Self-reported status, Codeforces acceptance and later learning remain separate. Optional reviews and an explicit upsolve queue feed the existing timed workflow and daily planner without replacing deliberate coding or recall dates. See [docs/contest-lab.md](docs/contest-lab.md) for timing, attribution, recovery, verification and limitations.
 
 ## My Practice Plan
 
@@ -133,6 +138,8 @@ npm run test:browser
 
 The browser suite starts the production server on port 3002 and uses isolated fixtures, leaving the normal personal workspace untouched. CI runs these checks on pushes and pull requests.
 
-Latest My Practice Plan verification, **8 October 2026**: **274 unit/integration tests and 200 distinct desktop/mobile browser checks passed; two hosted-account checks skipped** for absent disposable credentials. The browser result combines the full regression run and a focused rerun of two corrected retry-button test selectors against the same final production build. Lint, strict TypeScript and the Webpack production build passed. Availability, real timed/recall completion, reload, Memory/Progress evidence, overnight sessions, cross-tab changes, failed saves and retries were exercised. Light and Ink desktop/mobile screenshots were inspected with Large text, keyboard focus, long titles, reduced motion and narrow/200% reflow. See [docs/practice-plan.md](docs/practice-plan.md) for exact checks, screenshots, selection/lifecycle rules and limitations. Hosted account/device operation is not established by local fixtures. No deployment was performed.
+Latest Contest Lab verification, **8 October 2026**: **299 unit/integration tests and 228 desktop/mobile browser checks passed; two hosted-account checks skipped** for absent disposable credentials. The complete browser regression suite passed against the final production build. Lint, strict TypeScript and the Webpack production build passed. Contest setup, reload-safe timing, expiry, frozen early finish, evidence attribution, review drafts, failed saves/retries, conflicting tabs, account-cache isolation and real upsolve completion into Learning Memory were exercised. Light and Ink desktop/mobile screenshots were inspected with Large text, long titles, keyboard dialogs and reduced motion. See [docs/contest-lab.md](docs/contest-lab.md) for exact checks, screenshots and remaining limitations. Hosted account/device operation is not established by local fixtures. No deployment was performed.
+
+Prior My Practice Plan verification, **8 October 2026**: **274 unit/integration tests and 200 distinct desktop/mobile browser checks passed; two hosted-account checks skipped** for absent disposable credentials. The browser result combines the full regression run and a focused rerun of two corrected retry-button test selectors against the same final production build. Availability, real timed/recall completion, reload, Memory/Progress evidence, overnight sessions, cross-tab changes, failed saves and retries were exercised. See [docs/practice-plan.md](docs/practice-plan.md) for exact checks, screenshots, selection/lifecycle rules and limitations.
 
 Prior Track Studio verification, **8 October 2026**: **221 unit/integration tests passed; 166 desktop/mobile browser tests passed; two hosted-account browser tests skipped** because disposable test credentials are absent. Lint, strict TypeScript and the Webpack production build passed. Real local OCR covered selectable, scanned, mixed and heading-overlay PDFs, forced OCR, PNG and JPEG. The existing 100-problem DOCX kept its five ordered stages. Upload/review/correction/save/practice, manual and pasted tracks, retained failed saves, retries, cancellation, worker cleanup, document errors and reload persistence were exercised. Track edits preserve original practice, reflections, written recall and source evidence, including separate Gym identities and unrelated profile history. Both themes, Large text, keyboard dialogs, reduced motion, long titles and narrow/200% reflow were checked, with inspected screenshots. Actual migration SQL was exercised in local PostgreSQL; these fixtures do not establish hosted account behavior. See [docs/track-studio.md](docs/track-studio.md) for formats, limits, English OCR and asset requirements, workflow details and screenshots. [docs/learning-memory.md](docs/learning-memory.md), [docs/tracks-and-readability.md](docs/tracks-and-readability.md), [docs/reliability-pass.md](docs/reliability-pass.md) and [docs/verification.md](docs/verification.md) preserve earlier verification.

@@ -1,4 +1,5 @@
 "use client";
+import { reconcileContests } from "@/lib/contest-lab";
 
 import {
   createContext,
@@ -197,7 +198,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setLocalDay(localDate(now));
     if (!current.current.ready || persistBlocked.current) return;
     const next = reconcilePracticePlan(
-      reconcileWorkspaceDay(current.current.data, now),
+      reconcileContests(reconcileWorkspaceDay(current.current.data, now), now),
       now,
     );
     if (next !== current.current.data) await persist(next);
@@ -213,7 +214,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setBundle(value);
   }
   function persist(proposed: Data, replace = false, baseline?: Data) {
-    proposed = validateWorkspaceProposal(proposed);
+    proposed = validateWorkspaceProposal(reconcileContests(proposed));
     const planned = reconcilePracticePlan(proposed);
     if (planned !== proposed) proposed = validateWorkspaceProposal(planned);
     const isCurrent = guardWorkspace();

@@ -1,0 +1,60 @@
+# Contest Lab
+
+Contest Lab lives at `/contests`, with individual workspaces at `/contests/[contestId]`. It uses the same validated notebook, problem identities, Codeforces import, IndexedDB transactions, recovery copies, JSON backup format and account transport as the rest of Forma. `contests` is an optional schema-version-2 extension; old backups still load without it. No database migration or second problem catalogue is required.
+
+## Setup and timing
+
+Choose saved library problems or entries from any saved track, or generate a set from the existing public Codeforces catalogue. A contest has 1–20 canonically distinct problems and a 5–360 minute duration. Review the chosen set and edit setup before starting. Starting locks the ordered set, metadata snapshot, reveal preference, duration and captured profile. An open regular session or another active contest blocks start; regular practice also rejects an active contest. Competing start/setup changes use the existing conflict/recovery flow rather than silently changing the running set.
+
+Generated sets filter the current profile’s recorded acceptances and personal/current-profile learning history according to the selected exclusions. Started contest work also counts as previously practiced for this filter. Rating bounds exclude unknown ratings. Eligible candidates are sorted by known rating ascending, with unknown ratings last, then problem key. The first requested number is selected. This is deterministic for the same catalogue snapshot, filters and recorded history. Insufficient candidates produce an actionable error without changing filters. Historical imports may be incomplete, and unrecorded older solves cannot be excluded. Catalogue errors allow manual creation; source metadata is never invented.
+
+Tags, individual ratings, track patterns and previously saved approach/solution notes stay hidden unless the pre-start reveal option is enabled. Hints are captured with the set so later source edits cannot change them. Review reveals saved metadata after the contest. Contest scratch notes remain separate from previous learning notes.
+
+The timer derives remaining time from persisted `startedAt` and `deadline`; no ticking counter is stored. Closing the tab does not pause it. A loaded contest checks expiry every second; the existing workspace reconciliation also checks on return/focus and at most every minute. On expiry, `endedAt` equals the original deadline, with no fabricated attempts or solved states. Early finish freezes its captured end timestamp, including when its storage write needs retry. Abandonment has its own state and end reason.
+
+Timing depends on the device clock. Changing that clock can change remaining time and the recorded early-finish window. Whole-contest wall time is reported separately; per-problem thinking and coding durations remain unknown. Statements, submission and judging stay on Codeforces or the saved problem’s platform. Forma does not run or judge code, estimate rank, or predict rating changes.
+
+## Evidence and review
+
+Submission evidence requires all three: the captured handle, normalized problem identity, and the actual platform timestamp within the inclusive recorded contest window. Late imports use submission time, not sync time. Post-window solves do not rewrite the original result. The original profile stays attached even when the connected profile changes; switching back is required to edit that contest or start its upsolve.
+
+Existing Codeforces deduplication, pending verdict and rejudging behavior feeds the contest ledger. Submission IDs, actual timestamps and observed verdict changes are retained. Submission links open on Codeforces. Last successful sync and sync errors are visible. Incomplete or failed imports never become proof that no acceptance exists. Self-reported “Marked solved” stays distinct from accepted platform evidence.
+
+Reflections reuse learning outcomes, difficulty, mistake labels, approach notes and takeaways. Optional overall review records what went well, lost time and the next change. Scratch notes, reflection drafts and overall review autosave after 600 ms of inactivity; explicit save controls are also available. Switching problems, finishing, abandoning or expiring flushes pending scratch notes. Closing the reflection dialog saves its unfinished draft without confirming it; only the explicit reflection save confirms that review. Wait for saving to finish before closing the browser tab. Rejudging changes platform evidence without overwriting the reflection. Problem Memory shows original contest reflections alongside the separate later practice timeline; contest wall time is not credited again as timed problem practice.
+
+Loaded pages continue saving notes/reviews to local storage without the network. Codeforces sync can be retried after reconnecting. The existing service worker intentionally does not cache private page HTML: opening or hard-reloading the app completely offline still uses the existing offline fallback. This phase does not change that policy.
+
+## Upsolving and My Practice Plan
+
+Explicitly queue unfinished or assisted contest problems. Each entry retains its source contest, original identity and reflection, priority, optional suggested date, and review/Memory links. Queue addition never overwrites coding or written-recall dates.
+
+The existing shared candidate service recommends eligible coding upsolves with an explanation naming their contest. Future suggested upsolve dates also prevent the same problem leaking into Today as a generic library/track choice; written recall remains independently scheduled. Existing future coding dates, daily skips, deferrals, archives and profile boundaries still apply. The ordinary planner’s budget, availability and track/mixed mode rules remain in force, so not every eligible upsolve must appear in the small daily plan.
+
+Start from the queue or the existing planned/regular timed workflow. The new real session is bound to an eligible queue entry; a saved solved learning outcome completes that entry and links to the real attempt. An unsolved saved attempt remains in history while its queue entry stays eligible for another try. Opening a link, reading an editorial, platform acceptance alone, or administrative removal does not complete the upsolve. Multiple contests can reference the same problem, but a regular session automatically binds only one eligible queue entry; explicit queue start selects its particular entry. Original contest results and reflections remain separate.
+
+## Persistence and limits
+
+Actions use stable IDs, proposal validation and existing atomic persistence. The interface uses durable data for saved transitions while a write is pending or failed. Double-clicked mutations are serialized. Untouched draft fields follow incoming saved changes. Edited fields compare their original values with the latest durable record inside the save proposal; competing edits offer explicit choices to use the saved value or keep the current draft. Independent fields can merge. Same-field transaction conflicts preserve the newer durable state and a recoverable losing copy. Starting while a stale tab edits the setup is an explicit conflict. New records participate in backups, account caches and generic account reconciliation. Referenced problem identities are protected, and snapshots survive track membership changes or catalogue outages.
+
+Supported bounds are 5,000 contests per workspace, 20 problems per contest, 10,000 characters of scratch notes, 2,000 characters per reflection/overall field, and the existing 64 MB workspace capacity. Limits reject writes rather than truncate history. Snapshotted previous hints retain up to 14,000 characters; they are supporting hints, not a replacement for the full original Memory record.
+
+## Verification
+
+Executed on **8 October 2026** against the final implementation:
+
+- `npm test`: **299 unit/integration tests passed**. Coverage includes canonical identities, immutable started setups, profile/window attribution, delayed and changed verdicts, backup compatibility, IndexedDB recovery/account isolation, exact upsolve-session binding and future-date planner exclusions. A regression check also ensures contest evidence indexing does not repeatedly scan the entire submission history for every contest.
+- `CI=1 npm run test:browser -- --workers=4 --retries=0`: **228 desktop/mobile checks passed; two hosted-account checks skipped**, with no failed checks. The skips require disposable account credentials. Local account-cache and transport fixtures do not establish live cross-device behavior.
+- The new Contest Lab browser cases exercise create → edit setup → start → work → reload → finish → import timestamped evidence → reflect → schedule an upsolve → complete real later practice → inspect Memory. They also cover insufficient generated sets, expiry, abandonment, overlap prevention, failed finish/retry, optional review drafts, offline edits followed by reload, rapid note switching, expiry with pending notes, and two-tab draft conflicts and independent field merges.
+- `npm run lint`, `npm run typecheck` and `npm run build -- --webpack` passed. The production app was restarted locally; this phase was **not deployed**.
+- Desktop and mobile screenshots were inspected in Light and Ink with Large text. Browser checks cover long titles, narrow reflow, keyboard focus/dialog dismissal and reduced motion. The timer uses `aria-live="off"` to avoid announcing every tick.
+
+Screenshots use the existing browser fixtures and capture setup, active practice, review and reflection:
+
+| Workspace  | Desktop Light                                      | Desktop Ink                                       | Mobile Light                                      | Mobile Ink                                       |
+| ---------- | -------------------------------------------------- | ------------------------------------------------- | ------------------------------------------------- | ------------------------------------------------ |
+| Setup      | [View](forma-contest-setup-light-desktop.png)      | [View](forma-contest-setup-dark-desktop.png)      | [View](forma-contest-setup-light-mobile.png)      | [View](forma-contest-setup-dark-mobile.png)      |
+| Active     | [View](forma-contest-active-light-desktop.png)     | [View](forma-contest-active-dark-desktop.png)     | [View](forma-contest-active-light-mobile.png)     | [View](forma-contest-active-dark-mobile.png)     |
+| Review     | [View](forma-contest-review-light-desktop.png)     | [View](forma-contest-review-dark-desktop.png)     | [View](forma-contest-review-light-mobile.png)     | [View](forma-contest-review-dark-mobile.png)     |
+| Reflection | [View](forma-contest-reflection-light-desktop.png) | [View](forma-contest-reflection-dark-desktop.png) | [View](forma-contest-reflection-light-mobile.png) | [View](forma-contest-reflection-dark-mobile.png) |
+
+Remaining limits: local timing depends on the device clock; per-problem work duration is unknown; incomplete Codeforces history cannot prove an absence of solves; cold offline navigation uses the existing fallback; live hosted account/device operation awaits disposable test credentials.

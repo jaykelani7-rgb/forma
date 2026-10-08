@@ -27,6 +27,9 @@ export function problemIdentityProtected(
     data.codeforces.practiceAttempts.some((a) => a.problemId === problemId) ||
     data.revisions?.some((r) => r.problemId === problemId) === true ||
     data.session?.problemId === problemId ||
+    data.contests?.some((c) =>
+      c.problems.some((p) => p.problemId === problemId),
+    ) === true ||
     !!data.problems.find((p) => p.id === problemId)?.cfHandle
   );
 }

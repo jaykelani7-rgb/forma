@@ -33,6 +33,9 @@ export function withPlannedPracticeSession(
       sessionId,
       choice.fresh,
       choice.trackContext,
+      item.candidateKey.startsWith("upsolve:")
+        ? item.candidateKey.slice("upsolve:".length)
+        : undefined,
     ),
     itemId,
     sessionId,

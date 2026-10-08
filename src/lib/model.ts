@@ -1,3 +1,4 @@
+import { validateContests, type PracticeContest } from "./contest-lab";
 import {
   CodeforcesData,
   DEFAULT_REVIEW_DAYS,
@@ -143,6 +144,7 @@ export interface Data {
   activeTrackId?: string | null;
   revisions?: RevisionRecord[];
   practicePlans?: PracticePlan[];
+  contests?: PracticeContest[];
 }
 export const emptyData = (): Data => ({
   schemaVersion: 2,
@@ -1000,6 +1002,16 @@ export function validateData(input: unknown): Data {
             revisions,
             codeforces,
             learningLinks,
+          }),
+        }
+      : {}),
+    ...(input.contests !== undefined
+      ? {
+          contests: validateContests(input.contests, {
+            problems,
+            attempts,
+            session: input.session as Session | null,
+            codeforces,
           }),
         }
       : {}),

@@ -1,3 +1,4 @@
+import { contestLockedSetup, type PracticeContest } from "./contest-lab";
 import { Data, validateData } from "./model";
 
 export const MAX_BACKUP_BYTES = 64 * 1024 * 1024;
@@ -81,7 +82,7 @@ export function mergeWorkspaces(
   const conflicts: string[] = [];
   function merge(b: unknown, l: unknown, r: unknown, path: string): unknown {
     if (
-      path === "workspace.practicePlans" &&
+      ["workspace.practicePlans", "workspace.contests"].includes(path) &&
       b === undefined &&
       Array.isArray(l) &&
       Array.isArray(r)
@@ -95,6 +96,28 @@ export function mergeWorkspaces(
       equivalentInitialPlans(l, r)
     )
       return String(l.createdAt) < String(r.createdAt) ? l : r;
+    if (
+      /^workspace\.contests\[[^\]]+\]$/.test(path) &&
+      object(b) &&
+      object(l) &&
+      object(r) &&
+      b.state === "draft" &&
+      ((l.state !== "draft" &&
+        r.state === "draft" &&
+        !equal(
+          contestLockedSetup(b as unknown as PracticeContest),
+          contestLockedSetup(r as unknown as PracticeContest),
+        )) ||
+        (r.state !== "draft" &&
+          l.state === "draft" &&
+          !equal(
+            contestLockedSetup(b as unknown as PracticeContest),
+            contestLockedSetup(l as unknown as PracticeContest),
+          )))
+    ) {
+      conflicts.push(`${path}.locked setup`);
+      return r;
+    }
     if (equal(l, b)) return r;
     if (equal(r, b) || equal(l, r)) return l;
     if (object(b) && object(l) && object(r)) {

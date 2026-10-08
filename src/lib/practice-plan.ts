@@ -1,4 +1,9 @@
 import {
+  activeContest,
+  eligibleUpsolves,
+  futureUpsolveIdentities,
+} from "./contest-lab";
+import {
   elapsed,
   localDate,
   matchesFocus,
@@ -206,6 +211,7 @@ export function practiceCandidates(
   data: Data,
   now = new Date(),
 ): PracticeCandidate[] {
+  if (activeContest(data)) return [];
   const today = localDate(now),
     prefs = practicePreferences(data);
   const candidates: PracticeCandidate[] = [];
@@ -253,6 +259,7 @@ export function practiceCandidates(
       data.codeforces.connectedHandle?.toLowerCase()
   )
     return candidates;
+  const futureUpsolves = futureUpsolveIdentities(data, now);
   const resolved = resolvedPracticeProblems(data, now);
   const allowed = resolved.filter((problem) => {
     const state = sharedPracticeState(data, problem, now);
@@ -279,7 +286,12 @@ export function practiceCandidates(
         ? { relatedRecallAt: state.recallAt }
         : {}),
     };
-    if (state.codingAt && state.codingAt <= today && relevant.has(identity))
+    if (
+      state.codingAt &&
+      state.codingAt <= today &&
+      relevant.has(identity) &&
+      !futureUpsolves.has(identity)
+    )
       candidates.push({
         key: `coding:${identity}`,
         identity,
@@ -358,13 +370,38 @@ export function practiceCandidates(
       });
     }
   }
+  for (const { contest, row, problem } of eligibleUpsolves(data, now)) {
+    const identity = practiceIdentity(problem);
+    candidates.unshift({
+      key: `upsolve:${row.id}`,
+      identity,
+      problem,
+      fresh: false,
+      kind: "coding",
+      activity: "coding",
+      reason: `Upsolve from ${contest.name}: ${row.reflection ? (row.reflection.outcome === "unsolved" ? "unfinished" : "assisted") : "unfinished"} contest problem.`,
+      evidence: [
+        {
+          type: "collection",
+          label: `Contest Lab / ${contest.name}. Original contest result stays separate.`,
+          recordId: contest.id,
+        },
+      ],
+      dueAt: row.upsolve!.dueAt ?? today,
+      suggestedMinutes: data.settings.defaultDuration,
+      ...contextFor(data, problem),
+    });
+  }
   const next =
     data.activeTrackId && nextTrackEntry(data, data.activeTrackId, now);
   if (next) {
     const identity = practiceIdentity(next.problem),
       state = sharedPracticeState(data, next.problem, now);
     // Due revisits already have their schedule-backed candidate.
-    if (!state.codingAt || state.codingAt > today)
+    if (
+      (!state.codingAt || state.codingAt > today) &&
+      !futureUpsolves.has(identity)
+    )
       candidates.push({
         key: `track:${next.entry.id}`,
         identity,
@@ -408,6 +445,7 @@ export function practiceCandidates(
   const collected = allowed.filter(
     (problem) =>
       relevant.has(practiceIdentity(problem)) &&
+      !futureUpsolves.has(practiceIdentity(problem)) &&
       sharedPracticeState(data, problem, now).eligible &&
       !completedActive.has(practiceIdentity(problem)) &&
       (!problem.cfHandle ||
@@ -459,6 +497,8 @@ export function practiceCandidates(
       rank(a) - rank(b) ||
       (a.dueAt ?? "").localeCompare(b.dueAt ?? "") ||
       Number(a.kind === "recall") - Number(b.kind === "recall") ||
+      Number(!a.key.startsWith("upsolve:")) -
+        Number(!b.key.startsWith("upsolve:")) ||
       a.identity.localeCompare(b.identity) ||
       a.key.localeCompare(b.key),
   );
