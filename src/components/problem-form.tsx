@@ -1,7 +1,12 @@
 "use client";
 import { useRef, useState } from "react";
 import { ArrowRight, Link2 } from "lucide-react";
+import Link from "next/link";
 import { Problem, safeUrl, uid } from "@/lib/model";
+import {
+  assertSafeProblemEdit,
+  problemIdentityProtected,
+} from "@/lib/workspace-proposal";
 import { useWorkspace } from "./provider";
 import { Modal } from "./ui";
 
@@ -12,7 +17,7 @@ export function AddProblem({
   onClose: () => void;
   problem?: Problem;
 }) {
-  const { update, notify, guardWorkspace } = useWorkspace();
+  const { data, update, notify, guardWorkspace } = useWorkspace();
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
   const saving = useRef(false);
@@ -87,24 +92,28 @@ export function AddProblem({
     setPending(true);
     setError("");
     try {
-      const saved = await update((data) => ({
-        ...data,
-        problems: data.problems.some((p) => p.id === value.id)
-          ? data.problems.map((p) =>
-              p.id === value.id
-                ? {
-                    ...p,
-                    title: value.title,
-                    platform: value.platform,
-                    url: value.url,
-                    problemCode: value.problemCode,
-                    tags: value.tags,
-                    rating: value.rating,
-                  }
-                : p,
-            )
-          : [...data.problems, value],
-      }));
+      const saved = await update((data) => {
+        const previous = data.problems.find((p) => p.id === value.id);
+        if (previous) assertSafeProblemEdit(data, previous, value);
+        return {
+          ...data,
+          problems: data.problems.some((p) => p.id === value.id)
+            ? data.problems.map((p) =>
+                p.id === value.id
+                  ? {
+                      ...p,
+                      title: value.title,
+                      platform: value.platform,
+                      url: value.url,
+                      problemCode: value.problemCode,
+                      tags: value.tags,
+                      rating: value.rating,
+                    }
+                  : p,
+              )
+            : [...data.problems, value],
+        };
+      });
       if (!isCurrent()) return;
       if (!saved) {
         setError(
@@ -143,6 +152,17 @@ export function AddProblem({
           Save a problem you want to understand. The first attempt can come
           whenever you’re ready.
         </p>
+        {problem && problemIdentityProtected(data, problem.id) && (
+          <p className="field-help">
+            This problem has track membership or recorded practice. Keep its
+            original platform, ID and link to preserve that history. Replace a
+            track entry through{" "}
+            <Link className="text-link" href="/tracks">
+              Edit track
+            </Link>
+            ; its earlier history stays in Forma.
+          </p>
+        )}
         <label>
           Problem name
           <input

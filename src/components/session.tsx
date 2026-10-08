@@ -13,7 +13,8 @@ import {
   Play,
   RotateCcw,
 } from "lucide-react";
-import { problemLearningHistory } from "@/lib/learning";
+import { problemMemory, revisionCueForProblem } from "@/lib/memory";
+import { sharedPracticeState } from "@/lib/practice-state";
 import {
   Attempt,
   BRAND,
@@ -35,11 +36,14 @@ import { BrandMark, FocusBack } from "./shell";
 import { EmptyState, Modal, ProblemLink } from "./ui";
 import type { TrackContext } from "@/lib/tracks-types";
 import { nextTrackEntry, trackContextForEntry } from "@/lib/tracks";
+import { MISTAKES, type ReflectionMemory } from "@/lib/memory-types";
+import { ReflectionMemoryFields } from "./reflection-memory-fields";
 
 export function FocusedSession() {
   const {
     data,
     update,
+    retryLocalSave,
     notify,
     storageError,
     storagePending,
@@ -51,11 +55,22 @@ export function FocusedSession() {
   const [closingDraft, setClosingDraft] = useState<{
     session: Session;
     problem: Problem;
+    reviewProblem?: Problem;
   } | null>(null);
   const session = closingDraft?.session ?? data.session;
   const problem =
     closingDraft?.problem ??
     data.problems.find((p) => p.id === session?.problemId);
+  const reviewProblem =
+    closingDraft?.reviewProblem ??
+    (problem
+      ? (sharedPracticeState(
+          data,
+          problem,
+          new Date(),
+          problem.cfHandle ? { handle: problem.cfHandle } : undefined,
+        ).codingProblem ?? { ...problem, reviewAt: null, reviewCount: 0 })
+      : undefined);
   const [now, setNow] = useState(() => Date.now());
   const [outcome, setOutcome] = useState<Outcome | null>(null);
   const [difficulty, setDifficulty] = useState<Difficulty | null>(null);
@@ -63,6 +78,7 @@ export function FocusedSession() {
     undefined,
   );
   const [takeaway, setTakeaway] = useState("");
+  const [memory, setMemory] = useState<ReflectionMemory>({});
   const [error, setError] = useState("");
   const [discard, setDiscard] = useState(false);
   const [pending, setPending] = useState<"save" | "discard" | "restore" | null>(
@@ -72,6 +88,7 @@ export function FocusedSession() {
   const attemptIdentity = useRef<string | null>(null);
   const [completed, setCompleted] = useState<{
     title: string;
+    problemId: string;
     milestone: boolean;
     reviewAt: string | null;
     trackContext?: TrackContext;
@@ -113,6 +130,7 @@ export function FocusedSession() {
       setOutcome(null);
       setDifficulty(null);
       setTakeaway("");
+      setMemory({});
       setReviewDate(undefined);
       attemptIdentity.current = null;
       setError("");
@@ -156,20 +174,21 @@ export function FocusedSession() {
   }
   async function save(e: React.FormEvent) {
     e.preventDefault();
+    await commit(e.currentTarget as HTMLFormElement);
+  }
+  async function commit(form: HTMLFormElement, retry = false) {
     if (closing.current) return;
     if (!outcome || !session || !problem) {
       setError("Choose the reflection that fits this attempt.");
       return;
     }
     const review = nextReview(
-      closingDraft?.problem ?? problem,
+      reviewProblem ?? problem,
       outcome,
       new Date(),
       data.settings.reviewDays,
     );
-    const submitted = new FormData(e.currentTarget as HTMLFormElement).get(
-      "reviewDate",
-    );
+    const submitted = new FormData(form).get("reviewDate");
     if (reviewDate === null) review.reviewAt = null;
     else if (submitted) review.reviewAt = String(submitted);
     const priorLearning = attemptIdentity.current
@@ -182,12 +201,18 @@ export function FocusedSession() {
       : data;
     const milestone =
       outcome === "independent" &&
-      problemLearningHistory(priorLearning, problem.id).some(
+      problemMemory(
+        priorLearning,
+        problem.id,
+        problem.cfHandle ? { handle: problem.cfHandle } : undefined,
+      ).history.some(
         (a) => a.outcome !== null && a.outcome !== "independent",
       ) &&
-      !problemLearningHistory(priorLearning, problem.id).some(
-        (a) => a.outcome === "independent",
-      );
+      !problemMemory(
+        priorLearning,
+        problem.id,
+        problem.cfHandle ? { handle: problem.cfHandle } : undefined,
+      ).history.some((a) => a.outcome === "independent");
     const attempt: Attempt = {
       id: attemptIdentity.current ?? (attemptIdentity.current = uid()),
       problemId: problem.id,
@@ -198,15 +223,16 @@ export function FocusedSession() {
       difficulty,
       takeaway: takeaway.trim(),
       notes: session.notes,
+      ...memory,
       ...(session.trackContext ? { trackContext: session.trackContext } : {}),
     };
     const isCurrent = guardWorkspace();
     closing.current = true;
     setPending("save");
     setError("");
-    setClosingDraft(closingDraft ?? { session, problem });
+    setClosingDraft(closingDraft ?? { session, problem, reviewProblem });
     try {
-      const saved = await update((d) => {
+      const saved = await (retry ? retryLocalSave : update)((d) => {
         if (d.session && d.session.id !== session.id)
           throw new Error(
             "Another session is now active. Review your recovery copy before saving this reflection.",
@@ -223,6 +249,7 @@ export function FocusedSession() {
                   ...p,
                   ...review,
                   reviewManual: reviewDate !== undefined,
+                  reviewUpdatedAt: attempt.completedAt,
                   ...(p.cfHandle ? { reviewAttemptId: undefined } : {}),
                   ...(reviewDate === null && p.reviewAt
                     ? { reviewCompletedAt: attempt.completedAt }
@@ -241,6 +268,7 @@ export function FocusedSession() {
       }
       setCompleted({
         title: problem.title,
+        problemId: problem.id,
         milestone,
         reviewAt: review.reviewAt,
         ...(session.trackContext ? { trackContext: session.trackContext } : {}),
@@ -331,6 +359,7 @@ export function FocusedSession() {
                         reviewAttemptId: closingDraft.problem.reviewAttemptId,
                         reviewCompletedAt:
                           closingDraft.problem.reviewCompletedAt,
+                        reviewUpdatedAt: closingDraft.problem.reviewUpdatedAt,
                       }
                     : p,
                 )
@@ -443,6 +472,13 @@ export function FocusedSession() {
             See your progress
             <ArrowRight size={16} />
           </Link>
+          <Link
+            className="text-link"
+            href={`/problems/${encodeURIComponent(completed.problemId)}?from=${encodeURIComponent(completed.trackContext && stageExists(completed.trackContext) ? `/tracks/${completed.trackContext.trackId}/stages/${completed.trackContext.stageId}` : "/")}`}
+          >
+            View Learning Memory
+            <ArrowRight size={16} />
+          </Link>
         </div>
         {next && (
           <p className="small muted">
@@ -474,6 +510,14 @@ export function FocusedSession() {
       </div>
     );
   const duration = elapsed(session, now);
+  const memoryScope = problem.cfHandle
+    ? { handle: problem.cfHandle }
+    : undefined;
+  const priorMemory =
+    session.phase === "focus"
+      ? problemMemory(data, problem.id, memoryScope)
+      : null;
+  const recallCue = revisionCueForProblem(data, problem.id, memoryScope);
   return (
     <div className="session-page page-enter">
       <header className="focus-header">
@@ -525,6 +569,58 @@ export function FocusedSession() {
             <summary>Reveal pattern hint</summary>
             <p>{currentEntry.pattern}</p>
           </details>
+        )}
+        {priorMemory && (priorMemory.history.length > 0 || recallCue) && (
+          <section className="session-memory" aria-label="Before you re-solve">
+            <h2>Before you re-solve</h2>
+            {priorMemory.summary.mistakes.length > 0 && (
+              <p className="small muted">
+                Previously marked:{" "}
+                {priorMemory.summary.mistakes
+                  .map(({ category }) => MISTAKES[category])
+                  .join(" · ")}
+                .
+              </p>
+            )}
+            {priorMemory.history.some((record) => record.difficulty) && (
+              <p className="small muted">
+                Earlier difficulties:{" "}
+                {[
+                  ...new Set(
+                    priorMemory.history.flatMap((record) =>
+                      record.difficulty
+                        ? [DIFFICULTIES[record.difficulty]]
+                        : [],
+                    ),
+                  ),
+                ].join(" · ")}
+                .
+              </p>
+            )}
+            {recallCue && <p>Your cue: {recallCue}</p>}
+            {priorMemory.history.some(
+              (record) => record.approach || record.notes || record.takeaway,
+            ) && (
+              <details>
+                <summary>Reveal previous notes</summary>
+                {priorMemory.history
+                  .filter(
+                    (record) =>
+                      record.approach || record.notes || record.takeaway,
+                  )
+                  .map((record) => (
+                    <div key={record.id}>
+                      <p className="small muted">
+                        {new Date(record.completedAt).toLocaleDateString()}
+                      </p>
+                      {record.approach && <p>{record.approach}</p>}
+                      {record.notes && <p>{record.notes}</p>}
+                      {record.takeaway && <p>{record.takeaway}</p>}
+                    </div>
+                  ))}
+              </details>
+            )}
+          </section>
         )}
         {session.phase === "focus" ? (
           <>
@@ -667,30 +763,35 @@ export function FocusedSession() {
                 ))}
               </div>
             </fieldset>
-            <fieldset className="difficulty-options">
-              <legend>
-                Where did you get stuck?{" "}
-                <span className="optional">optional</span>
-              </legend>
-              <div>
-                {Object.entries(DIFFICULTIES).map(([key, label]) => (
-                  <button
-                    type="button"
-                    disabled={pending !== null}
-                    key={key}
-                    aria-pressed={difficulty === key}
-                    className={difficulty === key ? "selected" : ""}
-                    onClick={() =>
-                      setDifficulty(
-                        difficulty === key ? null : (key as Difficulty),
-                      )
-                    }
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </fieldset>
+            <ReflectionMemoryFields
+              value={memory}
+              onChange={setMemory}
+              disabled={pending !== null}
+            >
+              <fieldset className="difficulty-options">
+                <legend>
+                  Broad difficulty <span className="optional">optional</span>
+                </legend>
+                <div>
+                  {Object.entries(DIFFICULTIES).map(([key, label]) => (
+                    <button
+                      type="button"
+                      disabled={pending !== null}
+                      key={key}
+                      aria-pressed={difficulty === key}
+                      className={difficulty === key ? "selected" : ""}
+                      onClick={() =>
+                        setDifficulty(
+                          difficulty === key ? null : (key as Difficulty),
+                        )
+                      }
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </fieldset>
+            </ReflectionMemoryFields>
             <label className="takeaway-label">
               One thing to remember <span className="optional">optional</span>
               <input
@@ -700,6 +801,9 @@ export function FocusedSession() {
                 maxLength={300}
                 placeholder="Next time, I’ll…"
               />
+              <span className="small muted">
+                What would you notice sooner next time?
+              </span>
             </label>
             {outcome && (
               <div className="schedule-preview">
@@ -718,7 +822,7 @@ export function FocusedSession() {
                     className={
                       (reviewDate === undefined
                         ? nextReview(
-                            problem,
+                            reviewProblem ?? problem,
                             outcome,
                             new Date(),
                             data.settings.reviewDays,
@@ -730,7 +834,7 @@ export function FocusedSession() {
                     onClick={() =>
                       setReviewDate(
                         nextReview(
-                          problem,
+                          reviewProblem ?? problem,
                           outcome,
                           new Date(),
                           data.settings.reviewDays,
@@ -751,7 +855,7 @@ export function FocusedSession() {
                 </div>
                 {(reviewDate === undefined
                   ? nextReview(
-                      problem,
+                      reviewProblem ?? problem,
                       outcome,
                       new Date(),
                       data.settings.reviewDays,
@@ -765,7 +869,7 @@ export function FocusedSession() {
                       value={
                         (reviewDate === undefined
                           ? nextReview(
-                              problem,
+                              reviewProblem ?? problem,
                               outcome,
                               new Date(),
                               data.settings.reviewDays,
@@ -805,6 +909,19 @@ export function FocusedSession() {
                 <ArrowLeft size={15} />
                 Back to the session
               </button>
+              {storageError && (
+                <button
+                  type="button"
+                  className="button secondary"
+                  disabled={pending !== null}
+                  onClick={(event) => {
+                    const form = event.currentTarget.form;
+                    if (form?.reportValidity()) void commit(form, true);
+                  }}
+                >
+                  Retry saving reflection
+                </button>
+              )}
               <button
                 type="submit"
                 className="button primary"

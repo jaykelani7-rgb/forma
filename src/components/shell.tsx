@@ -51,7 +51,11 @@ export function BrandMark({ small = false }: { small?: boolean }) {
 }
 export function Shell({ children }: { children: ReactNode }) {
   const path = usePathname();
-  const activePath = path.startsWith("/tracks/") ? "/tracks" : path;
+  const activePath = path.startsWith("/tracks/")
+    ? "/tracks"
+    : path.startsWith("/problems/")
+      ? "/problems"
+      : path;
   const {
     data,
     ready,

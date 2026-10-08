@@ -1611,10 +1611,14 @@ label > .input-icon {
 }
 .revisit-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 14px;
   margin-top: 22px;
 }
+.revisit-notes { margin-top: .75rem; }
+.revisit-notes summary { cursor: pointer; color: var(--accent); }
+.revisit-notes p { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: .5rem; }
 .revisit-actions .button {
   font-size: var(--text-control);
   min-height: 44px;
@@ -5376,6 +5380,11 @@ a,
 html[data-text-size="large"] .sidebar-note {
   display: none;
 }
+.session-memory { margin-top: 1rem; padding: 1rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.session-memory h2 { font-size: var(--text-control); margin-bottom: .5rem; }
+.session-memory p { margin-top: .5rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+.session-memory details { margin-top: .75rem; }
+.session-memory summary { color: var(--accent); cursor: pointer; }
 .today-track-context {
   margin-top: 12px;
   display: grid;

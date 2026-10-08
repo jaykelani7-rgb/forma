@@ -8,14 +8,8 @@ import {
   Play,
   RefreshCw,
 } from "lucide-react";
-import {
-  automaticPracticeEligible,
-  Duration,
-  localDate,
-  Problem,
-  reviewQueue,
-  uid,
-} from "@/lib/model";
+import { Duration, localDate, Problem, reviewQueue, uid } from "@/lib/model";
+import { sharedPracticeState } from "@/lib/practice-state";
 import {
   catalogueProblemToSaved,
   catalogueTopics,
@@ -106,7 +100,7 @@ export function FreshDiscovery({
   const due =
     reviewQueue(data).find(
       (problem) =>
-        automaticPracticeEligible(problem) &&
+        sharedPracticeState(data, problem).eligible &&
         problem.reviewAt !== null &&
         problem.reviewAt <= localDate(),
     ) ?? null;

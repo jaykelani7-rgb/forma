@@ -1,4 +1,8 @@
 import type { Difficulty, Outcome, Problem } from "./model";
+import {
+  type ReflectionMemory,
+  validateReflectionMemory,
+} from "./memory-types";
 
 export const CF_PAGE_SIZE = 50;
 export const CF_INBOX_SIZE = 5;
@@ -49,7 +53,7 @@ export interface ImportedAttempt {
   /** Assigned once to a calendar-day batch; completion/skip does not refill it. */
   batchDate?: string;
 }
-export interface QuickReflection {
+export interface QuickReflection extends ReflectionMemory {
   attemptId: string;
   outcome: Outcome;
   difficulty: Difficulty | null;
@@ -388,6 +392,7 @@ export function validateCodeforces(
       difficulty: r.difficulty as Difficulty | null,
       takeaway: r.takeaway,
       savedAt: normalizeStamp(r.savedAt)!,
+      ...validateReflectionMemory(r),
     });
   }
   for (const p of problems) {

@@ -9,6 +9,7 @@ import {
   trackEntryProgress,
 } from "./tracks";
 import type { TrackContext } from "./tracks-types";
+import { revisitItems } from "./practice-state";
 
 export interface TodayPractice {
   problem: Problem;
@@ -18,6 +19,7 @@ export interface TodayPractice {
   fresh: boolean;
   trackContext?: TrackContext;
   position?: { index: number; total: number };
+  activity?: "explain" | "complexity";
 }
 const identity = (problem: Problem) =>
   problem.cfKey ??
@@ -79,6 +81,28 @@ export function todayPractice(
     };
   }
   const existing = suggestion(data, now);
+  const recall = revisitItems(data, now).find(
+    (item) =>
+      item.recallAt &&
+      item.recallAt <= localDate(now) &&
+      !item.skipped &&
+      (!item.deferredUntil || item.deferredUntil <= localDate(now)),
+  );
+  if (
+    recall &&
+    (!existing?.problem.reviewAt ||
+      existing.problem.reviewAt > recall.recallAt!)
+  )
+    return {
+      problem: recall.problem,
+      reason:
+        "A written recall check is ready. Your coding reattempt keeps its own date.",
+      revisit: true,
+      focusFallback: false,
+      fresh: false,
+      activity: recall.recallActivity!,
+      ...contextForProblem(data, recall.problem),
+    };
   if (existing?.problem.reviewAt && existing.problem.reviewAt <= localDate(now))
     return {
       ...existing,

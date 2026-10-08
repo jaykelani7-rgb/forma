@@ -410,6 +410,13 @@ export function ActivityRows({
                 )}
               </div>
               <div className="cf-row-actions">
+                <Link
+                  className="text-link"
+                  href={`/problems/${encodeURIComponent(problem.id)}?from=${encodeURIComponent("/activity")}`}
+                  aria-label={`Learning Memory: ${problem.title}`}
+                >
+                  Learning Memory
+                </Link>
                 <button
                   className="button secondary"
                   aria-label={`${reflection ? "Edit reflection" : "Reflect"}: ${problem.title}`}

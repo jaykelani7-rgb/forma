@@ -1,0 +1,63 @@
+.summary {
+  margin: 2rem 0;
+  padding: clamp(1rem, 3vw, 2rem);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+}
+.heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 1.5rem;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+.heading h2 {
+  font-size: 1.55rem;
+  line-height: 1.25;
+}
+.heading label {
+  min-width: 10rem;
+}
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 1.25rem;
+  margin: 1.5rem 0;
+}
+.metrics dt {
+  font-size: 0.86rem;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.metrics dd {
+  font-size: 1.55rem;
+  margin: 0.3rem 0 0;
+  font-variant-numeric: tabular-nums;
+}
+.columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  gap: 1.5rem;
+}
+.columns h3 {
+  font-size: 1rem;
+  margin: 0 0 0.75rem;
+  line-height: 1.5;
+}
+.columns ul {
+  padding-left: 1.25rem;
+}
+.columns li {
+  margin: 0.5rem 0;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 600px) {
+  .heading label {
+    width: 100%;
+  }
+  .summary {
+    margin: 1.5rem 0;
+  }
+}

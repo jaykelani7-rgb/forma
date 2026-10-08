@@ -12,6 +12,7 @@ import {
 } from "@/lib/model";
 import { useWorkspace } from "./provider";
 import { CodeforcesProgress } from "./codeforces";
+import { LearningSummary } from "./learning-summary";
 import { EmptyState, PageHeader, SectionHeading } from "./ui";
 
 export function Progress() {
@@ -67,6 +68,7 @@ export function Progress() {
           </select>
         </label>
       )}
+      <LearningSummary handle={handle} />
       {!stats.practiceAttempts ? (
         <EmptyState
           icon={<TrendingUp size={30} strokeWidth={1.4} />}

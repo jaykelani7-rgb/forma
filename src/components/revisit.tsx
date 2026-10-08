@@ -1,5 +1,10 @@
 "use client";
 import { useRef, useState } from "react";
+import Link from "next/link";
+import { revisitItems } from "@/lib/practice-state";
+import { problemMemory, revisionCueForProblem } from "@/lib/memory";
+import { MISTAKES } from "@/lib/memory-types";
+import { RevisionDialog } from "./revision";
 import {
   ArrowRight,
   CalendarDays,
@@ -16,7 +21,6 @@ import {
   latestReflection,
   localDate,
   reviewLabel,
-  reviewQueue,
   completeRevisit,
   rescheduleProblem,
 } from "@/lib/model";
@@ -26,6 +30,10 @@ import { EmptyState, Modal, OutcomeLabel, PageHeader, Tags } from "./ui";
 export function Revisit() {
   const { data, update, startSession, notify, guardWorkspace } = useWorkspace();
   const [showAll, setShowAll] = useState(false);
+  const [revision, setRevision] = useState<{
+    problem: Problem;
+    activity: "explain" | "complexity";
+  } | null>(null);
   const [reschedule, setReschedule] = useState<Problem | null>(null);
   const [retired, setRetired] = useState<Problem | null>(null);
   const [date, setDate] = useState(localDate(addDays(new Date(), 1)));
@@ -33,7 +41,7 @@ export function Revisit() {
   const [pending, setPending] = useState(false);
   const [retryCompletion, setRetryCompletion] = useState<Problem | null>(null);
   const saving = useRef(false);
-  const queue = reviewQueue(data);
+  const queue = revisitItems(data);
   const batch = showAll ? queue : queue.slice(0, 3);
   async function commit(
     change: (current: typeof data) => typeof data,
@@ -162,6 +170,7 @@ export function Revisit() {
                           reviewCount: retired.reviewCount,
                           reviewManual: retired.reviewManual,
                           reviewCompletedAt: retired.reviewCompletedAt,
+                          reviewUpdatedAt: retired.reviewUpdatedAt,
                           reviewAttemptId: retired.reviewAttemptId,
                         }
                       : p,
@@ -194,8 +203,13 @@ export function Revisit() {
             </button>
           </div>
           <div className="revisit-list">
-            {batch.map((problem, index) => {
-              const last = latestReflection(data, problem.id);
+            {batch.map((item, index) => {
+              const { problem, codingAt, recallAt, dueAt } = item;
+              const memory = problemMemory(data, problem.id);
+              const cue = revisionCueForProblem(data, problem.id);
+              const last =
+                memory.summary.latestReflection ??
+                latestReflection(data, problem.id);
               return (
                 <article className="revisit-entry" key={problem.id}>
                   <div className="revisit-entry-index mono">0{index + 1}</div>
@@ -203,12 +217,48 @@ export function Revisit() {
                     <div className="revisit-title-row">
                       <h2>{problem.title}</h2>
                       <span
-                        className={`review-time ${problem.reviewAt! <= localDate() ? "ready" : ""}`}
+                        className={`review-time ${dueAt! <= localDate() ? "ready" : ""}`}
                       >
                         <span className="status-dot" />
-                        {reviewLabel(problem.reviewAt!)}
+                        {reviewLabel(dueAt!)}
                       </span>
                     </div>
+                    <p className="small muted">
+                      {codingAt
+                        ? `Coding reattempt: ${codingAt}. `
+                        : "No coding reattempt scheduled. "}
+                      {recallAt
+                        ? `Written recall: ${recallAt}.`
+                        : "No written recall scheduled."}
+                    </p>
+                    {memory.summary.mistakes.length > 0 && (
+                      <p className="small muted">
+                        Previously marked:{" "}
+                        {memory.summary.mistakes
+                          .map((m) => MISTAKES[m.category])
+                          .join(" · ")}
+                      </p>
+                    )}
+                    {cue && <p className="small">Your cue: {cue}</p>}
+                    <details className="revisit-notes">
+                      <summary>Reveal previous notes</summary>
+                      {memory.history
+                        .filter(
+                          (r) =>
+                            r.outcome !== null &&
+                            (r.approach || r.notes || r.takeaway),
+                        )
+                        .map((r) => (
+                          <div key={r.id}>
+                            <p className="small muted">
+                              {new Date(r.completedAt).toLocaleDateString()}
+                            </p>
+                            {r.approach && <p>{r.approach}</p>}
+                            {r.notes && <p>{r.notes}</p>}
+                            {r.takeaway && <p>{r.takeaway}</p>}
+                          </div>
+                        ))}
+                    </details>
                     <div className="problem-meta">
                       <span>{problem.platform}</span>
                       {problem.cfHandle && <span>{problem.cfHandle}</span>}
@@ -225,41 +275,69 @@ export function Revisit() {
                     </p>
                     <div className="revisit-entry-bottom">
                       <Tags tags={problem.tags} />
-                      <OutcomeLabel outcome={last?.outcome} />
+                      <OutcomeLabel outcome={last?.outcome ?? undefined} />
                     </div>
                     <div className="revisit-actions">
+                      <Link
+                        className="text-link"
+                        href={`/problems/${encodeURIComponent(problem.id)}?from=%2Frevisit`}
+                      >
+                        Learning Memory
+                      </Link>
                       <button
                         className="button primary"
                         disabled={pending}
                         onClick={() => startSession(problem)}
                       >
-                        Start revisit
+                        {codingAt ? "Start revisit" : "Re-solve problem"}
                         <ArrowRight size={16} />
                       </button>
                       <button
-                        className="button ghost"
+                        className="button secondary"
                         disabled={pending}
-                        onClick={() => {
-                          setDate(
-                            problem.reviewAt! < localDate()
-                              ? localDate(addDays(new Date(), 1))
-                              : problem.reviewAt!,
-                          );
-                          setError("");
-                          setReschedule(problem);
-                        }}
+                        onClick={() =>
+                          setRevision({ problem, activity: "explain" })
+                        }
                       >
-                        <CalendarDays size={15} />
-                        Reschedule
+                        Explain approach
                       </button>
                       <button
-                        className="text-link retire"
+                        className="button secondary"
                         disabled={pending}
-                        onClick={() => retire(problem)}
+                        onClick={() =>
+                          setRevision({ problem, activity: "complexity" })
+                        }
                       >
-                        <Check size={15} />
-                        Complete this revisit
+                        Recall complexity &amp; edges
                       </button>
+                      {codingAt && (
+                        <>
+                          <button
+                            className="button ghost"
+                            disabled={pending}
+                            onClick={() => {
+                              setDate(
+                                problem.reviewAt! < localDate()
+                                  ? localDate(addDays(new Date(), 1))
+                                  : problem.reviewAt!,
+                              );
+                              setError("");
+                              setReschedule(problem);
+                            }}
+                          >
+                            <CalendarDays size={15} />
+                            Reschedule
+                          </button>
+                          <button
+                            className="text-link retire"
+                            disabled={pending}
+                            onClick={() => retire(problem)}
+                          >
+                            <Check size={15} />
+                            Complete this revisit
+                          </button>
+                        </>
+                      )}
                     </div>
                   </div>
                 </article>
@@ -272,12 +350,15 @@ export function Revisit() {
           title="A little breathing room."
           description="Your revisit list is clear. After a session, problems that need another attempt will appear here."
           action={
-            <a href="/problems" className="button primary">
+            <Link href="/problems" className="button primary">
               Find a problem
               <ArrowRight size={16} />
-            </a>
+            </Link>
           }
         />
+      )}
+      {revision && (
+        <RevisionDialog {...revision} onClose={() => setRevision(null)} />
       )}
       <section className="review-rule">
         <Leaf size={23} strokeWidth={1.3} />

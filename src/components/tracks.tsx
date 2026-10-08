@@ -608,6 +608,12 @@ function TracksWorkspace({
                             Start practice
                             <ArrowRight size={16} />
                           </button>
+                          <Link
+                            className="text-link"
+                            href={`/problems/${encodeURIComponent(trackProblem(data, entry).fresh ? entry.problemId : trackProblem(data, entry).problem.id)}?from=${encodeURIComponent(stageUrl(entry.trackId, entry.stageId))}`}
+                          >
+                            Learning Memory
+                          </Link>
                           <a
                             className="text-link"
                             href={entry.url}

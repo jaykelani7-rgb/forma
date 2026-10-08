@@ -14,6 +14,10 @@ import {
   SyncedProfile,
   handleKey,
 } from "./codeforces-types";
+import {
+  matchingPracticeProblems,
+  sharedPracticeState,
+} from "./practice-state";
 
 export function connectedProfile(data: Data): SyncedProfile | undefined {
   return data.codeforces.profiles.find(
@@ -544,6 +548,11 @@ export function practiceReflectionFor(
         outcome: timed.outcome,
         difficulty: timed.difficulty,
         takeaway: timed.takeaway,
+        ...(timed.mistakes !== undefined ? { mistakes: timed.mistakes } : {}),
+        ...(timed.approach !== undefined ? { approach: timed.approach } : {}),
+        ...(timed.mistakeNote !== undefined
+          ? { mistakeNote: timed.mistakeNote }
+          : {}),
         savedAt: timed.completedAt,
       };
   }
@@ -599,20 +608,37 @@ export function relevantSchedule(
   data: Data,
   attempt: ImportedAttempt,
 ): boolean {
+  const problem = data.problems.find(
+    (record) => record.id === attempt.problemId,
+  );
+  if (!problem) return false;
+  const matchingIds = new Set(
+    matchingPracticeProblems(data, problem, { handle: attempt.handle }).map(
+      (record) => record.id,
+    ),
+  );
   const linkedTimedId = data.learningLinks?.find(
     (link) => link.importedAttemptId === attempt.id,
   )?.timedAttemptId;
   const importedIsOlder = profileActivity(data, attempt.handle).some(
     (activity) =>
-      activity.problemId === attempt.problemId &&
+      matchingIds.has(activity.problemId) &&
       Date.parse(activity.lastSubmittedAt) >
         Date.parse(attempt.lastSubmittedAt) &&
-      reflectionFor(data, activity.id),
+      practiceReflectionFor(data, activity.id),
+  );
+  const timedHandles = new Map(
+    data.learningLinks?.map((link) => [
+      link.timedAttemptId,
+      handleKey(link.handle),
+    ]),
   );
   const timedIsNewer = data.attempts.some(
     (timed) =>
-      timed.problemId === attempt.problemId &&
+      matchingIds.has(timed.problemId) &&
       timed.id !== linkedTimedId &&
+      (!timedHandles.has(timed.id) ||
+        timedHandles.get(timed.id) === handleKey(attempt.handle)) &&
       Date.parse(timed.completedAt) > Date.parse(attempt.lastSubmittedAt),
   );
   return !importedIsOlder && !timedIsNewer;
@@ -638,19 +664,38 @@ export function saveQuickReflection(
   const attempt = data.codeforces.practiceAttempts.find((a) => a.id === id);
   if (!attempt) throw new Error("This activity is no longer available.");
   const problem = data.problems.find((p) => p.id === attempt.problemId)!;
+  const codingProblem =
+    sharedPracticeState(data, problem, now, { handle: attempt.handle })
+      .codingProblem ?? problem;
   const previous = reflectionFor(data, id);
   const reflection = {
     attemptId: id,
     outcome: input.outcome,
     difficulty: input.difficulty,
     takeaway: input.takeaway.trim(),
+    ...(previous?.mistakes !== undefined
+      ? { mistakes: previous.mistakes }
+      : {}),
+    ...(previous?.approach !== undefined
+      ? { approach: previous.approach }
+      : {}),
+    ...(previous?.mistakeNote !== undefined
+      ? { mistakeNote: previous.mistakeNote }
+      : {}),
+    ...(input.mistakes !== undefined ? { mistakes: input.mistakes } : {}),
+    ...(input.approach !== undefined
+      ? { approach: input.approach.trim() }
+      : {}),
+    ...(input.mistakeNote !== undefined
+      ? { mistakeNote: input.mistakeNote.trim() }
+      : {}),
     savedAt: now.toISOString(),
   };
   const canSchedule =
     relevantSchedule(data, attempt) &&
-    (attemptAfterReviewCompletion(problem, attempt) ||
+    (attemptAfterReviewCompletion(codingProblem, attempt) ||
       input.overrideSchedule) &&
-    (!preservesManualReview(problem, attempt) || input.overrideSchedule);
+    (!preservesManualReview(codingProblem, attempt) || input.overrideSchedule);
   return {
     ...data,
     problems: data.problems.map((p) =>
@@ -661,11 +706,12 @@ export function saveQuickReflection(
             reviewCount:
               input.outcome === "independent" && input.reviewAt
                 ? previous
-                  ? p.reviewCount
-                  : p.reviewCount + 1
+                  ? codingProblem.reviewCount
+                  : codingProblem.reviewCount + 1
                 : 0,
             reviewAttemptId: id,
             reviewManual: input.overrideSchedule,
+            reviewUpdatedAt: reflection.savedAt,
           }
         : p,
     ),

@@ -1,6 +1,6 @@
 # Forma
 
-A daily competitive-programming notebook with a clean light appearance and black-and-ivory **Ink**. Import a DOCX practice sheet into Tracks, practice in Forma or on Codeforces, reflect briefly, and keep a manageable revisit queue. Comfortable and Large text preferences apply across the app and work alongside browser zoom.
+A daily competitive-programming notebook with a clean light appearance and black-and-ivory **Ink**. Import a DOCX practice sheet into Tracks, practice in Forma or on Codeforces, and use Learning Memory to revisit recorded approaches, mistakes and takeaways. Timed re-solves and written recall share a manageable revisit list. Comfortable and Large text preferences apply across the app and work alongside browser zoom.
 
 ## Run locally
 
@@ -27,6 +27,7 @@ Local mode needs no account or environment variables. Optional account setup is 
 3. Pause, hide the timer, and write notes. A saved session survives navigation and reload.
 4. Finish with an outcome, an optional difficulty, and a takeaway. Imported attempts support quick reflections without invented solving time.
 5. Complete, reschedule, or intentionally practice a revisit. Skip today's recommendation or archive a problem without deleting its history.
+6. Open Learning Memory from Problems, Tracks, Activity or Revisit. Optional mistake details stay collapsed in reflections. Explain an invariant or recall complexity and edge cases without counting the check as a new solve or timed session; Progress shows evidence from your selected period.
 
 Demo, personal, and each verified account use separate workspaces. Demo exploration and restoration cannot replace personal records. The first-use state stays welcoming; returning users see a compact Today view with the next action higher on the page.
 
@@ -34,6 +35,7 @@ Demo, personal, and each verified account use separate workspaces. Demo explorat
 | --------------- | --------------------------------------------------------------------------------------- |
 | `/` or `/today` | Stable daily reflection batch, due revisit, fresh discovery, practice rhythm            |
 | `/problems`     | Collection, editing, sourced histories, explicit attempt links                          |
+| `/problems/[problemId]` | Learning Memory, original source records, editable reflections and revision checks |
 | `/tracks`       | DOCX preview/import, active track, unlocked stages, shared learning progress            |
 | `/session`      | Persistent timer, notes, reflection                                                     |
 | `/revisit`      | Recommended batch, full queue, completion, rescheduling, undo                           |
@@ -60,6 +62,8 @@ If a timed session and imported group describe the same attempt, explicitly link
 Default revisit intervals are tomorrow for an unsolved attempt, three days for editorial assistance, and five days for a hint. Settings can change these defaults from 1–90 days. Deliberate dates and opt-outs remain intact. Completing a revisit clears its schedule without claiming a successful solve; old reflection edits cannot reopen it, while a genuinely later assisted attempt receives its default. Future dates, deferrals, today's skips, and archived problems stay out of automatic suggestions. Intentional early practice remains available.
 
 See [docs/learning-and-scheduling.md](docs/learning-and-scheduling.md) for provenance, scope, linking, practice-day definitions, and scheduling rules.
+
+Written recall suggests 7 days after independent recall, 3 after a cue and 1 when you cannot recall yet. Settings can change these intervals. Each save permits a date override or no further recall; the latest written check sets its next date while preserving a separate coding reattempt. Matching track and imported records share scoped schedule resolution, so an unscheduled copy cannot bypass a future revisit. Recorded identities cannot be casually reassigned in the generic editor. See [docs/learning-memory.md](docs/learning-memory.md) for the reliability fixes, data changes, scheduling rules and verification.
 
 ## Codeforces and fresh discovery
 
@@ -99,6 +103,7 @@ Next.js App Router, React, strict TypeScript, Tailwind CSS, Lucide icons, and se
 - `src/lib/concurrency.ts` and `storage.ts`: capacity, three-way merge, transactional revisions, recovery.
 - `src/lib/codeforces*.ts`: import boundaries, grouping, reflection batches, profile freshness.
 - `src/lib/learning.ts`: derived sourced history and explicit linking.
+- `src/lib/memory*.ts`, `practice-state.ts` and `workspace-proposal.ts`: scoped learning evidence, written revision, shared scheduling and pre-exposure validation.
 - `src/lib/docx-import.ts`, `tracks*.ts` and `today-practice.ts`: bounded DOCX parsing, track membership/progress and daily priorities.
 - `src/lib/catalogue.ts` and `discovery.ts`: catalogue and transparent selection rules.
 - `src/lib/cloud-*.ts` and `supabase/migrations`: optional verified account transport and durable storage.
@@ -116,4 +121,4 @@ npm run test:browser
 
 The browser suite starts the production server on port 3002 and uses isolated fixtures, leaving the normal personal workspace untouched. CI runs these checks on pushes and pull requests.
 
-Latest local verification, **7 October 2026**: **160 unit/integration tests passed; 104 desktop/mobile browser tests passed; two hosted-account browser tests skipped** because disposable test credentials are absent. Lint, strict TypeScript, and the supported Webpack production build passed. The real DOCX, editable/cancellable previews, failed-save recovery, shared track history, focused practice, reflections, progress and reload were exercised end to end. Both themes, actual text contrast, keyboard dialogs, saved Large text, long names and narrow/reflow layouts were checked. Actual migration SQL was exercised in local PostgreSQL, including ownership, revisions and retry safety; these local fixtures do not establish hosted account behavior. See [docs/tracks-and-readability.md](docs/tracks-and-readability.md) for current results, screenshots and boundaries. [docs/reliability-pass.md](docs/reliability-pass.md) and [docs/verification.md](docs/verification.md) preserve earlier verification.
+Latest local verification, **8 October 2026**: **188 unit/integration tests passed; 136 desktop/mobile browser tests passed; two hosted-account browser tests skipped** because disposable test credentials are absent. Lint, strict TypeScript, and the supported Webpack production build passed. Shared scheduling and identity-edit regressions, Learning Memory, both written recall activities, reflection editing, configurable intervals, selected-period summaries, failed saves and retries were exercised alongside the existing DOCX, backup, recovery and daily practice workflows. Both themes, keyboard dialogs, saved Large text, long names and narrow/reflow layouts were checked. Actual migration SQL was exercised in local PostgreSQL, including ownership, revisions and retry safety; these local fixtures do not establish hosted account behavior. See [docs/learning-memory.md](docs/learning-memory.md) for current results, screenshots and boundaries. [docs/tracks-and-readability.md](docs/tracks-and-readability.md), [docs/reliability-pass.md](docs/reliability-pass.md) and [docs/verification.md](docs/verification.md) preserve earlier verification.

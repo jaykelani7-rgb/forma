@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import { useRouter } from "next/navigation";
+import { validateWorkspaceProposal } from "@/lib/workspace-proposal";
 import { Check, X } from "lucide-react";
 import {
   Data,
@@ -202,6 +203,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setBundle(value);
   }
   function persist(proposed: Data, replace = false, baseline?: Data) {
+    proposed = validateWorkspaceProposal(proposed);
     const isCurrent = guardWorkspace();
     editVersion.current++;
     const base = record.current;
@@ -264,7 +266,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     try {
       await queue.current;
       if (!isCurrent() || !record.current) return false;
-      const proposed = fn ? fn(current.current.data) : current.current.data;
+      const proposed = validateWorkspaceProposal(
+        fn ? fn(current.current.data) : current.current.data,
+      );
       if (!persistBlocked.current) return await update(() => proposed);
       // Retry the entire unsaved proposal against its last durable revision.
       // Normal CAS merging still rejects conflicts and retains recovery copies.
