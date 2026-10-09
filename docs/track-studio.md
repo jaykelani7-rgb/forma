@@ -1,6 +1,6 @@
 # Track Studio
 
-Track Studio extends Forma’s existing practice-sheet editor. Upload a document or image, paste Codeforces links and explicit IDs, or create a manual plan. All three paths use the same editable preview and existing track records. Ordinary practice pages do not load the PDF or OCR engines.
+Track Studio extends Forma’s existing practice-sheet editor. Upload a document or image, import a shared track file, paste Codeforces links and explicit IDs, or create a manual plan. All paths use the same editable preview and existing track records. Ordinary practice pages do not load the PDF or OCR engines. [Shared Tracks](shared-tracks.md) documents curriculum-only exports, file validation and deliberate duplicate-copy imports.
 
 ## Create and review a track
 
@@ -89,7 +89,7 @@ The existing 64 MiB workspace/backup capacity and global record limits remain in
 
 ## Verification
 
-At the original Track Studio phase, verified locally on **8 October 2026**: **221 unit/integration tests passed**, including real local Tesseract recognition, and **166 desktop/mobile browser tests passed**. Lint, strict type checking and the Webpack production build passed. Two hosted-account browser cases were skipped because disposable test credentials are absent. The pre-phase baseline was 188 unit/integration and 136 browser checks; those existing workflows remain covered. See the later [integration review](integration-review.md) for the complete current regression results and hybrid-page fix.
+At the original Track Studio phase, verified locally on **8 October 2026**: **221 unit/integration tests passed**, including real local Tesseract recognition, and **166 desktop/mobile browser tests passed**. Lint, strict type checking and the Webpack production build passed. Two hosted-account browser cases were skipped because disposable test credentials are absent. The pre-phase baseline was 188 unit/integration and 136 browser checks; those existing workflows remain covered. See the later [integration review](integration-review.md) for the hybrid-page fix and [Shared Tracks verification](shared-tracks.md#verification) for the current complete regression results.
 
 The existing supplied DOCX fixture retains **100 problems in five ordered stages of 20**. New controlled fixtures cover selectable PDF text and annotations, scanned and mixed PDFs, images, ambiguous identifiers, missing links, duplicate candidates and stage boundaries. See [document fixture notes](../tests/fixtures/documents/README.md) for their provenance. Real OCR extraction is exercised with a controlled printed image; mocked OCR alone does not establish recognition.
 

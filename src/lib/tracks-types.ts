@@ -29,6 +29,7 @@ export interface Track {
   createdAt: string;
   stageIds: string[];
   sourceNotes?: string;
+  shareDescription?: string;
 }
 export interface TrackStage {
   id: string;
@@ -79,6 +80,7 @@ export interface TrackImportDraft {
   sourceFingerprint: string;
   stages: TrackImportStage[];
   sourceNotes?: string;
+  shareDescription?: string;
 }
 
 const record = (value: unknown): value is Record<string, unknown> =>
@@ -203,7 +205,11 @@ export function validateTracks(
       !text(value.sourceFingerprint, 200, 1) ||
       !stamp(value.createdAt) ||
       !ids(value.stageIds, 2000) ||
-      !(value.sourceNotes === undefined || text(value.sourceNotes, 5000))
+      !(value.sourceNotes === undefined || text(value.sourceNotes, 5000)) ||
+      !(
+        value.shareDescription === undefined ||
+        text(value.shareDescription, 5000)
+      )
     )
       return fail();
     return {
@@ -215,6 +221,9 @@ export function validateTracks(
       stageIds: [...value.stageIds],
       ...(value.sourceNotes !== undefined
         ? { sourceNotes: value.sourceNotes as string }
+        : {}),
+      ...(value.shareDescription !== undefined
+        ? { shareDescription: value.shareDescription as string }
         : {}),
     };
   });

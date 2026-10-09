@@ -17,6 +17,7 @@ import {
   entryNeedsReview,
   parsePastedProblems,
   trackDraftReview,
+  trackEntryIdentity,
 } from "@/lib/track-studio";
 import type {
   TrackImportDraft,
@@ -24,11 +25,17 @@ import type {
   TrackImportStage,
 } from "@/lib/tracks-types";
 import { normalizeCodeforcesIdentity } from "@/lib/codeforces-identity";
+import {
+  findEquivalentSharedTracks,
+  readSharedTrackFile,
+  sharedTrackPreview,
+  SHARED_TRACK_LIMITS,
+} from "@/lib/shared-tracks";
 import { useWorkspace } from "./provider";
 import { Modal } from "./ui";
 import styles from "./tracks.module.css";
 
-export type TrackStudioEntryPoint = "upload" | "paste" | "manual";
+export type TrackStudioEntryPoint = "upload" | "paste" | "manual" | "shared";
 
 function move<T>(values: T[], index: number, direction: number): T[] {
   const next = [...values];
@@ -62,7 +69,7 @@ export function TrackImport({
   initialDraft?: TrackImportDraft;
   entryPoint?: TrackStudioEntryPoint;
 }) {
-  const { data, update, notify, guardWorkspace, retryLocalSave } =
+  const { data, savedData, update, notify, guardWorkspace, retryLocalSave } =
     useWorkspace();
   const router = useRouter();
   const [mode, setMode] = useState<TrackStudioEntryPoint>(entryPoint);
@@ -99,15 +106,29 @@ export function TrackImport({
   const namespaces = useRef(new Map<string, string>());
   const controller = useRef<AbortController | null>(null);
   const owner = useRef(guardWorkspace());
+  const profileOwner = useRef(
+    data.codeforces.connectedHandle?.toLowerCase() ?? "",
+  );
+  const mounted = useRef(true);
   const searchRef = useRef<HTMLInputElement | null>(null);
   const discardRef = useRef<HTMLButtonElement | null>(null);
   useEffect(() => {
-    if (!owner.current()) {
+    if (
+      !owner.current() ||
+      profileOwner.current !==
+        (data.codeforces.connectedHandle?.toLowerCase() ?? "")
+    ) {
       controller.current?.abort();
       onClose();
     }
   }, [data, onClose]);
-  useEffect(() => () => controller.current?.abort(), []);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      controller.current?.abort();
+    };
+  }, []);
   useEffect(() => {
     if (!dirty && !pasted.trim() && !batch.trim()) return;
     const preventLoss = (event: BeforeUnloadEvent) => {
@@ -154,21 +175,32 @@ export function TrackImport({
     onClose();
   }
   async function select(file: File) {
-    if (busy.current) return;
-    const isCurrent = guardWorkspace();
+    if (busy.current || !owner.current()) return;
+    const workspaceCurrent = guardWorkspace();
+    const isCurrent = () =>
+      mounted.current && owner.current() && workspaceCurrent();
     const abort = new AbortController();
     controller.current = abort;
     busy.current = true;
     setError("");
-    setProgress({ phase: "Reading practice sheet", percent: 0 });
+    setProgress({
+      phase:
+        mode === "shared"
+          ? "Reading shared track file"
+          : "Reading practice sheet",
+      percent: 0,
+    });
     try {
-      const parsed = await importPracticeDocument(file, {
-        signal: abort.signal,
-        forceOCR,
-        onProgress: (value) => {
-          if (isCurrent() && !abort.signal.aborted) setProgress(value);
-        },
-      });
+      const parsed =
+        mode === "shared"
+          ? await readSharedTrackFile(file, { signal: abort.signal })
+          : await importPracticeDocument(file, {
+              signal: abort.signal,
+              forceOCR,
+              onProgress: (value) => {
+                if (isCurrent() && !abort.signal.aborted) setProgress(value);
+              },
+            });
       if (!isCurrent() || abort.signal.aborted) return;
       setDraft(parsed);
       setOpenStages(new Set(parsed.stages[0] ? [parsed.stages[0].id] : []));
@@ -208,18 +240,29 @@ export function TrackImport({
     }
   }
   async function save() {
-    if (!draft || busy.current) return;
-    const isCurrent = guardWorkspace();
+    if (!draft || busy.current || !owner.current()) return;
+    const workspaceCurrent = guardWorkspace();
+    const isCurrent = () =>
+      mounted.current && owner.current() && workspaceCurrent();
     busy.current = true;
     setPending(true);
     setError("");
     try {
-      const change = (current: typeof data) =>
-        initialDraft
+      const change = (current: typeof data) => {
+        if (
+          !isCurrent() ||
+          profileOwner.current !==
+            (current.codeforces.connectedHandle?.toLowerCase() ?? "")
+        )
+          throw new Error(
+            "The workspace or Codeforces profile changed. Open a new preview in the current workspace before saving.",
+          );
+        return initialDraft
           ? updateTrack(current, draft)
           : importTrack(current, draft, {
               duplicates: copy ? "copy" : "reject",
             });
+      };
       const saved = await (writeFailed
         ? retryLocalSave(change)
         : update(change));
@@ -254,10 +297,16 @@ export function TrackImport({
   const counts = draft && trackDraftReview(draft);
   const duplicates =
     draft && !initialDraft
-      ? findDuplicateTracks(data, draft).filter(
-          (track) => track.id !== draft.id,
-        )
+      ? (mode === "shared"
+          ? findEquivalentSharedTracks(data, draft)
+          : findDuplicateTracks(data, draft)
+        ).filter((track) => track.id !== draft.id)
       : [];
+  const sharedPreview =
+    draft && mode === "shared" && !initialDraft
+      ? sharedTrackPreview({ ...savedData, codeforces: data.codeforces }, draft)
+      : null;
+  const alreadyPresent = new Set(sharedPreview?.alreadyPresentIdentities ?? []);
   const unresolved = new Set(counts?.unresolved.map((entry) => entry.id));
   const repeated = new Set(counts?.duplicates.map((entry) => entry.id));
   function entryEdit(
@@ -404,8 +453,12 @@ export function TrackImport({
         initialDraft
           ? "Edit your track."
           : draft
-            ? "Make this sheet your own."
-            : "Import a practice sheet."
+            ? mode === "shared"
+              ? "Make this track your own."
+              : "Make this sheet your own."
+            : mode === "shared"
+              ? "Import shared track."
+              : "Import a practice sheet."
       }
       onClose={cancel}
       className={styles.modal}
@@ -435,11 +488,18 @@ export function TrackImport({
                 type="button"
                 className="button secondary"
                 onClick={() => {
-                  if (discardTarget === "manual") {
+                  if (
+                    discardTarget === "manual" ||
+                    discardTarget === "shared"
+                  ) {
                     setPasted("");
-                    setMode("manual");
-                    setDraft(createManualTrackDraft());
-                    setDirty(true);
+                    setMode(discardTarget);
+                    setDraft(
+                      discardTarget === "manual"
+                        ? createManualTrackDraft()
+                        : null,
+                    );
+                    setDirty(discardTarget === "manual");
                     setError("");
                     setDiscarding(false);
                     return;
@@ -504,6 +564,23 @@ export function TrackImport({
               </button>
               <button
                 type="button"
+                className={`button ${mode === "shared" ? "secondary" : "ghost"}`}
+                aria-pressed={mode === "shared"}
+                disabled={!!progress}
+                onClick={() => {
+                  if (pasted.trim()) {
+                    setDiscardTarget("shared");
+                    setDiscarding(true);
+                    return;
+                  }
+                  setMode("shared");
+                  setError("");
+                }}
+              >
+                Import shared track
+              </button>
+              <button
+                type="button"
                 className="button ghost"
                 disabled={!!progress}
                 onClick={() => {
@@ -563,6 +640,33 @@ export function TrackImport({
                   a failed download.
                 </p>
                 <FileUp size={30} aria-hidden="true" className="muted" />
+              </>
+            ) : mode === "shared" ? (
+              <>
+                <label>
+                  Shared track file (.forma-track.json)
+                  <input
+                    type="file"
+                    accept=".forma-track.json,.json,application/json"
+                    disabled={!!progress}
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      event.target.value = "";
+                      if (file) void select(file);
+                    }}
+                  />
+                </label>
+                <p>
+                  Choose a Forma track file, up to{" "}
+                  {SHARED_TRACK_LIMITS.maxFileBytes / (1024 * 1024)} MB. Review
+                  its stages and problems before saving. The sender’s progress
+                  and personal notes are excluded. Your own history may apply to
+                  matching problems in this workspace.
+                </p>
+                <p>
+                  No track is made active and no session starts when you import
+                  a shared file.
+                </p>
               </>
             ) : (
               <>
@@ -625,6 +729,25 @@ export function TrackImport({
                 maxLength={240}
               />
             </label>
+            <label>
+              Share description
+              <textarea
+                value={draft.shareDescription ?? ""}
+                disabled={pending}
+                rows={3}
+                maxLength={5000}
+                onChange={(event) =>
+                  changeDraft({
+                    ...draft,
+                    shareDescription: event.target.value,
+                  })
+                }
+              />
+            </label>
+            <p className={styles.source}>
+              Optional curriculum text for sharing. Review this text before
+              including it in a track file.
+            </p>
             <p className={styles.source}>
               Source: {draft.sourceName}. Ratings and pattern hints are source
               metadata. Recognized ID format is shown below; problem existence
@@ -647,6 +770,12 @@ export function TrackImport({
               </label>
             </details>
             <div className={styles.summary} aria-label="Preview counts">
+              {sharedPreview && (
+                <span>
+                  <strong>{sharedPreview.alreadyPresentCount}</strong> already
+                  in your workspace
+                </span>
+              )}
               <span>
                 <strong>{counts?.total}</strong> detected problems
               </span>
@@ -669,6 +798,15 @@ export function TrackImport({
                 <strong>{counts?.included}</strong> included
               </span>
             </div>
+            {sharedPreview && (
+              <p className={styles.notice}>
+                Only the curriculum is imported. The sender’s progress is
+                excluded; your existing history and schedules may already apply
+                to matching problems in your current profile. Imported titles,
+                ratings and hints stay as track metadata. Choose Make active
+                yourself after saving.
+              </p>
+            )}
             <p className={styles.saveSummary} aria-live="polite">
               {counts?.unresolved.length || counts?.needsReview.length
                 ? "Correct or explicitly exclude unresolved entries, and review uncertain extraction before saving."
@@ -678,23 +816,37 @@ export function TrackImport({
             </p>
             {!!duplicates.length && (
               <div className={styles.notice}>
-                <p>This sheet already belongs to your workspace.</p>
+                <p>
+                  {mode === "shared"
+                    ? "An equivalent track already exists in your workspace."
+                    : "This sheet already belongs to your workspace."}
+                </p>
                 <div className={styles.actions}>
                   {duplicates.map((track) => (
-                    <Link
-                      key={track.id}
-                      className="text-link"
-                      href={`/tracks/${encodeURIComponent(track.id)}`}
-                      onClick={(event) => {
-                        if (dirty) {
-                          event.preventDefault();
-                          setDiscardTarget(
-                            `/tracks/${encodeURIComponent(track.id)}`,
-                          );
-                          setDiscarding(true);
-                        }
-                      }}
-                    >{`Open existing: ${track.title}`}</Link>
+                    <div key={track.id} className={styles.actions}>
+                      {mode === "shared" && (
+                        <span className={styles.curriculumText}>
+                          {track.title}
+                        </span>
+                      )}
+                      <Link
+                        className="text-link"
+                        href={`/tracks/${encodeURIComponent(track.id)}`}
+                        onClick={(event) => {
+                          if (dirty) {
+                            event.preventDefault();
+                            setDiscardTarget(
+                              `/tracks/${encodeURIComponent(track.id)}`,
+                            );
+                            setDiscarding(true);
+                          }
+                        }}
+                      >
+                        {mode === "shared"
+                          ? "Open existing track"
+                          : `Open existing: ${track.title}`}
+                      </Link>
+                    </div>
                   ))}
                 </div>
                 <label className={styles.copyChoice}>
@@ -707,7 +859,9 @@ export function TrackImport({
                       setDirty(true);
                     }}
                   />
-                  Import a separate copy of this track
+                  {mode === "shared"
+                    ? "Import a separate copy"
+                    : "Import a separate copy of this track"}
                 </label>
                 <p>
                   The same matching underlying problems and learning history
@@ -790,6 +944,16 @@ export function TrackImport({
                     </span>
                   </summary>
                   <div className={styles.stageBody}>
+                    {sharedPreview && stage.description && (
+                      <p className={styles.curriculumText}>
+                        {stage.description}
+                      </p>
+                    )}
+                    {sharedPreview && stage.suggestedTime && (
+                      <p className={styles.source}>
+                        Suggested practice time: {stage.suggestedTime}
+                      </p>
+                    )}
                     <details className={styles.stageSettings}>
                       <summary>Edit stage details</summary>
                       <div className={styles.stageFields}>
@@ -943,12 +1107,23 @@ export function TrackImport({
                                     ? "Unresolved identity or title"
                                     : `${entry.code} · Recognized ID format`}
                                 {isDuplicate ? " · Duplicate identity" : ""}
+                                {alreadyPresent.has(
+                                  trackEntryIdentity(entry)?.key ?? "",
+                                )
+                                  ? " · Already in your workspace"
+                                  : ""}
                                 {needsReview ? " · Needs review" : ""}
                               </span>
                             </span>
                             <span className={styles.editCue}>Edit</span>
                           </summary>
                           <div className={styles.entryBody}>
+                            {sharedPreview && entry.pattern && (
+                              <p className={styles.curriculumText}>
+                                <strong>Included pattern hint:</strong>{" "}
+                                {entry.pattern}
+                              </p>
+                            )}
                             <div className={styles.entryFields}>
                               <label className={styles.wide}>
                                 Problem {entryIndex + 1} title
