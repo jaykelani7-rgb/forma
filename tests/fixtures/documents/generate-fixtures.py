@@ -3,6 +3,7 @@ from PIL import Image, ImageDraw, ImageFont
 from reportlab.pdfgen import canvas
 from reportlab.lib.utils import ImageReader
 from reportlab.lib.pdfencrypt import StandardEncryption
+import sys
 root=Path(__file__).resolve().parents[3]
 out=root/'tests/fixtures/documents'
 font=ImageFont.truetype(str(root/'public/fonts/geist-mono-medium.ttf'), 44)
@@ -12,6 +13,26 @@ def image(lines, width=1900):
     d=ImageDraw.Draw(img)
     for i,line in enumerate(lines):d.text((65,40+i*88),line,font=font,fill='black')
     return img
+
+hybrid=image(['1791C - Prepend and Append'])
+hybrid.save(out/'hybrid-source.png')
+c=canvas.Canvas(str(out/'hybrid.pdf'),pagesize=(612,792),pageCompression=1)
+c.setFont('Helvetica-Bold',18);c.drawString(44,738,'Stage 1: Selectable foundations')
+c.setFont('Helvetica',15);c.drawString(44,688,'381A - Sereja and Dima')
+c.linkURL('https://codeforces.com/contest/381/problem/A',(42,684,440,706),relative=0,thickness=0)
+c.setFont('Helvetica-Bold',18);c.drawString(44,620,'Stage 2: Image practice')
+c.drawImage(ImageReader(hybrid),20,525,width=570,height=570*hybrid.height/hybrid.width)
+c.setFont('Helvetica-Bold',18);c.drawString(44,475,'Stage 3: Intentional revisit')
+c.setFont('Helvetica',15);c.drawString(44,425,'381A - Repeated membership')
+c.linkURL('https://codeforces.com/problemset/problem/381/A',(42,421,440,443),relative=0,thickness=0)
+c.save()
+c=canvas.Canvas(str(out/'decorative-image.pdf'),pagesize=(612,792),pageCompression=1)
+c.setFont('Helvetica-Bold',18);c.drawString(44,738,'Stage 1: Foundations')
+c.setFont('Helvetica',15);c.drawString(44,688,'381A - Sereja and Dima')
+logo=Image.new('RGB',(32,32),'#2c5945');c.drawImage(ImageReader(logo),550,732,width=16,height=16);c.save();logo.close()
+if '--hybrid-only' in sys.argv:
+    print('Generated hybrid.pdf, hybrid-source.png and decorative-image.pdf')
+    sys.exit(0)
 
 all_lines=['Stage 1: Foundations','381A - Sereja and Dima','279B - Books','Stage 2: Variants','1739C1 - Easy variant','1739C2 - Hard variant','38IA - Ambiguous printed ID','A title without an ID']
 screenshot=image(all_lines)

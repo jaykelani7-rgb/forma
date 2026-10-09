@@ -1,18 +1,19 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import {
+  readContestDraft,
+  retainContestDraft,
+  claimContestDraft,
+  type RetainedContestDraft,
+  type ContestDraftStatus,
+} from "@/lib/contest-draft-store";
 
 const equal = (a: unknown, b: unknown) =>
   JSON.stringify(a) === JSON.stringify(b);
 const keys = <T extends object>(...values: T[]) =>
   [...new Set(values.flatMap((value) => Object.keys(value)))] as (keyof T)[];
 
-interface DraftState<T extends object> {
-  source: T;
-  baseline: T;
-  draft: T;
-  conflicts: (keyof T)[];
-}
 export interface ContestDraftPatch<T extends object> {
   apply: (current: T) => T;
   complete: (saved: boolean) => void;
@@ -23,14 +24,32 @@ export interface ContestDraftController<T extends object> {
 
 /** Untouched fields follow incoming storage; divergent edits require a choice.
  * Every write checks its field baseline again inside the workspace proposal. */
-export function useContestDraft<T extends object>(source: T) {
-  const [stored, setStored] = useState<DraftState<T>>({
-    source,
-    baseline: source,
-    draft: source,
-    conflicts: [],
-  });
-  const pending = useRef<Partial<T> | null>(null);
+export function useContestDraft<T extends object>(source: T, scope: string) {
+  const [stored, setState] = useState<RetainedContestDraft<T>>(
+    () =>
+      readContestDraft<T>(scope) ?? {
+        source,
+        baseline: source,
+        draft: source,
+        conflicts: [],
+        status: "saved",
+      },
+  );
+  const latest = useRef(stored);
+  const [lease] = useState(() => claimContestDraft(scope));
+  const [reloadProtected, setReloadProtected] = useState(true);
+  function setStored(
+    update:
+      | RetainedContestDraft<T>
+      | ((value: RetainedContestDraft<T>) => RetainedContestDraft<T>),
+  ) {
+    const value =
+      typeof update === "function" ? update(latest.current) : update;
+    latest.current = value;
+    setReloadProtected(retainContestDraft(scope, value, lease));
+    setState(value);
+  }
+  const pending = useRef<Partial<T> | null>(stored.pending ?? null);
   const saving = useRef<Promise<boolean> | null>(null);
   let state = stored;
   if (!equal(state.source, source)) {
@@ -49,10 +68,9 @@ export function useContestDraft<T extends object>(source: T) {
         baseline[key] = source[key];
       } else if (!equal(source[key], baseline[key])) conflicts.push(key);
     }
-    state = { source, baseline, draft, conflicts };
+    state = { ...state, source, baseline, draft, conflicts };
     setStored(state);
   }
-  const latest = useRef(state);
   latest.current = state;
   const dirty = keys(state.draft, state.baseline).some(
     (key) => !equal(state.draft[key], state.baseline[key]),
@@ -73,6 +91,11 @@ export function useContestDraft<T extends object>(source: T) {
         pending.current = Object.fromEntries(
           changed.map((key) => [key, captured.draft[key]]),
         ) as Partial<T>;
+        setStored((value) => ({
+          ...value,
+          status: "saving",
+          pending: pending.current!,
+        }));
         return {
           apply(current) {
             const conflicts = changed.filter(
@@ -92,13 +115,22 @@ export function useContestDraft<T extends object>(source: T) {
           },
           complete(saved) {
             pending.current = null;
-            if (!saved) return;
+            if (!saved) {
+              setStored((value) => ({
+                ...value,
+                status: "failed",
+                pending: undefined,
+              }));
+              return;
+            }
             setStored((value) => {
               const baseline = { ...value.baseline };
               for (const key of changed) baseline[key] = captured.draft[key];
               return {
                 ...value,
                 baseline,
+                status: "saved",
+                pending: undefined,
                 conflicts: value.conflicts.filter(
                   (key) => !changed.includes(key),
                 ),
@@ -109,7 +141,7 @@ export function useContestDraft<T extends object>(source: T) {
       },
     };
   function setDraft(draft: T) {
-    setStored((value) => ({ ...value, draft }));
+    setStored((value) => ({ ...value, draft, status: "unsaved" }));
   }
   function useSaved() {
     setStored((value) => {
@@ -119,11 +151,16 @@ export function useContestDraft<T extends object>(source: T) {
         draft[key] = value.source[key];
         baseline[key] = value.source[key];
       }
-      return { ...value, baseline, draft, conflicts: [] };
+      return { ...value, baseline, draft, conflicts: [], status: "saved" };
     });
   }
   function keepDraft() {
-    setStored((value) => ({ ...value, baseline: value.source, conflicts: [] }));
+    setStored((value) => ({
+      ...value,
+      baseline: value.source,
+      conflicts: [],
+      status: "unsaved",
+    }));
   }
   async function save(write: (apply: (current: T) => T) => Promise<boolean>) {
     if (saving.current) {
@@ -151,6 +188,14 @@ export function useContestDraft<T extends object>(source: T) {
       saving.current = null;
     }
   }
+  const status: ContestDraftStatus =
+    state.status === "saving"
+      ? "saving"
+      : dirty
+        ? state.status === "failed"
+          ? "failed"
+          : "unsaved"
+        : "saved";
   return {
     draft: state.draft,
     setDraft,
@@ -160,7 +205,34 @@ export function useContestDraft<T extends object>(source: T) {
     save,
     useSaved,
     keepDraft,
+    status,
+    reloadProtected,
   };
+}
+
+export function ContestDraftFeedback({
+  label,
+  status,
+  reloadProtected,
+}: {
+  label: string;
+  status: "unsaved" | "saving" | "saved" | "failed";
+  reloadProtected: boolean;
+}) {
+  const messages = {
+    unsaved: "Unsaved · draft kept in this tab",
+    saving: "Saving…",
+    saved: "Saved",
+    failed: "Save failed · draft kept in this tab. Restore saving and retry.",
+  };
+  return (
+    <p className="small muted" data-draft-feedback={label}>
+      {messages[status]}
+      {!reloadProtected &&
+        status !== "saved" &&
+        ". Browser reload protection is unavailable."}
+    </p>
+  );
 }
 
 export function useContestAutosave(

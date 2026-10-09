@@ -75,6 +75,7 @@ export function LearningSummary({
       <p className="small muted">
         {from} through {to}, including both days. Linked coding and imported
         activity count as one practice event; written recall stays separate.
+        Imported submissions within a contest event count there once.
       </p>
       {!valid ? (
         <p role="alert" className="form-error">
@@ -101,6 +102,10 @@ export function LearningSummary({
                 <dd>{evidence.linkedEvents}</dd>
               </div>
               <div>
+                <dt>Contest problem events</dt>
+                <dd>{evidence.contestEvents}</dd>
+              </div>
+              <div>
                 <dt>Measured practice</dt>
                 <dd>{evidence.measuredMinutes} min</dd>
               </div>
@@ -110,8 +115,9 @@ export function LearningSummary({
               </div>
             </dl>
             <p className="small muted">
-              Measured minutes include linked timed sessions. Imported activity
-              and written checks add no estimated time.
+              Measured minutes include linked timed sessions. Contest problem
+              events, imported activity, and written checks add no estimated
+              time.
             </p>
             <div className={styles.columns}>
               <div>

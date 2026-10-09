@@ -66,7 +66,7 @@ export function Progress() {
         <label className="cf-progress-profile">
           Learning profile
           <select value={handle} onChange={(e) => setHandle(e.target.value)}>
-            <option value="">Personal timed practice only</option>
+            <option value="">Personal practice</option>
             {data.codeforces.profiles.map((p) => (
               <option key={p.handle}>{p.handle}</option>
             ))}
@@ -95,10 +95,13 @@ export function Progress() {
         <>
           <div className="progress-overview">
             <div>
-              <span className="eyebrow">PRACTICE ATTEMPTS</span>
+              <span className="eyebrow">PRACTICE EVENTS</span>
               <strong className="mono">
                 {stats.practiceAttempts}
-                <small>{stats.timedSessions} timed sessions</small>
+                <small>
+                  {stats.timedSessions} timed sessions · {stats.contestEvents}{" "}
+                  contest problem events
+                </small>
               </strong>
             </div>
             <div>
@@ -125,8 +128,9 @@ export function Progress() {
           <p className="small muted">
             {stats.reflected} reflected · {stats.pending} attempted, reflection
             pending · {stats.practiceDays.length} practice days. A practice day
-            includes a completed timed session or an imported submission;
-            imported activity adds no measured minutes.
+            includes a completed timed session, an imported submission, or
+            recorded contest participation. Contest problem events and imported
+            activity add no measured minutes.
           </p>
           <div className="progress-grid">
             <section className="progress-section">

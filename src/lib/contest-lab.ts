@@ -97,13 +97,60 @@ function fail(): never {
     "Contest Lab has invalid fields, timing, evidence, or problem relationships.",
   );
 }
+type UpsolveEvidence = Pick<
+  Data,
+  "problems" | "attempts" | "codeforces" | "learningLinks"
+>;
+function upsolveEvidenceIndex(data: UpsolveEvidence) {
+  return {
+    attempts: new Map(data.attempts.map((a) => [a.id, a])),
+    problems: new Map(data.problems.map((p) => [p.id, p])),
+    links: new Map(
+      (data.learningLinks ?? []).map((l) => [l.timedAttemptId, l]),
+    ),
+    imported: new Map(data.codeforces.practiceAttempts.map((a) => [a.id, a])),
+    reflections: new Map(
+      data.codeforces.reflections.map((r) => [r.attemptId, r]),
+    ),
+  };
+}
+function supportedUpsolveCompletion(
+  index: ReturnType<typeof upsolveEvidenceIndex>,
+  handle: string | null,
+  identity: string,
+  upsolve: NonNullable<ContestProblem["upsolve"]>,
+) {
+  const attempt = upsolve.sessionId && index.attempts.get(upsolve.sessionId);
+  if (
+    !attempt ||
+    !(Date.parse(attempt.startedAt) >= Date.parse(upsolve.addedAt))
+  )
+    return undefined;
+  const problem = index.problems.get(attempt.problemId);
+  if (!problem || practiceIdentity(problem) !== identity) return undefined;
+  const link = index.links.get(attempt.id),
+    imported = link && index.imported.get(link.importedAttemptId);
+  const evidenceHandle = imported?.handle ?? problem.cfHandle ?? null;
+  if (evidenceHandle && evidenceHandle.toLowerCase() !== handle?.toLowerCase())
+    return undefined;
+  const outcome =
+    link?.reflectionSource === "codeforces" && imported
+      ? (index.reflections.get(imported.id)?.outcome ?? attempt.outcome)
+      : attempt.outcome;
+  return outcome === "unsolved" ? undefined : attempt.id;
+}
 export function validateContests(
   value: unknown,
-  data: Pick<Data, "problems" | "attempts" | "session" | "codeforces">,
+  data: Pick<
+    Data,
+    "problems" | "attempts" | "session" | "codeforces" | "learningLinks"
+  >,
 ): PracticeContest[] {
   if (value === undefined) return [];
   if (!Array.isArray(value) || value.length > 5000) return fail();
+  if (!value.length) return [];
   const ids = new Set<string>();
+  const completionEvidence = upsolveEvidenceIndex(data);
   let active = 0;
   return value.map((raw) => {
     if (
@@ -316,15 +363,13 @@ export function validateContests(
         )
           return fail();
         if (u.completionId) {
-          const a = data.attempts.find((v) => v.id === u.completionId),
-            problem = a && data.problems.find((v) => v.id === a.problemId);
           if (
-            !a ||
-            !problem ||
-            a.id !== u.sessionId ||
-            a.outcome === "unsolved" ||
-            practiceIdentity(problem) !== p.identity ||
-            Date.parse(a.startedAt) < Date.parse(u.addedAt)
+            supportedUpsolveCompletion(
+              completionEvidence,
+              raw.handle as string | null,
+              p.identity,
+              u as unknown as NonNullable<ContestProblem["upsolve"]>,
+            ) !== u.completionId
           )
             return fail();
         }
@@ -523,7 +568,9 @@ export function contestEvidence(
     .map(({ evidence }) => ({ ...evidence }));
 }
 export function reconcileContests(data: Data, now = new Date()): Data {
+  if (!data.contests?.length) return data;
   let changed = false;
+  const completionEvidence = upsolveEvidenceIndex(data);
   const contests = (data.contests ?? []).map((original) => {
     let c = original;
     if (c.state === "active" && Date.parse(c.deadline!) <= now.getTime()) {
@@ -558,17 +605,27 @@ export function reconcileContests(data: Data, now = new Date()): Data {
         };
         changed = true;
       }
-      if (next.upsolve?.sessionId && !next.upsolve.completionId) {
-        const a = data.attempts.find((a) => a.id === next.upsolve!.sessionId);
-        if (
-          a &&
-          a.outcome !== "unsolved" &&
-          Date.parse(a.startedAt) >= Date.parse(next.upsolve.addedAt) &&
-          data.problems.some(
-            (v) => v.id === a.problemId && practiceIdentity(v) === p.identity,
-          )
-        ) {
-          next = { ...next, upsolve: { ...next.upsolve, completionId: a.id } };
+      if (next.upsolve) {
+        const supported = supportedUpsolveCompletion(
+          completionEvidence,
+          c.handle,
+          p.identity,
+          next.upsolve,
+        );
+        // Re-evaluate the retained real session after outcome/source/profile
+        // corrections. Removed items keep their administrative decision and do
+        // not gain a fresh completion if that outcome is later corrected again.
+        const completionId =
+          next.upsolve.state === "removed"
+            ? next.upsolve.completionId === supported
+              ? supported
+              : undefined
+            : supported;
+        if (completionId !== next.upsolve.completionId) {
+          const upsolve = { ...next.upsolve };
+          delete upsolve.completionId;
+          if (completionId) upsolve.completionId = completionId;
+          next = { ...next, upsolve };
           changed = true;
         }
       }

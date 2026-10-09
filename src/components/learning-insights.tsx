@@ -70,9 +70,11 @@ export function LearningInsights({
           {shortDate(record.completedAt)} ·{" "}
           {record.source === "linked"
             ? "Linked timed + imported event"
-            : record.source === "timed"
-              ? "Timed coding session"
-              : "Imported coding activity"}
+            : record.source === "contest"
+              ? `Contest participation · ${record.contestSource?.name ?? "Original contest"}`
+              : record.source === "timed"
+                ? "Timed coding session"
+                : "Imported coding activity"}
           {record.outcome === "independent"
             ? " · Recorded independent solve"
             : record.outcome === "hint"

@@ -2661,7 +2661,7 @@ label > .input-icon {
   gap: 12px;
   max-width: 530px;
   font-size: var(--text-support);
-  pointer-events: auto;
+  pointer-events: none;
   animation: pageIn 0.2s ease;
 }
 .toast-check {
@@ -2678,6 +2678,7 @@ label > .input-icon {
 .toast .icon-button {
   min-width: 35px;
   min-height: 35px;
+  pointer-events: auto;
 }
 
 /* Tablet, then a roomy notebook at pocket size. */

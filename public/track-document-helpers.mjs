@@ -183,6 +183,7 @@ export function pdfTextLines(items, annotations, page) {
         right: annotation.rect[2],
         y: Math.max(annotation.rect[1], annotation.rect[3]),
         height: 12,
+        annotationOnly: true,
       };
       // A link drawn over an image has no text item. Place it beside the nearest
       // following baseline instead of moving it after every later page row.
@@ -203,6 +204,13 @@ export function pdfTextLines(items, annotations, page) {
     page,
     location: `Page ${page}, line ${index + 1}`,
     links: row.links,
+    bounds: [
+      row.left,
+      row.y - row.height * 0.25,
+      row.right,
+      row.y + row.height,
+    ],
+    ...(row.annotationOnly ? { annotationOnly: true } : {}),
   }));
 }
 
@@ -235,6 +243,14 @@ export function ocrTextLines(
     confidence: Number.isFinite(line.confidence)
       ? Math.max(0, Math.min(100, line.confidence))
       : undefined,
+    ...(line.bbox && viewport?.convertToPdfPoint
+      ? {
+          bounds: [
+            ...viewport.convertToPdfPoint(line.bbox.x0, line.bbox.y1),
+            ...viewport.convertToPdfPoint(line.bbox.x1, line.bbox.y0),
+          ],
+        }
+      : {}),
   }));
   for (const annotation of annotations) {
     const url = annotation.url ?? annotation.unsafeUrl;
@@ -278,6 +294,8 @@ export function ocrTextLines(
         page,
         location: `Page ${page}, hyperlink annotation`,
         links: [url],
+        bounds: annotation.rect,
+        annotationOnly: true,
       });
     else
       for (const i of matches) {
@@ -288,6 +306,132 @@ export function ocrTextLines(
   return result;
 }
 
+/** A raster may be a logo or an additional problem. Do not guess its content or
+ * force expensive OCR; require an explicit coverage decision in the preview. */
+export function mixedContentWarning(page) {
+  return {
+    text: "Image text on this PDF page has not been read.",
+    kind: "pdf-text",
+    page,
+    location: `Page ${page}, mixed selectable text and image content`,
+    reviewReasons: [
+      "Mixed-content page: image text was not extracted. Re-import with ‘Use OCR for all PDF pages’ to recover image problems. Exclude this warning only after checking every image on this page, including possible decorative images.",
+    ],
+  };
+}
+
+function rect(line) {
+  const values = line.bounds;
+  if (
+    !Array.isArray(values) ||
+    values.length !== 4 ||
+    !values.every(Number.isFinite)
+  )
+    return null;
+  return [
+    Math.min(values[0], values[2]),
+    Math.min(values[1], values[3]),
+    Math.max(values[0], values[2]),
+    Math.max(values[1], values[3]),
+  ];
+}
+function sameLocation(first, second) {
+  const a = rect(first),
+    b = rect(second);
+  if (!a || !b) return false;
+  const width = Math.min(a[2], b[2]) - Math.max(a[0], b[0]);
+  const shorter = Math.min(a[2] - a[0], b[2] - b[0]);
+  return (
+    width > Math.max(1, shorter * 0.5) &&
+    Math.min(a[3], b[3]) >= Math.max(a[1], b[1]) - 4
+  );
+}
+function identityTokens(line) {
+  const values = new Set();
+  for (const text of [line.text, ...(line.links ?? [])]) {
+    for (const match of text.matchAll(
+      /(?:^|[^\p{L}\p{N}])((?:Gym\s*)?\d{1,9}[\s/-]*[A-Za-z]\d*)(?=$|[^\p{L}\p{N}])/giu,
+    ))
+      values.add(match[1].replace(/[\s/-]/g, "").toUpperCase());
+    for (const match of text.matchAll(
+      /codeforces\.com\/(?:problemset\/problem\/(\d+)\/([A-Za-z]\d*)|(?:contest|gym)\/(\d+)\/problem\/([A-Za-z]\d*))/gi,
+    ))
+      values.add(
+        `${match[1] ?? match[3]}${match[2] ?? match[4]}`.toUpperCase(),
+      );
+  }
+  return values;
+}
+const comparable = (text) => text.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+
+/** Keep native text authoritative. Remove an OCR copy only at the same physical
+ * location with equivalent text/identity; never deduplicate by identity alone. */
+export function reconcileHybridPDFLines(selectable, recognized) {
+  const native = [...selectable];
+  const additions = [];
+  for (const original of recognized) {
+    const nearby = native.filter((line) => sameLocation(line, original));
+    const identities = identityTokens(original);
+    const matching = nearby.find((line) => {
+      const known = identityTokens(line);
+      return (
+        comparable(line.text) === comparable(original.text) ||
+        (identities.size > 0 &&
+          [...identities].every((identity) => known.has(identity)))
+      );
+    });
+    if (matching && !matching.annotationOnly) {
+      if (matching.text.trim() !== original.text.trim()) {
+        const at = native.indexOf(matching);
+        native[at] = {
+          ...matching,
+          ocrAlternatives: [
+            ...(matching.ocrAlternatives ?? []),
+            { text: original.text, confidence: original.confidence },
+          ],
+          reviewReasons: [
+            ...new Set([
+              ...(matching.reviewReasons ?? []),
+              "Same-position OCR differs from selectable text. Both readings are kept in source evidence; check for missed or ambiguous problem text before saving.",
+            ]),
+          ],
+        };
+      }
+      continue;
+    }
+    let line = original;
+    if (matching?.annotationOnly) {
+      native.splice(native.indexOf(matching), 1);
+      line = {
+        ...line,
+        links: [...new Set([...(line.links ?? []), ...(matching.links ?? [])])],
+      };
+    } else if (nearby.length || !rect(original)) {
+      line = {
+        ...line,
+        reviewReasons: [
+          ...(line.reviewReasons ?? []),
+          nearby.length
+            ? "OCR overlaps selectable text with an uncertain association. Compare both source rows before excluding an overlap or splitting identities."
+            : "OCR has no recoverable page position. Its association with selectable text and stages is uncertain; compare both readings before saving.",
+        ],
+      };
+    }
+    additions.push(line);
+  }
+  for (const line of additions) {
+    const box = rect(line);
+    const at = box
+      ? native.findIndex((existing) => {
+          const bounds = rect(existing);
+          return bounds && bounds[1] < box[1] - 4;
+        })
+      : -1;
+    native.splice(at < 0 ? native.length : at, 0, line);
+  }
+  return native;
+}
+
 export function boundedExtractedLines(lines) {
   if (lines.length > DOCUMENT_IMPORT_LIMITS.maxLines)
     throw new Error(
@@ -296,7 +440,13 @@ export function boundedExtractedLines(lines) {
   if (
     lines.reduce(
       (sum, line) =>
-        sum + line.text.length + (line.links ?? []).join("").length,
+        sum +
+        line.text.length +
+        (line.links ?? []).join("").length +
+        (line.ocrAlternatives ?? []).reduce(
+          (total, value) => total + value.text.length,
+          0,
+        ),
       0,
     ) > DOCUMENT_IMPORT_LIMITS.maxCharacters
   )

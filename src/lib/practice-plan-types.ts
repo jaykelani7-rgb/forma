@@ -15,6 +15,7 @@ export interface PlanEvidence {
   type:
     | "schedule"
     | "attempt"
+    | "contest"
     | "revision"
     | "track"
     | "session"
@@ -45,6 +46,7 @@ export interface PracticePlanItem {
   relatedRecallAt?: string;
   trackContext?: TrackContext;
   sessionId?: string;
+  upsolvePriority?: "normal" | "high";
   deliberate?: boolean;
   decisionAt?: string;
   deferredUntil?: string;
@@ -191,6 +193,13 @@ export function validatePracticePlans(
           item.activity as string,
         ) ||
         (item.kind === "recall") !== (item.activity !== "coding") ||
+        !(
+          item.upsolvePriority === undefined ||
+          (["normal", "high"].includes(String(item.upsolvePriority)) &&
+            item.candidateKey.startsWith("upsolve:") &&
+            item.kind === "coding" &&
+            item.activity === "coding")
+        ) ||
         !integer(item.timeboxMinutes, 5, 180) ||
         !text(item.reason, 1000, 1) ||
         !stamp(item.selectedAt) ||
@@ -235,6 +244,7 @@ export function validatePracticePlans(
           ![
             "schedule",
             "attempt",
+            "contest",
             "revision",
             "track",
             "session",
@@ -362,6 +372,9 @@ export function validatePracticePlans(
           ? { trackContext: validateTrackContext(item.trackContext) }
           : {}),
         ...(item.sessionId !== undefined ? { sessionId: item.sessionId } : {}),
+        ...(item.upsolvePriority !== undefined
+          ? { upsolvePriority: item.upsolvePriority }
+          : {}),
         ...(item.deliberate !== undefined
           ? { deliberate: item.deliberate }
           : {}),

@@ -345,8 +345,8 @@ async function extractPDF(bytes, forceOCR) {
         annotations,
         activePage,
       );
-      // Use one source per page. A few characters (e.g. a page number on a scan)
-      // do not establish a usable text layer. Never combine text + OCR rows.
+      // A page number on a scan does not establish a usable text layer. Mixed
+      // native/raster pages require a visible coverage decision before saving.
       let operators;
       try {
         operators = await timed(
@@ -365,13 +365,19 @@ async function extractPDF(bytes, forceOCR) {
         pdfjs.OPS.paintImageXObject,
         pdfjs.OPS.paintInlineImageXObject,
         pdfjs.OPS.paintImageMaskXObject,
+        pdfjs.OPS.paintImageXObjectRepeat,
+        pdfjs.OPS.paintImageMaskXObjectRepeat,
+        pdfjs.OPS.paintImageMaskXObjectGroup,
+        pdfjs.OPS.paintInlineImageXObjectGroup,
       ];
       const hasImages = operators.fnArray.some((operation) =>
         imageOps.includes(operation),
       );
       const readableText = helpers.selectableProblemText(extracted, hasImages);
-      if (readableText && !forceOCR) result.push(...extracted);
-      else {
+      if (readableText && !forceOCR) {
+        result.push(...extracted);
+        if (hasImages) result.push(helpers.mixedContentWarning(activePage));
+      } else {
         if (typeof OffscreenCanvas === "undefined")
           throw new Error(
             "This browser cannot render scanned PDFs locally. Use a current browser or export the page as PNG/JPEG.",
@@ -400,7 +406,11 @@ async function extractPDF(bytes, forceOCR) {
             annotations,
             page.getViewport({ scale: size.scale }),
           );
-          result.push(...recognized);
+          result.push(
+            ...(hasImages && readableText
+              ? helpers.reconcileHybridPDFLines(extracted, recognized)
+              : recognized),
+          );
         } finally {
           activeRender = null;
           canvas.width = canvas.height = 0;

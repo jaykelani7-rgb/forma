@@ -168,6 +168,138 @@ for (const forceOCR of [false, true])
     );
   });
 
+test("a same-page hybrid PDF requires image coverage review and deliberate OCR recovers its missing problem without losing repeated memberships", async ({
+  page,
+}) => {
+  test.setTimeout(90000);
+  await seed(page);
+  await page.goto("/tracks");
+  const ocrRequests: string[] = [];
+  page.on("request", (request) => {
+    if (/\/import-assets\/(?:tesseract|core|eng)-/.test(request.url()))
+      ocrRequests.push(request.url());
+  });
+  let dialog = await documentPreview(page, "hybrid.pdf");
+  await expect(dialog.getByLabel("Preview counts")).toContainText(
+    "1 unresolved entries",
+  );
+  await expect(dialog.getByLabel("Preview counts")).toContainText(
+    "1 duplicate entries",
+  );
+  await expect(dialog.locator("[data-studio-stage]")).toHaveCount(3);
+  await expect(
+    dialog.getByRole("button", { name: "Confirm import", exact: true }),
+  ).toBeDisabled();
+  const lastStage = dialog.locator("[data-studio-stage]").last();
+  await openDetails(lastStage);
+  const warning = lastStage.locator("[data-studio-entry]").last();
+  await openDetails(warning);
+  await expect(warning).toContainText(
+    "Mixed-content page: image text was not extracted",
+  );
+  await expect(warning).toContainText("Use OCR for all PDF pages");
+  await warning.getByLabel("Codeforces ID", { exact: true }).fill("1791C");
+  await expect(
+    dialog.getByRole("button", { name: "Confirm import", exact: true }),
+  ).toBeDisabled();
+  expect(ocrRequests).toEqual([]);
+  expect((await durable(page)).tracks).toEqual([]);
+  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+  await dialog
+    .getByRole("button", { name: "Discard draft", exact: true })
+    .click();
+  dialog = await documentPreview(page, "hybrid.pdf", true);
+  await expect(dialog.getByLabel("Preview counts")).toContainText(
+    "3 detected problems",
+  );
+  await expect(dialog.getByLabel("Preview counts")).toContainText(
+    "0 unresolved entries",
+  );
+  await expect(dialog.locator("[data-studio-stage]")).toHaveCount(3);
+  const imageStage = dialog.locator("[data-studio-stage]").nth(1);
+  await openDetails(imageStage);
+  await expect(imageStage.locator("[data-studio-entry]")).toHaveCount(1);
+  const recovered = imageStage.locator("[data-studio-entry]").first();
+  await openDetails(recovered);
+  await expect(
+    recovered.getByLabel("Codeforces ID", { exact: true }),
+  ).toHaveValue("1791C");
+  await expect(
+    recovered.getByLabel("Source evidence for problem 1"),
+  ).toContainText("Prepend and Append");
+  await reviewRows(dialog);
+  await dialog
+    .getByRole("button", { name: "Confirm import", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "hybrid", exact: true, level: 1 }),
+  ).toBeVisible();
+  const saved = await durable(page);
+  expect(saved.trackEntries!.map((entry) => entry.code)).toEqual([
+    "381A",
+    "1791C",
+    "381A",
+  ]);
+  expect(saved.trackEntries!.map((entry) => entry.source?.kind)).toEqual([
+    "pdf-text",
+    "ocr",
+    "pdf-text",
+  ]);
+  expect(saved.trackStages!.map((stage) => stage.title)).toEqual([
+    "Selectable foundations",
+    "Image practice",
+    "Intentional revisit",
+  ]);
+  expect(saved.trackEntries![0].title).toBe("Sereja and Dima");
+  expect(saved.trackEntries![0].source?.text).toBe("381A - Sereja and Dima");
+  expect(saved.trackEntries![0].problemId).toBe(
+    saved.trackEntries![2].problemId,
+  );
+  expect(saved.problems).toHaveLength(2);
+  expect(ocrRequests.length).toBeGreaterThan(0);
+  await page.reload();
+  expect((await durable(page)).trackEntries).toEqual(saved.trackEntries);
+});
+
+test("a decorative raster prompts an explicit coverage decision without forcing OCR", async ({
+  page,
+}) => {
+  await seed(page);
+  await page.goto("/tracks");
+  const ocrRequests: string[] = [];
+  page.on("request", (request) => {
+    if (/\/import-assets\/(?:tesseract|core|eng)-/.test(request.url()))
+      ocrRequests.push(request.url());
+  });
+  const dialog = await documentPreview(page, "decorative-image.pdf");
+  await expect(
+    dialog.getByRole("button", { name: "Confirm import", exact: true }),
+  ).toBeDisabled();
+  const stage = dialog.locator("[data-studio-stage]").first();
+  await openDetails(stage);
+  const warning = stage.locator("[data-studio-entry]").last();
+  await openDetails(warning);
+  await expect(warning).toContainText("including possible decorative images");
+  await warning.getByRole("button", { name: /^Exclude problem/ }).click();
+  await expect(
+    dialog.getByRole("button", { name: "Confirm import", exact: true }),
+  ).toBeEnabled();
+  await dialog
+    .getByRole("button", { name: "Confirm import", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", {
+      name: "decorative-image",
+      exact: true,
+      level: 1,
+    }),
+  ).toBeVisible();
+  expect(
+    (await durable(page)).trackEntries!.map((entry) => entry.code),
+  ).toEqual(["381A"]);
+  expect(ocrRequests).toEqual([]);
+});
+
 for (const name of [
   "scanned.pdf",
   "mixed.pdf",

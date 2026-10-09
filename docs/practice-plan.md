@@ -15,11 +15,11 @@ The target date is context only. It supplies no readiness estimate or placement 
 The normal order is:
 
 1. An unfinished Forma session, including a paused or overnight session.
-2. Eligible due coding reattempts and due written recall, ordered by their separate saved due dates.
+2. Eligible coding upsolves, due coding reattempts and due written recall, ordered by their separate applicable dates.
 3. The next eligible active-track problem, using existing stage and membership order.
 4. Other eligible saved collection problems.
 
-Within an equal priority and date, coding precedes written recall, then canonical identity and candidate key break ties lexicographically. Existing focus filtering applies when matching topics exist; otherwise the full eligible collection remains available. Collection fallback excludes finished active-track work and avoids treating imported-only submissions as new notebook coding problems without timed attempts.
+Within equal activity precedence and date, coding precedes written recall. Upsolve candidates precede other coding choices at that tie; high-priority upsolves precede normal-priority upsolves, then canonical identity and candidate key break ties lexicographically. Existing focus filtering applies when matching topics exist; otherwise the full eligible collection remains available. Collection fallback excludes finished active-track work and avoids treating imported-only submissions as new notebook coding problems without timed attempts. Future upsolve dates also suppress generic library/track coding for that identity while written recall remains independently scheduled.
 
 **Mix in due revision** follows that order. **Make room for my track** keeps the strongest first activity, then puts the next eligible track problem ahead of additional revisions if time remains. Neither setting promises track work on a short day.
 
@@ -45,7 +45,7 @@ A plan stores its local day, profile, budget, stable item IDs, existing problem/
 
 Starting planned coding resolves the current item, creates any needed fresh track problem and binds the session to its plan in one validated write. Completion follows a matching saved timed attempt, a saved quick reflection after selection, or a matching written-recall record. A bare imported acceptance does not create plan completion or claim an independent solve. Planning controls cannot create completion evidence.
 
-Practice saved elsewhere, schedule edits, track-order or membership changes, archives, skips, deferrals and profile changes revalidate pending items. Stale selections keep a visible explanation; eligible replacements use the same service. Completed evidence and deliberate choices are retained. If a manual coding session starts for a default recall suggestion of the same identity, the plan explains that written recall remains independently due in the backlog.
+Practice saved elsewhere, schedule edits, track-order or membership changes, archives, skips, deferrals and profile changes revalidate pending items. Stale selections keep a visible explanation; eligible replacements use the same service. Upsolve priority is saved with each selection. Changed automatic priority/order leaves an explained stale selection and current replacement; deliberate, started and ended choices stay attached to their original selection. Completed evidence and deliberate choices are retained. If a manual coding session starts for a default recall suggestion of the same identity, the plan explains that written recall remains independently due in the backlog.
 
 If a personal timed event is deliberately linked to a different profile later, its original plan completion reference remains as explained stale evidence. It no longer adds participation to the former profile. A real saved record, identity, activity, date and later link provenance must validate; an unrelated later-day record cannot complete an older unbound plan through a backup.
 
@@ -69,7 +69,7 @@ Limits are 5,000 saved day/profile plans per workspace and 100 decisions/message
 
 ## Returning after a break
 
-After at least seven local days since the latest applicable saved coding or written-recall activity, Today can offer **Welcome back. Start with one short session?** It shows the last recorded date and lets you choose fifteen minutes or continue normally. The offer does not infer inactivity from app visits, reset progress, penalize missed days or conclude that learning outside Forma stopped. Sparse or absent history produces no inactivity claim.
+After at least seven local days since the latest applicable actual coding, contest participation or written-recall activity, Today can offer **Welcome back. Start with one short session?** It shows the last recorded date and lets you choose fifteen minutes or continue normally. Editing old reflection notes does not count as a new coding session. An actual contest start counts as participation; unattended expiry does not invent activity on its later deadline date. The offer does not infer inactivity from app visits, reset progress, penalize missed days or conclude that learning outside Forma stopped. Sparse or absent history produces no inactivity claim.
 
 ## Useful observations in Progress
 

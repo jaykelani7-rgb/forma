@@ -7,6 +7,10 @@ import type { Attempt, Data, Difficulty, Outcome, Problem } from "./model";
 import type { ReflectionMemory } from "./memory-types";
 import type { TrackContext } from "./tracks-types";
 import { practiceIdentity } from "./practice-state";
+import {
+  projectContestLearning,
+  type ContestLearningSource,
+} from "./contest-learning";
 
 export interface LearningLink {
   timedAttemptId: string;
@@ -20,7 +24,7 @@ export interface LearningLink {
 // affects learning credit only; measured time and original reflections survive.
 export interface LearningRecord extends ReflectionMemory {
   id: string;
-  source: "timed" | "codeforces" | "linked";
+  source: "timed" | "codeforces" | "linked" | "contest";
   problemId: string;
   problemIds: string[];
   handle: string | null;
@@ -37,8 +41,9 @@ export interface LearningRecord extends ReflectionMemory {
   submissionIds: number[];
   accepted: boolean | null;
   reflectionPending: boolean;
-  reflectionSource: "timed" | "codeforces" | null;
+  reflectionSource: "timed" | "codeforces" | "contest" | null;
   trackContext?: TrackContext;
+  contestSource?: ContestLearningSource;
 }
 
 export interface LearningScope {
@@ -365,7 +370,7 @@ export function learningHistory(
   const handle = Object.hasOwn(scope, "handle")
     ? scope.handle
     : data.codeforces.connectedHandle;
-  return records
+  return projectContestLearning(data, records)
     .filter(
       (record) =>
         (scope.allProfiles ||
@@ -460,6 +465,55 @@ function localDay(stamp: string): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
+/** Original coding participation dates. Editing a reflection never adds a day;
+ * automatic contest expiry is not evidence that someone returned at its deadline.
+ * Written recall is separate and consumers can add its actual completion date. */
+export function learningParticipationDays(
+  data: Data,
+  scope: LearningScope = {},
+): string[] {
+  return participationDays(data, scope, learningHistory(data, scope));
+}
+
+function participationDays(
+  data: Data,
+  scope: LearningScope,
+  history: LearningRecord[],
+): string[] {
+  const handle = Object.hasOwn(scope, "handle")
+    ? scope.handle
+    : data.codeforces.connectedHandle;
+  const inScope = (value: string | null | undefined) =>
+    scope.allProfiles || !value || lower(value) === lower(handle ?? "");
+  const days = new Set(history.map((record) => localDay(record.completedAt)));
+  const problemMap = new Map(
+    data.problems.map((problem) => [problem.id, problem]),
+  );
+  const target = scope.problemId ? problemMap.get(scope.problemId) : undefined;
+  const targetIdentity = target ? practiceIdentity(target) : null;
+  for (const submission of data.codeforces.submissions) {
+    const problem = problemMap.get(submission.problemId);
+    if (
+      inScope(submission.handle) &&
+      (!scope.problemId ||
+        (problem && practiceIdentity(problem) === targetIdentity))
+    )
+      days.add(localDay(submission.submittedAt));
+  }
+  for (const contest of data.contests ?? []) {
+    if (!contest.startedAt || !inScope(contest.handle)) continue;
+    if (
+      scope.problemId &&
+      !contest.problems.some((row) => row.identity === targetIdentity)
+    )
+      continue;
+    days.add(localDay(contest.startedAt));
+    if (contest.endedAt && contest.endReason !== "expired")
+      days.add(localDay(contest.endedAt));
+  }
+  return [...days].sort();
+}
+
 export function learningStats(data: Data, scope: LearningScope = {}) {
   const history = learningHistory(data, scope);
   const reflected = history.filter((record) => record.outcome !== null);
@@ -488,33 +542,6 @@ export function learningStats(data: Data, scope: LearningScope = {}) {
       });
     }
   }
-  // Practice days measure activity: a completed timed session or a fetched
-  // submission. They never imply a measured duration or independent solution.
-  const days = new Set(
-    history
-      .filter((record) => record.timedAttemptId)
-      .map((record) => localDay(record.completedAt)),
-  );
-  const importedIds = new Set(
-    history.flatMap((record) =>
-      record.importedAttemptId ? [record.importedAttemptId] : [],
-    ),
-  );
-  const includedAttempts = data.codeforces.practiceAttempts.filter((attempt) =>
-    importedIds.has(attempt.id),
-  );
-  const submissions = new Map(
-    data.codeforces.submissions.map((submission) => [
-      `${lower(submission.handle)}:${submission.id}`,
-      submission,
-    ]),
-  );
-  for (const attempt of includedAttempts) {
-    for (const id of attempt.submissionIds) {
-      const submission = submissions.get(`${lower(attempt.handle)}:${id}`);
-      if (submission) days.add(localDay(submission.submittedAt));
-    }
-  }
   return {
     history,
     practiceAttempts: history.length,
@@ -528,6 +555,8 @@ export function learningStats(data: Data, scope: LearningScope = {}) {
     unsolved: reflected.filter((record) => record.outcome === "unsolved")
       .length,
     timedSessions: history.filter((record) => record.timedAttemptId).length,
+    contestEvents: history.filter((record) => record.source === "contest")
+      .length,
     measuredMinutes: Math.floor(
       history.reduce((sum, record) => sum + (record.elapsedMs ?? 0), 0) / 60000,
     ),
@@ -537,7 +566,7 @@ export function learningStats(data: Data, scope: LearningScope = {}) {
     topics: [...topics.values()].sort(
       (a, b) => b.count - a.count || a.topic.localeCompare(b.topic),
     ),
-    practiceDays: [...days].sort(),
+    practiceDays: participationDays(data, scope, history),
   };
 }
 

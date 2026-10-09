@@ -1012,6 +1012,7 @@ export function validateData(input: unknown): Data {
             attempts,
             session: input.session as Session | null,
             codeforces,
+            learningLinks,
           }),
         }
       : {}),

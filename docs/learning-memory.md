@@ -12,7 +12,13 @@ The timeline runs oldest to newest. Timed events show measured seconds; imported
 
 Revisit offers coding re-solves, approach/invariant explanations, and complexity/edge-case recall. Written checks record their activity and independent/cue/not-yet-recalled assessment. Re-solving uses the existing timed session and reflection workflow. Its preparation shows previously recorded difficulties and the scoped cue; prior solution notes require **Reveal previous notes**. Written checks likewise keep solution notes hidden until requested, with an opaque dialog backdrop.
 
-Progress adds a selectable week or date range. Standalone timed, standalone imported and linked practice events form an additive breakdown. Written checks remain separate. Measured time includes linked timed sessions and excludes estimates for imported activity or recall. Independent-after-assistance evidence requires an earlier recorded hint or editorial and a later independent practice event. Period boundaries use inclusive local calendar dates of the practice event or completed written check.
+Progress adds a selectable week or date range. Standalone timed, standalone imported, linked and contest practice events form an additive breakdown. Written checks remain separate. Measured time includes linked timed sessions and excludes estimates for imported activity, contests or recall. Independent-after-assistance evidence requires an earlier recorded hint or editorial and a later independent practice event. Period boundaries use inclusive local calendar dates of the practice event or completed written check.
+
+## Contest evidence
+
+Shared history includes touched contest problems and confirmed contest reflections, with links to their original contest and row. Memory's latest reflection, explicit mistake counts, Progress observations and track progress use the same profile-scoped evidence. Platform acceptance stays separate from an independent learning outcome; status controls and unfinished reflection drafts cannot supply understanding. Contest time is never divided among problems or inserted as a regular timed attempt.
+
+Imported-only submissions inside a recorded contest window support one contest event, with the original import sources retained. Submissions outside the window remain separate actual activity. Explicit real timed/import links keep their selected reflection source and measured duration. A native confirmed contest reflection takes precedence over imported reflection support in its contest event. Original participation dates remain separate from later reflection edits. Correcting a completed timed upsolve to Unsolved can reopen its existing queue entry without losing the attempt, priority or chosen date; administrative removal stays removed. See [the integration review](integration-review.md) for reproductions, current checks and remaining limitations.
 
 ## Reliability fixes
 
@@ -44,6 +50,8 @@ Local mode needs no account or additional environment variables. Optional hosted
 
 ## Verification
 
+The results below describe the original Memory phase. The later [integration review](integration-review.md) records verification of shared contest evidence and corrected upsolve outcomes.
+
 The final local run passed:
 
 - `npm run lint` and `npm run typecheck`.
@@ -59,9 +67,9 @@ Local SQL fixtures exercise the existing account ownership, revision and retry r
 
 Memory and written recall were captured and visually inspected in both themes, on desktop and mobile, with Large text, long names and reduced motion:
 
-| View | Warm paper | Ink |
-| --- | --- | --- |
+| View           | Warm paper                                         | Ink                                               |
+| -------------- | -------------------------------------------------- | ------------------------------------------------- |
 | Desktop Memory | [Screenshot](forma-memory-desktop-light-large.png) | [Screenshot](forma-memory-desktop-dark-large.png) |
-| Mobile Memory | [Screenshot](forma-memory-mobile-light-large.png) | [Screenshot](forma-memory-mobile-dark-large.png) |
+| Mobile Memory  | [Screenshot](forma-memory-mobile-light-large.png)  | [Screenshot](forma-memory-mobile-dark-large.png)  |
 | Desktop recall | [Screenshot](forma-recall-desktop-light-large.png) | [Screenshot](forma-recall-desktop-dark-large.png) |
-| Mobile recall | [Screenshot](forma-recall-mobile-light-large.png) | [Screenshot](forma-recall-mobile-dark-large.png) |
+| Mobile recall  | [Screenshot](forma-recall-mobile-light-large.png)  | [Screenshot](forma-recall-mobile-dark-large.png)  |
