@@ -162,9 +162,10 @@ test("track practice, mistake reflection, Memory edit, written revision and relo
     "Reflection saved. A little sharper than before.",
   );
   if (testInfo.project.name === "mobile") {
-    // Exercise the actual mobile overlap, after both entrance animations finish.
-    // The notification remains visible; waiting for it to disappear would hide
-    // the original mouse-down/mouse-up interception race.
+    // Font metrics differ between macOS and the Linux CI runner. Place the real
+    // notification over the link so both exercise the same click-through case.
+    // Keep its hit-testing styles and lifetime intact to catch the original race.
+    await memoryLink.scrollIntoViewIfNeeded();
     await page.evaluate(async () => {
       const animations = [
         document.querySelector(".session-complete"),
@@ -174,9 +175,12 @@ test("track practice, mistake reflection, Memory edit, written revision and relo
     });
     const overlap = await memoryLink.evaluate((link) => {
       const linkBox = link.getBoundingClientRect();
-      const toastBox = document
-        .querySelector(".toast")!
-        .getBoundingClientRect();
+      const toast = document.querySelector<HTMLElement>(".toast")!;
+      const region = document.querySelector<HTMLElement>(".toast-region")!;
+      const toastHeight = toast.getBoundingClientRect().height;
+      region.style.top = `${linkBox.top + (linkBox.height - toastHeight) / 2}px`;
+      region.style.bottom = "auto";
+      const toastBox = toast.getBoundingClientRect();
       const left = Math.max(linkBox.left, toastBox.left);
       const right = Math.min(linkBox.right, toastBox.right);
       const top = Math.max(linkBox.top, toastBox.top);
@@ -197,6 +201,10 @@ test("track practice, mistake reflection, Memory edit, written revision and relo
     ).not.toBeNull();
     expect(overlap!.linkReceivesClick).toBe(true);
     await memoryLink.click({ position: { x: overlap!.x, y: overlap!.y } });
+    await page.locator(".toast-region").evaluate((region) => {
+      (region as HTMLElement).style.removeProperty("top");
+      (region as HTMLElement).style.removeProperty("bottom");
+    });
   } else await memoryLink.click();
   await expect(
     page.getByRole("heading", { name: title, exact: true }),
