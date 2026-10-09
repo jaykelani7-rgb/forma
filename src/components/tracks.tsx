@@ -10,6 +10,7 @@ import {
   FileUp,
   Layers3,
   Pencil,
+  Share2,
   Sprout,
   Trash2,
 } from "lucide-react";
@@ -27,6 +28,7 @@ import {
 } from "@/lib/tracks";
 import { useWorkspace } from "./provider";
 import { TrackImport, type TrackStudioEntryPoint } from "./track-import";
+import { TrackShare } from "./track-share";
 import { EmptyState, Modal, PageHeader } from "./ui";
 import styles from "./tracks.module.css";
 
@@ -78,9 +80,13 @@ export function Tracks({
   trackId?: string;
   stageId?: string;
 }) {
-  const { workspaceKey } = useWorkspace();
+  const { workspaceKey, data } = useWorkspace();
   return (
-    <TracksWorkspace key={workspaceKey} trackId={trackId} stageId={stageId} />
+    <TracksWorkspace
+      key={`${workspaceKey}:${data.codeforces.connectedHandle?.toLowerCase() ?? ""}`}
+      trackId={trackId}
+      stageId={stageId}
+    />
   );
 }
 
@@ -104,6 +110,7 @@ function TracksWorkspace({
     null,
   );
   const [editing, setEditing] = useState(false);
+  const [sharing, setSharing] = useState<string | null>(null);
   const [removing, setRemoving] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
@@ -267,6 +274,12 @@ function TracksWorkspace({
           <div className={styles.actions}>
             <button
               className="button secondary"
+              onClick={() => setImporting("shared")}
+            >
+              Import shared track
+            </button>
+            <button
+              className="button secondary"
               onClick={() => setImporting("paste")}
             >
               Paste Codeforces links or IDs
@@ -317,6 +330,15 @@ function TracksWorkspace({
                       Open track
                       <ArrowRight size={16} />
                     </Link>
+                    <button
+                      className="button ghost"
+                      disabled={pending}
+                      aria-label={`Share track: ${value.title}`}
+                      onClick={() => setSharing(value.id)}
+                    >
+                      <Share2 size={16} />
+                      Share track
+                    </button>
                     <button
                       className="button ghost"
                       disabled={pending}
@@ -384,6 +406,14 @@ function TracksWorkspace({
                     Edit track
                   </button>
                   <button
+                    className="button secondary"
+                    disabled={pending}
+                    onClick={() => setSharing(track.id)}
+                  >
+                    <Share2 size={16} />
+                    Share track
+                  </button>
+                  <button
                     className="button ghost"
                     disabled={pending}
                     onClick={() => setRemoving(true)}
@@ -395,6 +425,9 @@ function TracksWorkspace({
               )
             }
           />
+          {!stage && track.shareDescription && (
+            <p className={styles.curriculumText}>{track.shareDescription}</p>
+          )}
           {stage ? (
             <p className={styles.source}>
               {stage.suggestedTime && `${practiceTime(stage.suggestedTime)} · `}
@@ -693,6 +726,9 @@ function TracksWorkspace({
           initialDraft={editDraft}
           onClose={() => setEditing(false)}
         />
+      )}
+      {sharing && (
+        <TrackShare trackId={sharing} onClose={() => setSharing(null)} />
       )}
       {removing && track && (
         <Modal

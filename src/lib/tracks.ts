@@ -9,6 +9,11 @@ import {
 } from "./codeforces-identity";
 import { entryNeedsReview, trackEntryIdentity } from "./track-studio";
 import { validateTrackEntrySource } from "./tracks-types";
+import {
+  findEquivalentSharedTracks,
+  isSharedTrackDraft,
+  sharedTrackFingerprint,
+} from "./shared-tracks";
 import type {
   Track,
   TrackContext,
@@ -39,6 +44,9 @@ export function trackDraft(data: Data, trackId: string): TrackImportDraft {
     title: track.title,
     sourceName: track.sourceName,
     sourceFingerprint: track.sourceFingerprint,
+    ...(track.shareDescription !== undefined
+      ? { shareDescription: track.shareDescription }
+      : {}),
     ...(track.sourceNotes !== undefined
       ? { sourceNotes: track.sourceNotes }
       : {}),
@@ -85,6 +93,7 @@ export function findDuplicateTracks(
   data: Data,
   draft: TrackImportDraft,
 ): Track[] {
+  if (isSharedTrackDraft(draft)) return findEquivalentSharedTracks(data, draft);
   return (data.tracks ?? []).filter(
     (track) => track.sourceFingerprint === draft.sourceFingerprint,
   );
@@ -158,11 +167,14 @@ function normalizeDraft(draft: TrackImportDraft): TrackImportDraft {
     throw new Error(
       "A practice sheet supports up to 100 stages and 1,000 problems.",
     );
-  return {
+  const normalized: TrackImportDraft = {
     id: draft.id,
     title: draft.title.trim(),
     sourceName: draft.sourceName,
     sourceFingerprint: draft.sourceFingerprint,
+    ...(draft.shareDescription !== undefined
+      ? { shareDescription: draft.shareDescription }
+      : {}),
     ...(draft.sourceNotes !== undefined
       ? { sourceNotes: draft.sourceNotes }
       : {}),
@@ -204,6 +216,9 @@ function normalizeDraft(draft: TrackImportDraft): TrackImportDraft {
         }),
     })),
   };
+  if (isSharedTrackDraft(normalized))
+    normalized.sourceFingerprint = sharedTrackFingerprint(normalized);
+  return normalized;
 }
 function applyDraft(
   data: Data,
@@ -266,9 +281,14 @@ function applyDraft(
     id: draft.id,
     title: draft.title,
     sourceName: existing?.sourceName ?? draft.sourceName,
-    sourceFingerprint: existing?.sourceFingerprint ?? draft.sourceFingerprint,
+    sourceFingerprint: isSharedTrackDraft(draft)
+      ? draft.sourceFingerprint
+      : (existing?.sourceFingerprint ?? draft.sourceFingerprint),
     createdAt,
     stageIds: stages.map((stage) => stage.id),
+    ...(draft.shareDescription !== undefined
+      ? { shareDescription: draft.shareDescription }
+      : {}),
     ...(draft.sourceNotes !== undefined
       ? { sourceNotes: draft.sourceNotes }
       : {}),
@@ -290,7 +310,9 @@ function applyDraft(
       ),
       ...entries,
     ],
-    activeTrackId: data.activeTrackId ?? draft.id,
+    activeTrackId: isSharedTrackDraft(draft)
+      ? (data.activeTrackId ?? null)
+      : (data.activeTrackId ?? draft.id),
   });
 }
 export function importTrack(
