@@ -5,13 +5,18 @@ import {
 } from "./contest-lab";
 import {
   elapsed,
+  dateFromDay,
   localDate,
   matchesFocus,
   shortDate,
   type Data,
   type Problem,
 } from "./model";
-import { learningHistory, type LearningRecord } from "./learning";
+import {
+  learningHistory,
+  learningParticipationDays,
+  type LearningRecord,
+} from "./learning";
 import type { RevisionRecord } from "./memory-types";
 import {
   practiceIdentity,
@@ -56,6 +61,7 @@ export interface PracticeCandidate {
   trackContext?: TrackContext;
   position?: { index: number; total: number };
   sessionId?: string;
+  upsolvePriority?: "normal" | "high";
 }
 export const PRACTICE_PLAN_RULES = {
   maximumActivities: 3,
@@ -196,6 +202,15 @@ function reflectionEvidence(data: Data, identity: string): PlanEvidence[] {
     editorial: "Your last reflection recorded editorial assistance.",
     unsolved: "Your last reflection recorded an unfinished attempt.",
   };
+  if (record.contestSource)
+    return [
+      {
+        type: "contest",
+        label: `${descriptions[record.outcome!]} ${record.reflectionSource === "contest" ? "Confirmed in" : "From imported activity supporting"} contest “${record.contestSource.name}”.`,
+        recordId: record.id,
+        day: localDate(new Date(record.completedAt)),
+      },
+    ];
   return [
     {
       type: "attempt",
@@ -379,12 +394,18 @@ export function practiceCandidates(
       fresh: false,
       kind: "coding",
       activity: "coding",
-      reason: `Upsolve from ${contest.name}: ${row.reflection ? (row.reflection.outcome === "unsolved" ? "unfinished" : "assisted") : "unfinished"} contest problem.`,
+      upsolvePriority: row.upsolve!.priority,
+      reason: `Upsolve from ${contest.name}: ${row.reflection ? (row.reflection.outcome === "unsolved" ? "unfinished" : row.reflection.outcome === "independent" ? "deliberately queued" : "assisted") : "unfinished"} contest problem. Saved upsolve priority: ${row.upsolve!.priority}.`,
       evidence: [
         {
           type: "collection",
           label: `Contest Lab / ${contest.name}. Original contest result stays separate.`,
           recordId: contest.id,
+        },
+        {
+          type: "collection",
+          label: `Upsolve priority at selection: ${row.upsolve!.priority}.`,
+          recordId: row.id,
         },
       ],
       dueAt: row.upsolve!.dueAt ?? today,
@@ -499,6 +520,8 @@ export function practiceCandidates(
       Number(a.kind === "recall") - Number(b.kind === "recall") ||
       Number(!a.key.startsWith("upsolve:")) -
         Number(!b.key.startsWith("upsolve:")) ||
+      Number(b.upsolvePriority === "high") -
+        Number(a.upsolvePriority === "high") ||
       a.identity.localeCompare(b.identity) ||
       a.key.localeCompare(b.key),
   );
@@ -568,6 +591,9 @@ function asItem(
       : {}),
     ...(candidate.trackContext ? { trackContext: candidate.trackContext } : {}),
     ...(candidate.sessionId ? { sessionId: candidate.sessionId } : {}),
+    ...(candidate.upsolvePriority
+      ? { upsolvePriority: candidate.upsolvePriority }
+      : {}),
     ...(deliberate ? { deliberate: true } : {}),
   };
 }
@@ -687,6 +713,7 @@ function completionFor(
         ];
       if (
         record.importedAttemptId &&
+        record.reflectionSource === "codeforces" &&
         record.outcome !== null &&
         record.reflectedAt &&
         record.reflectedAt >= item.selectedAt &&
@@ -754,6 +781,28 @@ function staleReason(
   )
     return "The schedule or eligible track order changed. A pending activity was replaced.";
   return null;
+}
+function upsolvePriorityChangeReason(
+  item: PracticePlanItem,
+  candidate: PracticeCandidate | undefined,
+  plan: PracticePlan,
+  unselectedHighPriorityDates: Set<string | null>,
+) {
+  if (
+    !candidate?.upsolvePriority ||
+    item.deliberate ||
+    item.sessionId ||
+    plan.status === "ended"
+  )
+    return null;
+  if ((item.upsolvePriority ?? "normal") !== candidate.upsolvePriority)
+    return item.upsolvePriority
+      ? "This upsolve’s priority changed. Its automatic choice was replaced while retaining the original selection evidence."
+      : "This older automatic choice did not save its upsolve priority. It was refreshed with the current priority while retaining the original selection evidence.";
+  if (candidate.upsolvePriority === "high") return null;
+  return unselectedHighPriorityDates.has(candidate.dueAt)
+    ? "A high-priority upsolve now precedes this automatic choice under the same scheduling conditions. The original selection evidence is retained."
+    : null;
 }
 /** Pure, retry-safe reconciliation. Refreshes keep the same selections; only
  * saved activity evidence completes items. Stale pending rows remain visible. */
@@ -827,6 +876,27 @@ export function reconcilePracticePlan(data: Data, now = new Date()): Data {
       candidate,
     ]),
   );
+  const retainedIdentities = new Set(
+    previous.items
+      .filter(
+        (item) =>
+          item.status !== "stale" &&
+          (item.status !== "pending" ||
+            item.deliberate ||
+            item.sessionId ||
+            item.upsolvePriority === "high"),
+      )
+      .map((item) => item.identity),
+  );
+  const unselectedHighPriorityDates = new Set(
+    [...candidates.values()]
+      .filter(
+        (candidate) =>
+          candidate.upsolvePriority === "high" &&
+          !retainedIdentities.has(candidate.identity),
+      )
+      .map((candidate) => candidate.dueAt),
+  );
   let replacementCount = 0,
     changed = false;
   const messages = [...previous.messages];
@@ -878,12 +948,15 @@ export function reconcilePracticePlan(data: Data, now = new Date()): Data {
         decisionAt: now.toISOString(),
       };
     }
-    const reason = staleReason(
-      data,
-      item,
-      candidates.get(item.candidateKey),
-      now,
-    );
+    const candidate = candidates.get(item.candidateKey);
+    const reason =
+      staleReason(data, item, candidate, now) ??
+      upsolvePriorityChangeReason(
+        item,
+        candidate,
+        previous,
+        unselectedHighPriorityDates,
+      );
     if (!reason) return item;
     changed = true;
     replacementCount++;
@@ -1270,11 +1343,7 @@ export function practicePlanView(data: Data, now = new Date()) {
     : plan?.status === "ended"
       ? null
       : (pending[0] ?? null);
-  const history = historyFor(data).records.flatMap((record) =>
-    record.reflectedAt
-      ? [record.completedAt, record.reflectedAt]
-      : [record.completedAt],
-  );
+  const history = learningParticipationDays(data);
   const recall = (data.revisions ?? [])
     .filter(
       (record) =>
@@ -1282,18 +1351,19 @@ export function practicePlanView(data: Data, now = new Date()) {
         record.handle.toLowerCase() ===
           data.codeforces.connectedHandle?.toLowerCase(),
     )
-    .map((record) => record.completedAt);
+    .map((record) => localDate(new Date(record.completedAt)));
   const latest = [...history, ...recall]
-    .filter((stamp) => stamp <= now.toISOString())
+    .filter((day) => day <= localDate(now))
     .sort()
     .at(-1);
-  const dayDistance = latest
+  const latestDate = latest ? dateFromDay(latest) : null;
+  const dayDistance = latestDate
     ? Math.floor(
         (Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()) -
           Date.UTC(
-            new Date(latest).getFullYear(),
-            new Date(latest).getMonth(),
-            new Date(latest).getDate(),
+            latestDate.getFullYear(),
+            latestDate.getMonth(),
+            latestDate.getDate(),
           )) /
           86400000,
       )

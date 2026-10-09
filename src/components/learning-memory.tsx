@@ -476,6 +476,15 @@ export function LearningMemory({
     const importedReflection = imported
       ? importedReflections.get(imported.id)
       : undefined;
+    const allImported = [
+      ...new Set([
+        ...(record.importedAttemptId ? [record.importedAttemptId] : []),
+        ...(record.contestSource?.importedAttemptIds ?? []),
+      ]),
+    ].flatMap((id) => {
+      const original = importedSources.get(id);
+      return original ? [original] : [];
+    });
     return (
       <details className={styles.sources}>
         <summary>
@@ -484,6 +493,24 @@ export function LearningMemory({
             ? " · explicitly linked as one practice event"
             : ""}
         </summary>
+        {record.contestSource && (
+          <div className={styles.source}>
+            <strong>Contest source · {record.contestSource.name}</strong>
+            <p>
+              Participation began {shortDate(record.contestSource.startedAt)}.
+              The contest clock is not allocated to individual problems.
+              {record.reflectionSource === "contest"
+                ? " Understanding and mistake labels come from your confirmed contest reflection."
+                : " Platform submissions and any confirmed imported reflection remain distinct from your contest status."}
+            </p>
+            <Link
+              href={`/contests/${record.contestSource.contestId}`}
+              className="text-link"
+            >
+              Review original contest record
+            </Link>
+          </div>
+        )}
         {timed && (
           <div className={styles.source}>
             <strong>Timed source</strong>
@@ -503,72 +530,76 @@ export function LearningMemory({
             </button>
           </div>
         )}
-        {imported && (
-          <div className={styles.source}>
-            <strong>Codeforces source · {imported.handle}</strong>
-            <p>
-              {imported.submissionIds.length} submission
-              {imported.submissionIds.length === 1 ? "" : "s"}; imported
-              duration is not measured.
-            </p>
-            <ul className={styles.list}>
-              {imported.submissionIds
-                .flatMap((id) => {
-                  const submission = submissionsBySource.get(
-                    `${imported.handle.toLowerCase()}:${id}`,
-                  );
-                  return submission ? [submission] : [];
-                })
-                .sort(
-                  (a, b) =>
-                    a.submittedAt.localeCompare(b.submittedAt) || a.id - b.id,
-                )
-                .map((submission) => (
-                  <li key={submission.id}>
-                    <span>
-                      #{submission.id} · {verdictLabel(submission.verdict)} ·{" "}
-                      {submission.language || "Language not recorded"} ·{" "}
-                    </span>
-                    <time dateTime={submission.submittedAt}>
-                      {new Date(submission.submittedAt).toLocaleString()}
-                    </time>
-                  </li>
-                ))}
-            </ul>
-            {importedReflection && (
+        {allImported.map((imported) => {
+          const importedReflection = importedReflections.get(imported.id);
+          return (
+            <div className={styles.source} key={imported.id}>
+              <strong>Codeforces source · {imported.handle}</strong>
               <p>
-                {OUTCOMES[importedReflection.outcome]}
-                {importedReflection.takeaway &&
-                  ` · ${importedReflection.takeaway}`}
+                Original imported activity · {imported.submissionIds.length}{" "}
+                submission
+                {imported.submissionIds.length === 1 ? "" : "s"}; imported
+                duration is not measured.
               </p>
-            )}
-            {importedReflection?.approach && (
-              <p className={styles.quote}>{importedReflection.approach}</p>
-            )}
-            {importedReflection?.mistakeNote && (
-              <p className={styles.quote}>{importedReflection.mistakeNote}</p>
-            )}
-            {!!importedReflection?.mistakes?.length && (
-              <div className={styles.pills}>
-                {importedReflection.mistakes.map((category) => (
-                  <span className={styles.pill} key={category}>
-                    {MISTAKES[category]}
-                  </span>
-                ))}
-              </div>
-            )}
-            <Link href="/activity" className="text-link">
-              Open imported activity
-            </Link>
-            <button
-              className="button secondary"
-              disabled={profileView}
-              onClick={() => setImportedEditing(imported.id)}
-            >
-              Edit imported source
-            </button>
-          </div>
-        )}
+              <ul className={styles.list}>
+                {imported.submissionIds
+                  .flatMap((id) => {
+                    const submission = submissionsBySource.get(
+                      `${imported.handle.toLowerCase()}:${id}`,
+                    );
+                    return submission ? [submission] : [];
+                  })
+                  .sort(
+                    (a, b) =>
+                      a.submittedAt.localeCompare(b.submittedAt) || a.id - b.id,
+                  )
+                  .map((submission) => (
+                    <li key={submission.id}>
+                      <span>
+                        #{submission.id} · {verdictLabel(submission.verdict)} ·{" "}
+                        {submission.language || "Language not recorded"} ·{" "}
+                      </span>
+                      <time dateTime={submission.submittedAt}>
+                        {new Date(submission.submittedAt).toLocaleString()}
+                      </time>
+                    </li>
+                  ))}
+              </ul>
+              {importedReflection && (
+                <p>
+                  {OUTCOMES[importedReflection.outcome]}
+                  {importedReflection.takeaway &&
+                    ` · ${importedReflection.takeaway}`}
+                </p>
+              )}
+              {importedReflection?.approach && (
+                <p className={styles.quote}>{importedReflection.approach}</p>
+              )}
+              {importedReflection?.mistakeNote && (
+                <p className={styles.quote}>{importedReflection.mistakeNote}</p>
+              )}
+              {!!importedReflection?.mistakes?.length && (
+                <div className={styles.pills}>
+                  {importedReflection.mistakes.map((category) => (
+                    <span className={styles.pill} key={category}>
+                      {MISTAKES[category]}
+                    </span>
+                  ))}
+                </div>
+              )}
+              <Link href="/activity" className="text-link">
+                Open imported activity
+              </Link>
+              <button
+                className="button secondary"
+                disabled={profileView}
+                onClick={() => setImportedEditing(imported.id)}
+              >
+                Edit imported source
+              </button>
+            </div>
+          );
+        })}
         {record.source === "linked" && (
           <>
             <p className={styles.meta}>
@@ -664,9 +695,9 @@ export function LearningMemory({
           <h2 id="memory-evidence">What your records show</h2>
           {!!contestMemory.length && (
             <p className={styles.meta}>
-              This summary covers timed practice, imported reflections, and
-              written recall. Original contest reflections appear separately
-              below.
+              This summary includes confirmed contest reflections alongside
+              timed practice and imported reflections. Written recall remains
+              separate; a contest status alone does not record understanding.
             </p>
           )}
           <dl className={styles.evidence}>
@@ -684,6 +715,20 @@ export function LearningMemory({
                 {memory.summary.latestReflection?.outcome
                   ? OUTCOMES[memory.summary.latestReflection.outcome]
                   : "No reflection recorded yet"}
+                {memory.summary.latestReflection?.contestSource && (
+                  <p className={styles.meta}>
+                    <Link
+                      className="text-link"
+                      href={`/contests/${memory.summary.latestReflection.contestSource.contestId}`}
+                    >
+                      {memory.summary.latestReflection.reflectionSource ===
+                      "contest"
+                        ? "Confirmed contest reflection"
+                        : "Imported reflection from contest participation"}{" "}
+                      · {memory.summary.latestReflection.contestSource.name}
+                    </Link>
+                  </p>
+                )}
               </dd>
             </div>
             <div>
@@ -837,13 +882,15 @@ export function LearningMemory({
         <h2 id="memory-history">Your learning history</h2>
         <p className={styles.meta}>
           Oldest to newest. Explicitly linked timed and imported sources count
-          as one practice event; written recall is a separate activity.
+          as one practice event. Imported submissions within a contest window
+          support that contest event once; their originals remain available.
+          Written recall is a separate activity.
         </p>
         {memory.timeline.length === 0 ? (
           <EmptyState
             icon={<BookOpen size={28} />}
             title="This page starts with your first record."
-            description="Finish a timed session, reflect on imported activity, or write a recall check. No learning outcome is inferred from a problem being in a track."
+            description="Finish a timed session, record contest participation, reflect on imported activity, or write a recall check. No learning outcome is inferred from a problem being in a track."
           />
         ) : (
           <ol className={styles.timeline}>
@@ -866,9 +913,11 @@ export function LearningMemory({
                           <h3>
                             {event.record.source === "linked"
                               ? "Timed practice + Codeforces activity"
-                              : event.record.source === "timed"
-                                ? "Timed practice"
-                                : "Imported Codeforces activity"}
+                              : event.record.source === "contest"
+                                ? `Contest participation · ${event.record.contestSource?.name ?? "Original contest"}`
+                                : event.record.source === "timed"
+                                  ? "Timed practice"
+                                  : "Imported Codeforces activity"}
                           </h3>
                           <time
                             className={styles.meta}
@@ -949,29 +998,43 @@ export function LearningMemory({
                         </div>
                       )}
                       <div className={styles.actions}>
-                        <button
-                          className="button secondary"
-                          disabled={profileView}
-                          onClick={() => {
-                            if (
-                              event.record.reflectionSource === "codeforces" ||
-                              !event.record.timedAttemptId
-                            )
-                              setImportedEditing(
-                                event.record.importedAttemptId,
-                              );
-                            else
-                              setTimedEditing(
-                                timedSources.get(event.record.timedAttemptId) ??
-                                  null,
-                              );
-                          }}
-                          aria-label={`Edit reflection: ${new Date(event.record.completedAt).toLocaleString()}`}
-                        >
-                          {event.record.outcome === null
-                            ? "Add reflection"
-                            : "Edit reflection"}
-                        </button>
+                        {event.record.contestSource &&
+                        event.record.reflectionSource !== "codeforces" ? (
+                          <Link
+                            className="button secondary"
+                            href={`/contests/${event.record.contestSource.contestId}`}
+                          >
+                            {event.record.outcome === null
+                              ? "Add contest reflection"
+                              : "Review contest reflection"}
+                          </Link>
+                        ) : (
+                          <button
+                            className="button secondary"
+                            disabled={profileView}
+                            onClick={() => {
+                              if (
+                                event.record.reflectionSource ===
+                                  "codeforces" ||
+                                !event.record.timedAttemptId
+                              )
+                                setImportedEditing(
+                                  event.record.importedAttemptId,
+                                );
+                              else
+                                setTimedEditing(
+                                  timedSources.get(
+                                    event.record.timedAttemptId,
+                                  ) ?? null,
+                                );
+                            }}
+                            aria-label={`Edit reflection: ${new Date(event.record.completedAt).toLocaleString()}`}
+                          >
+                            {event.record.outcome === null
+                              ? "Add reflection"
+                              : "Edit reflection"}
+                          </button>
+                        )}
                       </div>
                       {originalSources(event.record)}
                     </>

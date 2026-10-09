@@ -233,7 +233,9 @@ test("create → notes → reload → frozen finish → sync → reflect → ups
     }),
   ).toBeVisible();
   await expect(
-    page.getByText("Contest pressure hid the invariant.", { exact: true }),
+    page
+      .getByRole("region", { name: "Your learning history" })
+      .getByText("Contest pressure hid the invariant.", { exact: true }),
   ).toBeVisible();
   await expect(
     page

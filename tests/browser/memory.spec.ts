@@ -120,7 +120,7 @@ async function durable(page: Page): Promise<Data> {
 
 test("track practice, mistake reflection, Memory edit, written revision and reload keep one coherent notebook", async ({
   page,
-}) => {
+}, testInfo) => {
   await seed(page, trackFixture());
   await page.goto(path);
   await page
@@ -153,12 +153,59 @@ test("track practice, mistake reflection, Memory edit, written revision and relo
   await page
     .getByRole("button", { name: "Save reflection", exact: true })
     .click();
-  await page
-    .getByRole("link", { name: "View Learning Memory", exact: true })
-    .click();
+  const memoryLink = page.getByRole("link", {
+    name: "View Learning Memory",
+    exact: true,
+  });
+  const toast = page.locator(".toast");
+  await expect(toast).toContainText(
+    "Reflection saved. A little sharper than before.",
+  );
+  if (testInfo.project.name === "mobile") {
+    // Exercise the actual mobile overlap, after both entrance animations finish.
+    // The notification remains visible; waiting for it to disappear would hide
+    // the original mouse-down/mouse-up interception race.
+    await page.evaluate(async () => {
+      const animations = [
+        document.querySelector(".session-complete"),
+        document.querySelector(".toast"),
+      ].flatMap((node) => node?.getAnimations() ?? []);
+      await Promise.all(animations.map((animation) => animation.finished));
+    });
+    const overlap = await memoryLink.evaluate((link) => {
+      const linkBox = link.getBoundingClientRect();
+      const toastBox = document
+        .querySelector(".toast")!
+        .getBoundingClientRect();
+      const left = Math.max(linkBox.left, toastBox.left);
+      const right = Math.min(linkBox.right, toastBox.right);
+      const top = Math.max(linkBox.top, toastBox.top);
+      const bottom = Math.min(linkBox.bottom, toastBox.bottom);
+      if (left >= right || top >= bottom) return null;
+      const x = (left + right) / 2;
+      const y = (top + bottom) / 2;
+      return {
+        x: x - linkBox.left,
+        y: y - linkBox.top,
+        linkReceivesClick:
+          document.elementFromPoint(x, y)?.closest("a") === link,
+      };
+    });
+    expect(
+      overlap,
+      "the saved-reflection notification covers part of the mobile Memory link",
+    ).not.toBeNull();
+    expect(overlap!.linkReceivesClick).toBe(true);
+    await memoryLink.click({ position: { x: overlap!.x, y: overlap!.y } });
+  } else await memoryLink.click();
   await expect(
     page.getByRole("heading", { name: title, exact: true }),
   ).toBeVisible();
+  await expect(toast).toBeVisible();
+  await page
+    .getByRole("button", { name: "Dismiss notification", exact: true })
+    .click();
+  await expect(toast).toHaveCount(0);
   const summary = page.getByRole("region", { name: "What your records show" });
   await expect(summary).toContainText(
     "Off-by-one or indexing was marked in 1 reflection.",

@@ -88,8 +88,231 @@ async function saved(page: Page): Promise<Data> {
       }),
   );
 }
+async function failNextSave(page: Page) {
+  await page.evaluate(() => {
+    const original = IDBDatabase.prototype.transaction;
+    let armed = true;
+    IDBDatabase.prototype.transaction = function (names, mode, options) {
+      const tx = original.call(this, names, mode, options);
+      const stores = typeof names === "string" ? [names] : Array.from(names);
+      if (
+        armed &&
+        this.name === "forma-workspaces" &&
+        mode === "readwrite" &&
+        stores.includes("recoveries")
+      ) {
+        armed = false;
+        tx.objectStore("workspaces").get("__draft_failure__").onsuccess = () =>
+          tx.abort();
+      }
+      return tx;
+    };
+  });
+}
 const notes = (page: Page) =>
   page.locator('textarea[aria-label="Scratch notes"]:visible');
+
+test("scratch drafts survive sidebar navigation and browser back before autosave", async ({
+  page,
+}) => {
+  await seed(page, fixture(1));
+  await notes(page).fill("A thought retained before the debounce.");
+  await page.getByRole("link", { name: "Today", exact: true }).click();
+  await expect(page).toHaveURL(/\/$/);
+  expect((await saved(page)).contests![0].problems[0].notes).toBe("");
+  await page.goBack();
+  await expect(notes(page)).toHaveValue(
+    "A thought retained before the debounce.",
+  );
+  await expect(
+    page.locator('[data-draft-feedback="Scratch notes"]'),
+  ).toContainText("Unsaved");
+  await page.clock.runFor(700);
+  await expect(
+    page.locator('[data-draft-feedback="Scratch notes"]'),
+  ).toHaveText("Saved");
+  expect((await saved(page)).contests![0].problems[0].notes).toBe(
+    "A thought retained before the debounce.",
+  );
+});
+
+test("overall review survives navigation and a hard reload before autosave", async ({
+  page,
+}) => {
+  await seed(page, fixture(1, true));
+  await page
+    .getByLabel("What went well?")
+    .fill("An unfinished review kept through navigation.");
+  await page.getByRole("link", { name: "Today", exact: true }).click();
+  await expect(page).toHaveURL(/\/$/);
+  await page.goBack();
+  await expect(page.getByLabel("What went well?")).toHaveValue(
+    "An unfinished review kept through navigation.",
+  );
+  await page.reload();
+  await expect(page.getByLabel("What went well?")).toHaveValue(
+    "An unfinished review kept through navigation.",
+  );
+  expect((await saved(page)).contests![0].review.wentWell).toBe("");
+  await page
+    .getByRole("button", { name: "Save overall review", exact: true })
+    .click();
+  expect((await saved(page)).contests![0].review.wentWell).toBe(
+    "An unfinished review kept through navigation.",
+  );
+});
+
+test("browser back retains an unfinished reflection without confirming learning", async ({
+  page,
+}) => {
+  await seed(page, fixture(1, true));
+  await page.getByRole("link", { name: "Today", exact: true }).click();
+  await expect(page).toHaveURL(/\/$/);
+  await page.goto("/contests/draft-safety");
+  await page
+    .getByRole("button", { name: "Reflect on this problem", exact: true })
+    .click();
+  await page
+    .getByLabel("Takeaway", { exact: true })
+    .fill("A reflection retained without confirmation.");
+  await page.goBack();
+  await expect(page).toHaveURL(/\/$/);
+  await page.goForward();
+  await page
+    .getByRole("button", { name: "Reflect on this problem", exact: true })
+    .click();
+  await expect(page.getByLabel("Takeaway", { exact: true })).toHaveValue(
+    "A reflection retained without confirmation.",
+  );
+  expect(
+    (await saved(page)).contests![0].problems[0].reflection,
+  ).toBeUndefined();
+  await page.getByRole("button", { name: "Close dialog", exact: true }).click();
+  expect(
+    (await saved(page)).contests![0].problems[0].reflectionDraft?.takeaway,
+  ).toBe("A reflection retained without confirmation.");
+  expect(
+    (await saved(page)).contests![0].problems[0].reflection,
+  ).toBeUndefined();
+});
+
+test("failed scratch saves stay available through navigation and retry", async ({
+  page,
+}) => {
+  await seed(page, fixture(1));
+  await notes(page).fill("A failed save retained for retry.");
+  await failNextSave(page);
+  await page
+    .getByRole("button", { name: "Save scratch notes", exact: true })
+    .click();
+  await expect(
+    page.locator('[data-draft-feedback="Scratch notes"]'),
+  ).toContainText("Save failed");
+  await page.getByRole("link", { name: "Today", exact: true }).click();
+  await expect(page).toHaveURL(/\/$/);
+  await page.goBack();
+  await expect(notes(page)).toHaveValue("A failed save retained for retry.");
+  expect((await saved(page)).contests![0].problems[0].notes).toBe("");
+  await page
+    .getByRole("button", { name: "Retry saving Contest Lab", exact: true })
+    .click();
+  await expect(
+    page.locator('[data-draft-feedback="Scratch notes"]'),
+  ).toHaveText("Saved");
+  await page.reload();
+  await expect(notes(page)).toHaveValue("A failed save retained for retry.");
+});
+
+test("retained notes cannot autosave after a profile switch", async ({
+  page,
+}) => {
+  await seed(page, fixture(1));
+  await notes(page).fill(
+    "Only the original captured profile may save this draft.",
+  );
+  await page.getByRole("link", { name: "Settings", exact: true }).click();
+  await page.getByRole("button", { name: "Disconnect", exact: true }).click();
+  await expect
+    .poll(async () => (await saved(page)).codeforces.connectedHandle)
+    .toBeNull();
+  await page.goto("/contests/draft-safety");
+  await expect(notes(page)).toHaveValue(
+    "Only the original captured profile may save this draft.",
+  );
+  await expect(notes(page)).toBeDisabled();
+  await page.clock.runFor(1000);
+  expect((await saved(page)).contests![0].problems[0].notes).toBe("");
+});
+
+test("workspace switches keep personal drafts separate and restore them on return", async ({
+  page,
+}) => {
+  await seed(page, fixture(1));
+  await notes(page).fill("A personal workspace draft.");
+  await page.getByRole("link", { name: "Settings", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Explore the demo", exact: true })
+    .click();
+  await expect(
+    page
+      .getByRole("button", { name: "Go to my workspace", exact: true })
+      .first(),
+  ).toBeVisible();
+  await page.goto("/contests/draft-safety");
+  await expect(
+    page.getByRole("heading", { name: "Contest unavailable", exact: true }),
+  ).toBeVisible();
+  await page.goto("/settings");
+  await page
+    .getByRole("main")
+    .getByRole("button", { name: "Go to my workspace", exact: true })
+    .click();
+  await expect(page).toHaveURL(/\/$/);
+  await page.goto("/settings");
+  await expect(
+    page.getByRole("button", { name: "Explore the demo", exact: true }),
+  ).toBeVisible();
+  await page.goto("/contests/draft-safety");
+  await expect(notes(page)).toHaveValue("A personal workspace draft.");
+  await page
+    .getByRole("button", { name: "Save scratch notes", exact: true })
+    .click();
+  expect((await saved(page)).contests![0].problems[0].notes).toBe(
+    "A personal workspace draft.",
+  );
+});
+
+test("a retained draft detects another tab's competing save when returning", async ({
+  page,
+  context,
+}) => {
+  await seed(page, fixture(1));
+  await notes(page).fill("My retained text.");
+  await page.getByRole("link", { name: "Today", exact: true }).click();
+  await expect(page).toHaveURL(/\/$/);
+  const other = await context.newPage();
+  await freeze(other);
+  await other.goto("/contests/draft-safety");
+  await notes(other).fill("A newer saved value from another tab.");
+  await other
+    .getByRole("button", { name: "Save scratch notes", exact: true })
+    .click();
+  await page.goBack();
+  await expect(notes(page)).toHaveValue("My retained text.");
+  await expect(
+    page.getByRole("button", { name: "Keep my scratch notes", exact: true }),
+  ).toBeVisible();
+  await page.clock.runFor(1000);
+  expect((await saved(page)).contests![0].problems[0].notes).toBe(
+    "A newer saved value from another tab.",
+  );
+  await page
+    .getByRole("button", { name: "Use saved scratch notes", exact: true })
+    .click();
+  await expect(notes(page)).toHaveValue(
+    "A newer saved value from another tab.",
+  );
+});
 
 test("rapid problem changes and early finish capture both note drafts before the debounce", async ({
   page,

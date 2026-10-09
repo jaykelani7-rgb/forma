@@ -25,6 +25,8 @@ export interface ExtractedTrackLine {
   links?: string[];
   confidence?: number;
   heading?: boolean;
+  reviewReasons?: string[];
+  ocrAlternatives?: { text: string; confidence?: number }[];
 }
 
 interface DetectedIdentity {
@@ -96,6 +98,12 @@ export function entryNeedsReview(entry: TrackImportEntry): boolean {
     (entry.source.kind !== "ocr" && !entry.source.reviewReasons?.length)
   )
     return false;
+  if (
+    entry.source.reviewReasons?.some((reason) =>
+      reason.startsWith("Mixed-content page:"),
+    )
+  )
+    return true;
   const current = trackEntryIdentity(entry);
   // Ambiguous rows start without an identity. Entering a single valid one is a
   // deliberate correction, even when that code already appeared in the source.
@@ -232,8 +240,16 @@ export function parseExtractedTrack(
       "Use a source name up to 240 characters and a valid source fingerprint.",
     );
   if (
-    lines.reduce((sum, line) => sum + line.text.length, 0) >
-    TRACK_STUDIO_LIMITS.maxTextCharacters
+    lines.reduce(
+      (sum, line) =>
+        sum +
+        line.text.length +
+        (line.ocrAlternatives ?? []).reduce(
+          (total, value) => total + value.text.length,
+          0,
+        ),
+      0,
+    ) > TRACK_STUDIO_LIMITS.maxTextCharacters
   )
     throw new Error(
       "This extraction contains more than 250,000 text characters. Split it into smaller sheets.",
@@ -252,7 +268,7 @@ export function parseExtractedTrack(
     }
     const identity =
       identities.length === 1 ? identities[0].identity : undefined;
-    const reviewReasons: string[] = [];
+    const reviewReasons: string[] = [...(line.reviewReasons ?? [])];
     if (!identity)
       reviewReasons.push(
         identities.length > 1
@@ -294,6 +310,10 @@ export function parseExtractedTrack(
     const sourceText = [
       line.text,
       ...annotationEvidence.map((link) => `Hyperlink: ${link}`),
+      ...(line.ocrAlternatives ?? []).map(
+        (value) =>
+          `OCR at the same location${value.confidence !== undefined ? ` (${Math.round(value.confidence)}% confidence)` : ""}: ${value.text}`,
+      ),
     ].join("\n");
     if (sourceText.length > TRACK_STUDIO_LIMITS.maxSourceLineCharacters)
       throw new Error(
@@ -332,6 +352,21 @@ export function parseExtractedTrack(
       text.match(
         /^Stage\s*(?:\d+|[IVX]+)(?=\s|[:.\-–—]|$)\s*(?:[:.\-–—]\s*)?(.*)$/i,
       ) ?? text.match(/^Stage\s*:\s*(.+)$/i);
+    if (stage && line.kind === "ocr" && line.reviewReasons?.length) {
+      // An uncertain OCR overlap must not silently replace a native heading or
+      // create an invented boundary. Keep its original reading for review.
+      append(
+        {
+          ...line,
+          reviewReasons: [
+            ...line.reviewReasons,
+            "This uncertain heading has not changed the selectable stage boundaries. Check the source before assigning a stage.",
+          ],
+        },
+        [],
+      );
+      continue;
+    }
     if (stage) {
       if (stages.length >= TRACK_STUDIO_LIMITS.maxStages)
         throw new Error(
@@ -339,12 +374,27 @@ export function parseExtractedTrack(
         );
       current = createManualStage(stage[1].trim() || text);
       stages.push(current);
+      if (line.reviewReasons?.length) {
+        // Native text supplies the actual boundary even when OCR reads it
+        // differently. Keep the differing reading as a reviewable diagnostic.
+        append(
+          {
+            ...line,
+            reviewReasons: [
+              ...line.reviewReasons,
+              "The selectable stage heading is retained. Review the differing OCR reading before excluding this diagnostic.",
+            ],
+          },
+          [],
+        );
+      }
       continue;
     }
     // Only explicit source labels/table headers are metadata. An arbitrary title-only row is retained.
     const identities = detectedIdentities(text, line.links);
     const cells = text.split("|").map((cell) => cell.trim());
     if (
+      !line.reviewReasons?.length &&
       !identities.length &&
       cells.length > 1 &&
       cells.every((cell) =>

@@ -954,7 +954,9 @@ test("accepted imports alone do not complete a plan or gain time; a real saved r
   )!;
   assert.equal(completed.completion!.type, "reflection");
   assert.equal(reflected.attempts.length, 0);
-  assert.equal(practicePlanView(reflected, later).restart, null);
+  // A confirmed reflection completes its planned learning activity, while the
+  // imported coding participation retains the original submission date.
+  assert.equal(practicePlanView(reflected, later).restart!.days, 9);
   assert.equal(reflected.codeforces.reflections[0].outcome, "editorial");
   const editedAt = new Date(later.getTime() + 1000);
   const edited = saveQuickReflection(

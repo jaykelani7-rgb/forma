@@ -340,9 +340,11 @@ export function memoryPeriod(
     timedSessions: history.filter((record) => record.timedAttemptId !== null)
       .length,
     importedActivity: history.filter(
-      (record) => record.importedAttemptId !== null,
+      (record) => record.source === "codeforces" || record.source === "linked",
     ).length,
     linkedEvents: history.filter((record) => record.source === "linked").length,
+    contestEvents: history.filter((record) => record.source === "contest")
+      .length,
     measuredMinutes: Math.floor(
       history.reduce((sum, record) => sum + (record.elapsedMs ?? 0), 0) / 60000,
     ),

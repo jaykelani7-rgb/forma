@@ -9,9 +9,11 @@ import {
   useContestDraft,
   useContestAutosave,
   ContestDraftConflict,
+  ContestDraftFeedback,
   type ContestDraftController,
   type ContestDraftPatch,
 } from "./contest-drafts";
+import { contestDraftScope } from "@/lib/contest-draft-store";
 import {
   DIFFICULTIES,
   OUTCOMES,
@@ -82,15 +84,16 @@ function ContestWorkspace({ contestId }: { contestId?: string }) {
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
   const lock = useRef(false);
+  const scopeGuard = w.guardWorkspace();
   const data = w.storagePending || w.storageError ? w.savedData : w.data;
   const contest = data.contests?.find((c) => c.id === contestId),
     active = activeContest(data);
   async function save(fn: (d: Data) => Data) {
-    if (lock.current) return false;
+    if (lock.current || !scopeGuard()) return false;
     lock.current = true;
     setBusy(true);
     setError("");
-    const guard = w.guardWorkspace();
+    const guard = scopeGuard;
     try {
       const ok = await w.update(fn);
       if (guard() && !ok)
@@ -105,10 +108,8 @@ function ContestWorkspace({ contestId }: { contestId?: string }) {
         );
       return false;
     } finally {
-      if (guard()) {
-        lock.current = false;
-        setBusy(false);
-      }
+      lock.current = false;
+      setBusy(false);
     }
   }
   if (contestId && !contest)
@@ -705,23 +706,30 @@ function ContestView({
     if (c.state === "active" && Date.parse(c.deadline!) <= now && !busy)
       void flushNotesAndTransition((d) => reconcileContests(d, new Date(now)));
   });
-  const profile = w.data.codeforces.profiles.find(
-    (p) => p.handle.toLowerCase() === c.handle?.toLowerCase(),
-  );
   const results = c.state === "finished" || c.state === "abandoned";
   return (
     <>
-      <PageHeader
-        eyebrow={
-          results
-            ? "CONTEST REVIEW"
-            : c.state === "draft"
-              ? "YOUR CHOSEN SET"
-              : "IN PROGRESS"
-        }
-        title={c.name}
-        description={`${c.problems.length} problems · ${c.durationMinutes} minutes · ${c.handle ?? "Personal notebook"}`}
-      />
+      {c.state === "active" ? (
+        <header className={styles.activeHeader}>
+          <h1>{c.name}</h1>
+          <p className="small muted">
+            {c.problems.length} problems · {c.durationMinutes} minutes ·{" "}
+            {c.handle ?? "Personal notebook"}
+          </p>
+        </header>
+      ) : (
+        <PageHeader
+          eyebrow={
+            results
+              ? "CONTEST REVIEW"
+              : c.state === "draft"
+                ? "YOUR CHOSEN SET"
+                : "IN PROGRESS"
+          }
+          title={c.name}
+          description={`${c.problems.length} problems · ${c.durationMinutes} minutes · ${c.handle ?? "Personal notebook"}`}
+        />
+      )}
       {!scoped && (
         <p className={styles.notice}>
           This contest belongs to {c.handle ?? "the personal notebook"}. Switch
@@ -773,7 +781,7 @@ function ContestView({
           </div>
           <div className={styles.actions}>
             <button
-              className="button secondary"
+              className="text-link"
               disabled={readonly}
               onClick={() => setConfirm("early")}
             >
@@ -787,10 +795,6 @@ function ContestView({
               Abandon contest
             </button>
           </div>
-          <p className="small muted">
-            Whole-contest wall time. Per-problem working time is unknown. The
-            timer keeps running if you close this tab.
-          </p>
         </section>
       ) : (
         <section className={styles.card}>
@@ -841,34 +845,6 @@ function ContestView({
           </p>
         </section>
       )}
-      {c.state !== "draft" && (
-        <section className={styles.evidence}>
-          <h2>Codeforces evidence</h2>
-          <p>
-            Last successful sync:{" "}
-            {profile?.lastSyncAt
-              ? new Date(profile.lastSyncAt).toLocaleString()
-              : "No successful sync recorded"}
-            .{" "}
-            {profile?.historyComplete
-              ? "Imported history is complete."
-              : "Imported history is incomplete; missing acceptance is not proof of no solve."}
-          </p>
-          {w.sync.error && <p role="alert">{w.sync.error}</p>}
-          <button
-            className="button secondary"
-            disabled={!scoped || !c.handle || w.sync.phase !== null || busy}
-            onClick={() => void w.syncActivity()}
-          >
-            Sync contest evidence
-          </button>
-          <p className="small muted">
-            Matches submission time, canonical problem, and captured handle.
-            Pending and rejudged verdicts may update results without changing
-            reflections.
-          </p>
-        </section>
-      )}
       {c.state === "active" && (
         <label className={styles.currentProblem}>
           Current problem
@@ -908,6 +884,9 @@ function ContestView({
           />
         ))}
       </ol>
+      {c.state !== "draft" && (
+        <ContestSynchronization contest={c} busy={busy} />
+      )}
       {results && (
         <OverallReview key={c.id} contest={c} save={save} readonly={readonly} />
       )}
@@ -961,6 +940,62 @@ function ContestView({
     </>
   );
 }
+function ContestSynchronization({
+  contest: c,
+  busy,
+}: {
+  contest: PracticeContest;
+  busy: boolean;
+}) {
+  const w = useWorkspace();
+  const profile = w.data.codeforces.profiles.find(
+    (p) => p.handle.toLowerCase() === c.handle?.toLowerCase(),
+  );
+  return (
+    <section className={styles.evidence} aria-label="Contest synchronization">
+      <div className={styles.syncHeading}>
+        <div>
+          <h2>Codeforces evidence</h2>
+          <p className="small muted">
+            Last successful sync:{" "}
+            {profile?.lastSyncAt
+              ? new Date(profile.lastSyncAt).toLocaleString()
+              : "No successful sync recorded"}
+            {profile?.historyComplete
+              ? " · History complete"
+              : " · History incomplete"}
+          </p>
+        </div>
+        <button
+          className="button secondary"
+          disabled={
+            !contestScope(w.data, c) ||
+            !c.handle ||
+            w.sync.phase !== null ||
+            busy
+          }
+          onClick={() => void w.syncActivity()}
+        >
+          {w.sync.phase ? "Syncing contest evidence…" : "Sync contest evidence"}
+        </button>
+      </div>
+      {w.sync.error && <p role="alert">{w.sync.error}</p>}
+      <details>
+        <summary>How timing and evidence work</summary>
+        <p className="small muted">
+          Matches submission time, canonical problem, and captured handle.
+          Pending and rejudged verdicts may update results without changing
+          reflections. Incomplete imported history cannot prove there was no
+          solve.
+        </p>
+        <p className="small muted">
+          Whole-contest wall time uses this device’s clock and continues while
+          the tab is closed. Per-problem working time is unknown.
+        </p>
+      </details>
+    </section>
+  );
+}
 function ProblemCard({
   contest: c,
   problem: p,
@@ -983,7 +1018,10 @@ function ProblemCard({
   onReview: () => void;
 }) {
   const workspace = useWorkspace();
-  const notes = useContestDraft({ notes: p.notes });
+  const notes = useContestDraft(
+    { notes: p.notes },
+    contestDraftScope(workspace.workspaceKey, c.handle, c.id, "scratch", p.id),
+  );
   const [priority, setPriority] = useState<"normal" | "high">(
       p.upsolve?.priority ?? "normal",
     ),
@@ -1053,7 +1091,18 @@ function ProblemCard({
             {p.snapshot.platform} · {p.snapshot.problemCode}
           </span>
         </div>
-        <ProblemLink problem={snapshot} />
+        {c.state === "active" && snapshot.url ? (
+          <a
+            href={snapshot.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="button primary"
+          >
+            Open problem ↗<span className="sr-only"> (opens in a new tab)</span>
+          </a>
+        ) : (
+          <ProblemLink problem={snapshot} />
+        )}
       </div>
       {(c.revealHints || result) && (
         <p className="small muted">
@@ -1260,9 +1309,11 @@ function ProblemCard({
           >
             Save scratch notes
           </button>
-          {notes.dirty && (
-            <p className="small muted">Scratch notes have unsaved changes.</p>
-          )}
+          <ContestDraftFeedback
+            label="Scratch notes"
+            status={notes.status}
+            reloadProtected={notes.reloadProtected}
+          />
         </>
       )}
     </li>
@@ -1281,6 +1332,7 @@ function ReflectionDialog({
   readonly: boolean;
   onClose: () => void;
 }) {
+  const workspace = useWorkspace();
   const [fallback] = useState<ContestReflection>(() => ({
     outcome: "unsolved",
     difficulty: null,
@@ -1289,6 +1341,13 @@ function ReflectionDialog({
   }));
   const protectedDraft = useContestDraft(
     p.reflectionDraft ?? p.reflection ?? fallback,
+    contestDraftScope(
+      workspace.workspaceKey,
+      workspace.data.contests?.find((c) => c.id === contestId)?.handle,
+      contestId,
+      "reflection",
+      p.id,
+    ),
   );
   const { draft, setDraft } = protectedDraft;
   async function saveDraft() {
@@ -1434,6 +1493,11 @@ function ReflectionDialog({
           useSaved={protectedDraft.useSaved}
           keepDraft={protectedDraft.keepDraft}
         />
+        <ContestDraftFeedback
+          label="Reflection draft"
+          status={protectedDraft.status}
+          reloadProtected={protectedDraft.reloadProtected}
+        />
         <button
           className="button primary"
           disabled={readonly || !!protectedDraft.conflicts.length}
@@ -1453,7 +1517,11 @@ function OverallReview({
   save: Save;
   readonly: boolean;
 }) {
-  const protectedDraft = useContestDraft(c.review);
+  const workspace = useWorkspace();
+  const protectedDraft = useContestDraft(
+    c.review,
+    contestDraftScope(workspace.workspaceKey, c.handle, c.id, "overall"),
+  );
   const { draft, setDraft } = protectedDraft;
   async function saveReview() {
     return protectedDraft.save((apply) =>
@@ -1510,6 +1578,11 @@ function OverallReview({
           disabled={readonly}
           useSaved={protectedDraft.useSaved}
           keepDraft={protectedDraft.keepDraft}
+        />
+        <ContestDraftFeedback
+          label="Overall review"
+          status={protectedDraft.status}
+          reloadProtected={protectedDraft.reloadProtected}
         />
         <button
           className="button secondary"
