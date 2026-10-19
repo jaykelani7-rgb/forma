@@ -1,6 +1,6 @@
 # Shared Tracks v1
 
-Shared Tracks lets a person download a practice curriculum and send the file to someone else. A recipient imports the file through Track Studio, reviews and edits it, and confirms a new local track. Forma does not publish the file or create a public link. There are no automatic updates between the sender’s and recipient’s tracks.
+Shared Tracks lets a person download a practice curriculum and send the file to someone else. A recipient imports the file through Track Studio, reviews and edits it, and confirms a new local track. Downloading a file does not publish it or create a public link. There are no automatic updates between the sender’s and recipient’s tracks. This page documents the portable-file workflow; [Shared Tracks v2](shared-track-links.md) adds optional account-controlled unlisted links using the same version-1 curriculum format.
 
 ## Sharing a track
 

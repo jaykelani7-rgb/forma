@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { type Data, validateData } from "./model";
 import { encodeBackup, MAX_BACKUP_BYTES } from "./concurrency";
+import { sameOriginRequest } from "./request-origin";
 
 export interface VerifiedCloudUser {
   id: string;
@@ -317,8 +318,7 @@ export function createCloudHandlers(
       ),
     write: (request: Request) =>
       run(request, async (session) => {
-        const origin = request.headers.get("origin");
-        if (origin && origin !== new URL(request.url).origin)
+        if (!sameOriginRequest(request))
           throw new CloudServerError(
             "Save your account workspace from Forma’s own origin.",
             403,

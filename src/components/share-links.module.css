@@ -1,0 +1,172 @@
+.publicPage {
+  --bg: #f7f8f5;
+  --surface: #fff;
+  --text: #18251f;
+  --muted: #4e5d54;
+  --accent: #2c5945;
+  --accent-hover: #204b38;
+  --accent-soft: #e7eee8;
+  --line: #ccd5ce;
+  --button-bg: #2c5945;
+  --button-text: #fff;
+  color-scheme: light;
+  min-height: 100dvh;
+  background: var(--bg);
+  color: var(--text);
+  padding: 32px 24px 70px;
+}
+.publicPage[data-theme="dark"] {
+  --bg: #090909;
+  --surface: #141414;
+  --text: #f1efe9;
+  --muted: #aaa79f;
+  --accent: #e7e2d8;
+  --accent-hover: #fffdf6;
+  --accent-soft: #262521;
+  --line: #30302d;
+  --button-bg: #e7e2d8;
+  --button-text: #151513;
+  color-scheme: dark;
+}
+.publicInner {
+  max-width: 960px;
+  margin: auto;
+}
+.publicPage h1 {
+  font-family: "Instrument Serif", serif;
+  font-size: clamp(2.5rem, 5vw, 4.5rem);
+  line-height: 1.13;
+  overflow-wrap: anywhere;
+  margin: 30px 0 24px;
+}
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 20px;
+  margin-bottom: 65px;
+}
+.brand {
+  font-family: "Instrument Serif", serif;
+  font-size: 2.2rem;
+  color: inherit;
+  text-decoration: none;
+}
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.intro {
+  max-width: 660px;
+  color: var(--muted);
+  line-height: 1.7;
+}
+.panel {
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  margin: 28px 0;
+}
+.panel p {
+  margin-top: 16px;
+  line-height: 1.7;
+}
+.stages,
+.problems {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.stages > li {
+  border-bottom: 1px solid var(--line);
+  padding: 24px 0;
+}
+.stages summary {
+  cursor: pointer;
+  padding: 10px 0;
+  overflow-wrap: anywhere;
+}
+.stages > li > details > summary {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 1.2em;
+}
+.stages > li > details > summary::after {
+  content: "+";
+  margin-left: auto;
+  font-weight: 500;
+}
+.stages > li > details[open] > summary::after {
+  content: "−";
+}
+.problems > li {
+  padding: 18px 0;
+  border-top: 1px solid var(--line);
+}
+.problems a {
+  color: var(--accent);
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.prose {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.7;
+}
+.footnote {
+  color: var(--muted);
+  line-height: 1.7;
+  margin-top: 35px;
+}
+.large {
+  font-size: 1.2rem;
+  --text-control: 1.1rem;
+  --text-support: 1.05rem;
+}
+.linkResult {
+  overflow-wrap: anywhere;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.list {
+  display: grid;
+  gap: 18px;
+  list-style: none;
+  padding: 0;
+}
+.item {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 24px;
+}
+.item h2 {
+  overflow-wrap: anywhere;
+  margin-bottom: 12px;
+}
+.itemActions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 18px;
+}
+@media (max-width: 600px) {
+  .publicPage {
+    padding: 22px 18px 45px;
+  }
+  .header {
+    margin-bottom: 40px;
+  }
+  .panel,
+  .item {
+    padding: 18px;
+  }
+  .controls .button {
+    min-height: 44px;
+  }
+}

@@ -63,10 +63,14 @@ function identityFromCode(code: string, originalUrl: string) {
 export function TrackImport({
   onClose,
   initialDraft,
+  newDraft,
+  beforeImport,
   entryPoint = "upload",
 }: {
   onClose: () => void;
   initialDraft?: TrackImportDraft;
+  newDraft?: TrackImportDraft;
+  beforeImport?: () => Promise<void>;
   entryPoint?: TrackStudioEntryPoint;
 }) {
   const { data, savedData, update, notify, guardWorkspace, retryLocalSave } =
@@ -76,6 +80,7 @@ export function TrackImport({
   const [draft, setDraft] = useState<TrackImportDraft | null>(
     () =>
       initialDraft ??
+      newDraft ??
       (entryPoint === "manual" ? createManualTrackDraft() : null),
   );
   const [error, setError] = useState("");
@@ -95,10 +100,13 @@ export function TrackImport({
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("all");
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
-  const [openStages, setOpenStages] = useState<Set<string>>(
-    () => new Set(initialDraft?.stages[0] ? [initialDraft.stages[0].id] : []),
+  const [openStages, setOpenStages] = useState<Set<string>>(() => {
+    const first = (initialDraft ?? newDraft)?.stages[0];
+    return new Set(first ? [first.id] : []);
+  });
+  const [dirty, setDirty] = useState(
+    !!newDraft || (entryPoint === "manual" && !initialDraft),
   );
-  const [dirty, setDirty] = useState(entryPoint === "manual" && !initialDraft);
   const [discarding, setDiscarding] = useState(false);
   const [discardTarget, setDiscardTarget] = useState("close");
   const fieldId = useId();
@@ -248,6 +256,8 @@ export function TrackImport({
     setPending(true);
     setError("");
     try {
+      if (beforeImport) await beforeImport();
+      if (!isCurrent()) return;
       const change = (current: typeof data) => {
         if (
           !isCurrent() ||
@@ -730,8 +740,9 @@ export function TrackImport({
               />
             </label>
             <label>
-              Share description
+              <span id={`${fieldId}-share-description`}>Share description</span>
               <textarea
+                aria-labelledby={`${fieldId}-share-description`}
                 value={draft.shareDescription ?? ""}
                 disabled={pending}
                 rows={3}

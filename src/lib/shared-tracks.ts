@@ -320,6 +320,24 @@ export function encodeSharedTrack(value: SharedTrackFile): string {
     );
   return json;
 }
+
+/** Rebuild the v1 allowlist on the server; a client's sanitized claim is never trusted. */
+export function canonicalSharedTrack(value: unknown): SharedTrackFile {
+  const file = document(value);
+  for (const stage of file.track.stages) {
+    for (const problem of stage.problems) {
+      const identity = trackEntryIdentity(problem);
+      if (!identity)
+        throw new Error(
+          "Correct each unresolved identity before publishing this track.",
+        );
+      problem.code = identity.code;
+      problem.url = identity.url;
+    }
+  }
+  encodeSharedTrack(file);
+  return file;
+}
 export function sharedTrackFilename(title: string) {
   const stem = title
     .normalize("NFKD")

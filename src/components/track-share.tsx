@@ -2,6 +2,13 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Download } from "lucide-react";
+import Link from "next/link";
+import {
+  listOwnedShares,
+  publicationOperation,
+  publishShare,
+} from "@/lib/share-links-client";
+import { sharePath, type Publication } from "@/lib/share-links";
 import {
   encodeSharedTrack,
   sharedTrackFilename,
@@ -18,7 +25,8 @@ export function TrackShare({
   trackId: string;
   onClose: () => void;
 }) {
-  const { savedData, data, guardWorkspace, notify } = useWorkspace();
+  const { savedData, data, guardWorkspace, notify, account, workspaceKey } =
+    useWorkspace();
   const [snapshot] = useState(savedData);
   const [includeDescriptions, setIncludeDescriptions] = useState(false);
   const [includeHints, setIncludeHints] = useState(false);
@@ -26,11 +34,47 @@ export function TrackShare({
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
   const [prepared, setPrepared] = useState(false);
+  const [unlisted, setUnlisted] = useState(false);
+  const [linkReady, setLinkReady] = useState(false);
+  const [linkReason, setLinkReason] = useState("Checking link sharing…");
+  const [publication, setPublication] = useState<{
+    value: Publication;
+    text: string;
+  } | null>(null);
+  const publicationRequest = useRef<{ text: string; id: string } | null>(null);
+  const requestController = useRef<AbortController | null>(null);
+  const accountId =
+    workspaceKey === `account:${account?.id}` ? account?.id : undefined;
   const owner = useRef(guardWorkspace());
   const profile = useRef(data.codeforces.connectedHandle?.toLowerCase() ?? "");
   const mounted = useRef(true);
   const busy = useRef(false);
   const urls = useRef(new Set<string>());
+  useEffect(() => {
+    const controller = new AbortController();
+    requestController.current = controller;
+    listOwnedShares(accountId, controller.signal)
+      .then(() => {
+        if (
+          mounted.current &&
+          owner.current() &&
+          !controller.signal.aborted &&
+          accountId
+        ) {
+          setLinkReady(true);
+          setLinkReason("");
+        }
+      })
+      .catch((failure) => {
+        if (mounted.current && owner.current() && !controller.signal.aborted)
+          setLinkReason(
+            failure instanceof Error
+              ? failure.message
+              : "Link sharing is unavailable. Download a track file instead.",
+          );
+      });
+    return () => controller.abort();
+  }, [accountId]);
   useEffect(() => {
     if (
       !owner.current() ||
@@ -75,6 +119,71 @@ export function TrackShare({
   const problemCount =
     file?.track.stages.reduce((sum, stage) => sum + stage.problems.length, 0) ??
     0;
+  const published =
+    publication?.text === preview.text ? publication.value.share : null;
+
+  async function publish() {
+    if (
+      busy.current ||
+      !file ||
+      !accountId ||
+      !linkReady ||
+      !unlisted ||
+      !owner.current() ||
+      !mounted.current
+    )
+      return;
+    busy.current = true;
+    setPending(true);
+    setError("");
+    const isCurrent = () =>
+      mounted.current &&
+      owner.current() &&
+      !requestController.current?.signal.aborted;
+    try {
+      if (publicationRequest.current?.text !== preview.text)
+        publicationRequest.current = {
+          text: preview.text,
+          id: await publicationOperation(accountId, file),
+        };
+      if (!isCurrent()) return;
+      const value = await publishShare(
+        accountId,
+        file,
+        publicationRequest.current.id,
+        requestController.current?.signal,
+      );
+      if (!isCurrent()) return;
+      setPublication({ value, text: preview.text });
+      notify(
+        value.share.revokedAt
+          ? "This snapshot’s earlier link was revoked. Revise its content to create a new link."
+          : "Share link created. Your snapshot is ready to send.",
+      );
+    } catch (failure) {
+      if (isCurrent())
+        setError(
+          failure instanceof Error
+            ? failure.message
+            : "Publication did not finish. Retry uses the same request, or check My shared tracks.",
+        );
+    } finally {
+      busy.current = false;
+      if (isCurrent()) setPending(false);
+    }
+  }
+  async function copyLink() {
+    if (!published || !owner.current()) return;
+    try {
+      await navigator.clipboard.writeText(
+        new URL(sharePath(published.token), window.location.origin).href,
+      );
+      if (mounted.current && owner.current()) notify("Share link copied.");
+    } catch {
+      if (mounted.current && owner.current())
+        setError("Open the snapshot and copy its address to send the link.");
+    }
+  }
 
   function download() {
     if (
@@ -250,6 +359,78 @@ export function TrackShare({
             shared track in Forma.
           </p>
         )}
+        <section
+          aria-label="Create an unlisted share link"
+          className={styles.sharePreview}
+        >
+          <h3>Create a share link.</h3>
+          <p className={styles.notice}>
+            Unlisted means anyone with the link can view this exact snapshot
+            without signing in. Private edits won’t change it. Publishing
+            revised content creates a new link; older links remain available
+            until revoked.
+          </p>
+          {linkReason && (
+            <p className={styles.source} role="status">
+              {linkReason} File export is available without an account.
+            </p>
+          )}
+          {!accountId && (
+            <Link href="/settings#account" className="text-link">
+              Account settings
+            </Link>
+          )}
+          {linkReady && (
+            <label className={styles.copyChoice}>
+              <input
+                type="checkbox"
+                checked={unlisted}
+                disabled={pending}
+                onChange={(event) => setUnlisted(event.target.checked)}
+              />
+              I understand anyone with this link can view the snapshot.
+            </label>
+          )}
+          <button
+            className="button primary"
+            disabled={
+              pending || !file || !linkReady || !unlisted || !!published
+            }
+            onClick={publish}
+          >
+            {pending ? "Preparing…" : "Create share link"}
+          </button>
+          {published && (
+            <div role="status" className={styles.notice}>
+              <p>
+                {published.revokedAt
+                  ? "This snapshot’s link was revoked. Change the shared content to publish a new revision."
+                  : "Your share link is ready. You can send it to a friend."}
+              </p>
+              {!published.revokedAt && (
+                <div className={styles.actions}>
+                  <Link
+                    prefetch={false}
+                    href={sharePath(published.token)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-link"
+                  >
+                    View published snapshot
+                  </Link>
+                  <button className="button secondary" onClick={copyLink}>
+                    Copy link
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+          <p>
+            <Link href="/tracks/shared" className="text-link">
+              My shared tracks
+            </Link>
+          </p>
+        </section>
       </div>
       <div className={styles.footer}>
         <button className="button secondary" onClick={onClose}>

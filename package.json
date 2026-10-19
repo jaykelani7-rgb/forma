@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test tests/*.test.ts",
     "test:browser": "playwright test",
+    "test:share-links": "node scripts/test-share-links.mjs",
     "prepare:imports": "node scripts/prepare-import-assets.mjs",
     "postinstall": "npm run prepare:imports",
     "prebuild": "npm run prepare:imports",

@@ -1,8 +1,6 @@
 import type { Metadata } from "next";
 import { BRAND } from "@/lib/model";
-import { WorkspaceProvider } from "@/components/provider";
-import { Shell } from "@/components/shell";
-import { InstallSupport } from "@/components/install";
+import { WorkspaceBoundary } from "@/components/workspace-boundary";
 import "./globals.css";
 export const metadata: Metadata = {
   title: `${BRAND} — A practice in progress`,
@@ -26,10 +24,7 @@ export default function RootLayout({
         <a className="skip-link" href="#main-content">
           Skip to content
         </a>
-        <WorkspaceProvider>
-          <Shell>{children}</Shell>
-          <InstallSupport />
-        </WorkspaceProvider>
+        <WorkspaceBoundary>{children}</WorkspaceBoundary>
       </body>
     </html>
   );

@@ -999,3 +999,30 @@ for (const theme of ["light", "dark"] as const)
     await page.keyboard.press("Enter");
     await expect(dialog).toHaveCount(0);
   });
+
+test("local sharing explains unavailable hosted links and still downloads the reviewed track file", async ({
+  page,
+}) => {
+  await seed(page, sender());
+  await page.goto("/tracks/sender-track-id");
+  const before = await readyNotebook(page);
+  const dialog = await exportTrack(page);
+  await expect(
+    dialog.getByRole("region", { name: "Create an unlisted share link" }),
+  ).toContainText(/unavailable|sign in/i);
+  await expect(
+    dialog.getByRole("region", { name: "Create an unlisted share link" }),
+  ).toContainText(/file export|track file/i);
+  await expect(
+    dialog.getByRole("button", { name: "Create share link", exact: true }),
+  ).toBeDisabled();
+  await expect(
+    dialog.getByRole("link", { name: "View published snapshot" }),
+  ).toHaveCount(0);
+  const file = JSON.parse(await downloadTrack(page, dialog));
+  expect(file.format).toBe("forma-track");
+  expect(file.track.title).toBe(title);
+  expect(file.track.stages).toHaveLength(2);
+  expect(JSON.stringify(file)).not.toContain(privateText);
+  expect(await durable(page)).toEqual(before);
+});

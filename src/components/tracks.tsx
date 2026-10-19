@@ -29,6 +29,7 @@ import {
 import { useWorkspace } from "./provider";
 import { TrackImport, type TrackStudioEntryPoint } from "./track-import";
 import { TrackShare } from "./track-share";
+import { LinkedTrackImport } from "./linked-track-import";
 import { EmptyState, Modal, PageHeader } from "./ui";
 import styles from "./tracks.module.css";
 
@@ -76,9 +77,11 @@ function ProgressSummary({ track }: { track: Track }) {
 export function Tracks({
   trackId,
   stageId,
+  linkedToken,
 }: {
   trackId?: string;
   stageId?: string;
+  linkedToken?: string;
 }) {
   const { workspaceKey, data } = useWorkspace();
   return (
@@ -86,6 +89,7 @@ export function Tracks({
       key={`${workspaceKey}:${data.codeforces.connectedHandle?.toLowerCase() ?? ""}`}
       trackId={trackId}
       stageId={stageId}
+      linkedToken={linkedToken}
     />
   );
 }
@@ -93,9 +97,11 @@ export function Tracks({
 function TracksWorkspace({
   trackId,
   stageId,
+  linkedToken,
 }: {
   trackId?: string;
   stageId?: string;
+  linkedToken?: string;
 }) {
   const {
     data,
@@ -272,6 +278,9 @@ function TracksWorkspace({
             }
           />
           <div className={styles.actions}>
+            <Link className="button secondary" href="/tracks/shared">
+              My shared tracks
+            </Link>
             <button
               className="button secondary"
               onClick={() => setImporting("shared")}
@@ -720,6 +729,9 @@ function TracksWorkspace({
           entryPoint={importing}
           onClose={() => setImporting(null)}
         />
+      )}
+      {linkedToken && (
+        <LinkedTrackImport key={linkedToken} token={linkedToken} />
       )}
       {editDraft && (
         <TrackImport
