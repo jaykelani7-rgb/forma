@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="10 20 145 140">
+  <defs><mask id="eyes"><rect width="180" height="180" fill="white"/><ellipse cx="79.5" cy="82" rx="4" ry="5" fill="black"/><ellipse cx="112" cy="82" rx="4" ry="5" fill="black"/><path d="M91 92Q96 88 101 92L96 98Z" fill="black"/></mask></defs>
+  <g fill="black" mask="url(#eyes)">
+    <path d="M82 147C61 162 20 153 17 128C14 109 28 91 50 88C43 98 44 112 54 119C64 126 76 122 84 131C88 136 88 143 82 147Z"/>
+    <path d="M70 96C61 110 58 132 65 146C72 158 112 160 126 148C138 136 130 109 118 97Z"/>
+    <path d="M64 69C57 55 55 32 60 25C72 28 83 43 86 56ZM109 55C114 42 127 28 139 27C143 39 136 59 128 70Z"/>
+    <path d="M62 64C70 49 84 47 96 49C112 47 128 56 134 72L140 83L130 91C125 104 109 111 96 112C81 112 68 103 62 92L53 83Z"/>
+  </g>
+</svg>

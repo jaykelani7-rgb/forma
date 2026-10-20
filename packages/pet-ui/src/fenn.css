@@ -1,0 +1,30 @@
+.fenn { overflow: visible; flex: none; filter: drop-shadow(0 3px 3px #292c2705); }
+.fenn-tail { transform-origin: 78px 139px; }
+.fenn-head { transform-origin: 96px 108px; }
+.fenn-body { transform-origin: 96px 150px; }
+.fenn-eyes { transform-origin: 96px 82px; }
+.fenn--idle .fenn-body { animation: fenn-breathe 4s ease-in-out 1; }
+.fenn--context-ready .fenn-head { animation: fenn-listen 1.2s ease-in-out 1; }
+.fenn--focus .fenn-head { transform: rotate(2deg); }
+.fenn--tests-running .fenn-head { animation: fenn-attend 1.6s ease-in-out 1; }
+.fenn--local-tests-passed .fenn-head, .fenn--reflection-saved .fenn-head { animation: fenn-nod 1s ease-in-out 1; }
+.fenn--submission-pending .fenn-eyes { animation: fenn-blink 2s ease-in-out 1; }
+.fenn--accepted .fenn-tail { animation: fenn-curl 1.3s ease-in-out 1; }
+.fenn--accepted .fenn-body { animation: fenn-hop .9s ease-in-out 1; }
+.fenn--needs-attention .fenn-head { transform: rotate(-5deg); }
+.fenn--paused .fenn-head { transform: translateY(5px) rotate(5deg); }
+.fenn--paused .fenn-body { transform: scaleY(.96); }
+.fenn--paused .fenn-tail { transform: rotate(-5deg); }
+.fenn--offline { opacity: .86; }
+.fenn-spark { animation: fenn-spark 1.2s ease-out 1; transform-origin: 146px 65px; }
+.fenn--still *, .fenn--hidden * { animation: none !important; }
+.fenn--hidden { visibility: hidden; }
+@keyframes fenn-breathe { 50% { transform: scaleY(1.012); } }
+@keyframes fenn-listen { 35% { transform: rotate(-4deg) translateY(-1px); } 70% { transform: rotate(2deg); } }
+@keyframes fenn-attend { 40% { transform: translateY(-2px) rotate(-2deg); } }
+@keyframes fenn-nod { 35% { transform: rotate(4deg) translateY(2px); } 70% { transform: rotate(-1deg); } }
+@keyframes fenn-blink { 45%, 55% { transform: scaleY(1); } 50% { transform: scaleY(.12); } }
+@keyframes fenn-curl { 40% { transform: rotate(8deg); } 70% { transform: rotate(-2deg); } }
+@keyframes fenn-hop { 40% { transform: translateY(-3px); } }
+@keyframes fenn-spark { 0% { opacity: 0; transform: scale(.7); } 30% { opacity: 1; transform: scale(1.06); } 100% { opacity: 1; transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) { .fenn * { animation: none !important; } }
