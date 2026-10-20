@@ -10,3 +10,9 @@ playwright-report/
 
 # Recreated from pinned dependencies for local PDF and OCR imports
 public/import-assets/
+
+# Local companion bundles and unsigned distribution output
+.companion-build/
+dist/
+apps/vscode-extension/dist/
+apps/vscode-extension/*.vsix

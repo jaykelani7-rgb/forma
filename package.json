@@ -14,7 +14,13 @@
     "prepare:imports": "node scripts/prepare-import-assets.mjs",
     "postinstall": "npm run prepare:imports",
     "prebuild": "npm run prepare:imports",
-    "predev": "npm run prepare:imports"
+    "predev": "npm run prepare:imports",
+    "companion:build": "node scripts/companion/build.mjs",
+    "companion:dev": "npm run companion:build && node scripts/companion/start.mjs",
+    "companion:start": "node scripts/companion/start.mjs",
+    "companion:preview": "vite --config apps/desktop/vite.config.mjs",
+    "companion:package": "npm run companion:build && electron-builder --projectDir .companion-build --config ../apps/desktop/electron-builder.json --dir --mac --arm64",
+    "companion:verify": "node scripts/companion/verify-native.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "2.117.2",
@@ -36,11 +42,16 @@
     "@types/node": "^24.0.0",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
+    "@types/vscode": "1.95.0",
+    "electron": "44.9.0",
+    "electron-builder": "26.15.3",
+    "esbuild": "0.28.2",
     "eslint": "^9.0.0",
     "eslint-config-next": "^16.1.0",
     "fake-indexeddb": "^6.2.5",
     "tailwindcss": "^4.1.0",
     "tsx": "^4.20.0",
-    "typescript": "^5.9.0"
+    "typescript": "^5.9.0",
+    "vite": "8.3.4"
   }
 }

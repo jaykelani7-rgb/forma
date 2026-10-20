@@ -12,5 +12,8 @@ export default defineConfig([
     "test-results/**",
     "playwright-report/**",
     "public/import-assets/**",
+    ".companion-build/**",
+    "dist/**",
+    "apps/vscode-extension/dist/**",
   ]),
 ]);

@@ -1,0 +1,11 @@
+{
+  "appId": "app.forma.companion",
+  "productName": "Forma Companion",
+  "electronVersion": "44.9.0",
+  "asar": true,
+  "directories": { "output": "../dist/companion", "buildResources": "../packages/pet-ui/assets" },
+  "files": ["main.cjs", "database-worker.cjs", "preload.cjs", "renderer/**/*", "assets/**/*", "package.json"],
+  "mac": { "icon": "fenn.icns", "target": [{ "target": "dir", "arch": ["arm64"] }], "category": "public.app-category.education", "identity": null },
+  "win": { "target": ["dir"] },
+  "linux": { "target": ["dir"] }
+}
