@@ -185,12 +185,14 @@ async function abortNextSave(page: Page) {
   });
 }
 
-test.beforeEach(async ({ context }) => {
-  // Isolated visitors have distinct proxy identities; exercise the real limiter
-  // without treating an entire concurrent browser suite as one anonymous visitor.
-  await context.setExtraHTTPHeaders({
-    "X-Forwarded-For": `fixture-${randomUUID()}`,
-  });
+test.use({
+  // Apply the isolated visitor to both page contexts and the API request fixture.
+  // Browser-only headers left all API publications sharing one rate-limit bucket.
+  extraHTTPHeaders: async ({ baseURL }, applyHeaders) => {
+    await applyHeaders({
+      "X-Forwarded-For": `fixture-${new URL(baseURL!).port}-${randomUUID()}`,
+    });
+  },
 });
 async function review(page: Page, token: string) {
   await page.goto(`/tracks?share=${token}`);
@@ -199,6 +201,20 @@ async function review(page: Page, token: string) {
     title,
   );
   return dialog;
+}
+
+async function publishedToken(dialog: ReturnType<Page["getByRole"]>) {
+  const link = dialog.getByRole("link", { name: "View published snapshot" });
+  await expect(link).toHaveAttribute("href", /^\/share\/[A-Za-z0-9_-]+$/);
+  return (await link.getAttribute("href"))!.slice("/share/".length);
+}
+
+async function importedTrack(page: Page, dialog: ReturnType<Page["getByRole"]>) {
+  await expect(dialog).not.toBeVisible();
+  await expect(page).toHaveURL(/\/tracks\/[^/?#]+$/);
+  await expect(
+    page.getByRole("heading", { name: title, exact: true, level: 1 }),
+  ).toBeVisible();
 }
 
 test("review and publish a private track, preview anonymously, import locally, practise, then revoke without harming the imported copy", async ({
@@ -223,13 +239,10 @@ test("review and publish a private track, preview anonymously, import locally, p
   await dialog
     .getByLabel("I understand anyone with this link can view the snapshot.")
     .check();
-  const response = page.waitForResponse(
-    (r) => r.url().endsWith("/api/shares") && r.request().method() === "POST",
-  );
   await dialog
     .getByRole("button", { name: "Create share link", exact: true })
     .click();
-  const published = (await (await response).json()).share as OwnedShare;
+  const published = { token: await publishedToken(dialog) };
   await expect(
     dialog.getByRole("link", { name: "View published snapshot" }),
   ).toHaveAttribute("href", `/share/${published.token}`);
@@ -298,9 +311,7 @@ test("review and publish a private track, preview anonymously, import locally, p
     await preview
       .getByRole("button", { name: "Confirm import", exact: true })
       .click();
-    await expect(
-      recipient.getByRole("heading", { name: title, exact: true }),
-    ).toBeVisible();
+    await importedTrack(recipient, preview);
     const imported = await durable(recipient);
     expect(imported.activeTrackId).toBeNull();
     expect(imported.session).toBeNull();
@@ -313,6 +324,9 @@ test("review and publish a private track, preview anonymously, import locally, p
     await recipient
       .getByRole("button", { name: "Make this my active track", exact: true })
       .click();
+    await expect
+      .poll(async () => (await durable(recipient)).activeTrackId)
+      .toBe(imported.tracks![0].id);
     await recipient.goto(
       `/tracks/${imported.tracks![0].id}/stages/${imported.trackStages![0].id}`,
     );
@@ -492,9 +506,7 @@ test("existing history survives import and equivalent links allow an explicit se
   await dialog
     .getByRole("button", { name: "Confirm import", exact: true })
     .click();
-  await expect(
-    page.getByRole("heading", { name: title, exact: true }),
-  ).toBeVisible();
+  await importedTrack(page, dialog);
   const first = await durable(page);
   expect(first.attempts).toEqual(personal.attempts);
   expect(first.problems).toEqual(personal.problems);
@@ -509,9 +521,7 @@ test("existing history survives import and equivalent links allow an explicit se
   await dialog
     .getByRole("button", { name: "Confirm import", exact: true })
     .click();
-  await expect(
-    page.getByRole("heading", { name: title, exact: true }),
-  ).toBeVisible();
+  await importedTrack(page, dialog);
   await expect(dialog).not.toBeVisible();
   const copies = await durable(page);
   expect(copies.tracks).toHaveLength(2);
@@ -806,13 +816,10 @@ test("private edits leave the old public snapshot frozen and revised content rec
   await dialog
     .getByLabel("I understand anyone with this link can view the snapshot.")
     .check();
-  const response = page.waitForResponse(
-    (r) => r.url().endsWith("/api/shares") && r.request().method() === "POST",
-  );
   await dialog
     .getByRole("button", { name: "Create share link", exact: true })
     .click();
-  const second = (await (await response).json()).share as OwnedShare;
+  const second = { token: await publishedToken(dialog) };
   expect(second.token).not.toBe(first.token);
   await expect(
     dialog.getByRole("link", { name: "View published snapshot" }),

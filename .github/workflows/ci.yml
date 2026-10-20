@@ -22,6 +22,12 @@ jobs:
       - run: npm run lint
       - run: npx next typegen
       - run: npm run typecheck
+      - name: Check companion integrations
+        run: |
+          npx tsc --project apps/vscode-extension/tsconfig.json --noEmit
+          npm run companion:build
+          npm run extension:build
+          npm run browser:build
       - run: npm test
       - run: npm run build
       - run: npx playwright install --with-deps chromium

@@ -797,6 +797,11 @@ test("replacing and removing membership leaves measured attempts, recall and his
     .getByRole("dialog")
     .getByRole("button", { name: "Remove track", exact: true })
     .click();
+  // Do not cancel the asynchronous removal by navigating before its commit.
+  await expect(page).toHaveURL(/\/tracks$/);
+  await expect
+    .poll(async () => (await durable(page)).tracks?.length ?? 0)
+    .toBe(0);
   await page.goto(`/problems/${encodeURIComponent(originalEntry.problemId)}`);
   await expect(
     page.getByText("Original notes.", { exact: true }).first(),
