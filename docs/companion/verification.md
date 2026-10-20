@@ -1,3 +1,24 @@
+# Durable verdict follow-up and Today — 20 October 2026
+
+| Check | Result |
+| --- | --- |
+| `npm test` | 459 passed, zero skips, including a repeat with `TZ=UTC` to match CI. Sixteen new milestone tests cover finish-before-discovery, reflection while pending, rejudge/immutable identity, problem/profile isolation, ambiguous/outside-window evidence, older overlapping attempts, failure/expiry, bounded pending deadlines, SQLite restart, coalesced injected scheduler requests, read-only/stable Today, shared fresh-track context, recall without coding time, deferral, import/profile/calendar reconciliation, Continue preserving existing evidence, and continued discovery of a newer submission after an earlier final verdict. |
+| `npm run lint`; `npx tsc --noEmit`; `npx tsc -p apps/vscode-extension/tsconfig.json --noEmit` | Passed. |
+| `npm run build`; `npm run companion:build`; `npm run extension:build`; `npm run browser:build` | Passed. Production Next compilation required normal local process access after the sandboxed compile stalled; no source change was used to bypass a check. |
+| `CI=1 npm run test:browser` | 278 passed, two pre-existing intentional skips, desktop and mobile. |
+| `npm run test:share-links` | 24 passed using the isolated fixture service. No real track was published. Generated existing website screenshots were restored after the run. |
+| `npm run companion:verify` | Real Electron/SQLite/preload/socket execution passed with disposable data and zero renderer errors. Actual Today suggestion and completed-day UI rendered; compact Today bounds were 380 × 520. Reading Today created no session. Existing pairing/revocation, explicit reflection, focus protection, file-switch and draft-target checks passed. Screenshots and JSON report: `dist/companion-verification/`. Suggestion and completed-state screenshots visually inspected. |
+| `npm run extension:verify` | Real macOS VS Code Extension Development Host passed with installed CPH **2026.10.1792170155**, isolated profile, actual SQLite and controlled identity/browser-delivery fixtures. Not a live CPH import or judging claim. |
+| Local unsigned package | `electron-builder --projectDir .companion-build --config ../apps/desktop/electron-builder.json --dir --mac --arm64 -c.electronDist='/Users/jaykelani/CP Tracker/node_modules/electron/dist'` builds `dist/companion/mac-arm64/Forma Companion.app` with the installed runtime. The packaged executable also passed `--companion-smoke` using a new temporary notebook (SQLite ready, renderer screenshot captured, clean exit). Signing/notarization remain excluded. |
+
+The scheduler clock/transport tests use injected fixtures; no source was submitted to Codeforces and no live verdict is claimed. Public checks cover the latest 100 submissions only. Automatic discovery stops five minutes after Finish; pending follow-up stops fifteen minutes after first observed pending evidence. Manual refresh can later reconcile a verified final verdict/rejudge without altering reflection. Original Finish attribution does not extend during discovery or offline time. Existing legacy completed attempts are not backdated into new follow-up jobs.
+
+The active-session restart and expired-record paths retain absolute deadlines, while existing lifecycle tests verify paused/checkpointed recovery. Shared planner tests additionally cover archived/skipped/completed exclusions, upsolve/track context, activity-specific completion, saved day stability and timezone changes; the desktop calls those same domain functions. Automatic reminders remain off. Canonical notebook transfer preserves planner/learning data; device follow-up jobs remain in SQLite/full companion exports, whose restore UI is still future work. No live sync is implied.
+
+Run instructions and a full session walkthrough are in [setup](README.md#today-and-a-complete-session). The sections below are historical reports from earlier milestones; their previous manual gates are not claims about this run.
+
+---
+
 # Automatic recognition verification — 20 October 2026
 
 | Check | Result |

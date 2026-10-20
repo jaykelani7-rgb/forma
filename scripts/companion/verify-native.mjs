@@ -20,6 +20,15 @@ try {
   await page.evaluate(()=>window.forma.ui('expand',true));
   await page.waitForTimeout(100);
   await page.screenshot({path:join(output,'native-welcome.png')});
+  await page.evaluate(()=>window.forma.command({id:'native-attach',type:'attach',payload:{url:'https://codeforces.com/contest/4/problem/A',title:'Watermelon'}}));
+  await page.getByRole('button',{name:/Today with Fenn/}).click();
+  await page.getByRole('button',{name:'Start & open problem',exact:true}).waitFor();
+  const planned=await page.evaluate(()=>window.forma.getSnapshot());
+  assert.equal(planned.today.items[0].title,'Watermelon');
+  assert.equal(planned.today.items[0].activity,'coding');
+  assert.equal(planned.data.session,null);
+  await page.screenshot({path:join(output,'native-today-suggestion.png')});
+  await page.getByRole('button',{name:'Back to practice',exact:true}).click();
   const timings=await page.evaluate(async()=>{
     const api=window.forma;
     await api.command({id:'native-attach',type:'attach',payload:{url:'https://codeforces.com/contest/4/problem/A',title:'Watermelon'}});
@@ -39,6 +48,12 @@ try {
   });
   assert.equal(timings.noteCount,20);assert.equal(timings.attempts,1);assert.equal(timings.outcome,'hint');
   await page.screenshot({path:join(output,'native-practice.png')});
+  await page.getByRole('button',{name:/Today with Fenn/}).click();
+  await page.getByText('TODAY WITH FENN',{exact:true}).waitFor();
+  await page.screenshot({path:join(output,'native-today.png')});
+  const todayWindow=await application.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].getBounds());
+  assert.equal(todayWindow.height,520);
+  await page.getByRole('button',{name:'Back to practice',exact:true}).click();
   await page.evaluate(()=>window.forma.ui('theme','light'));
   await page.waitForTimeout(100);
   await page.screenshot({path:join(output,'native-light.png')});
@@ -124,7 +139,7 @@ try {
   const traySvgEmpty=await application.evaluate(({nativeImage})=>nativeImage.createFromBuffer(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22"><circle cx="11" cy="11" r="9"/></svg>')).isEmpty());
   const trayPngEmpty=await application.evaluate(({nativeImage},path)=>nativeImage.createFromPath(path).isEmpty(),resolve('.companion-build/assets/fenn-tray.png'));
   assert.equal(trayPngEmpty,false);
-  const report={recognition,verifiedAt:new Date().toISOString(),platform:process.platform,architecture:process.arch,softwareRendering:software,notebook:folder,traySvgEmpty,trayPngEmpty,pairing:{acknowledged:pairedAck.ok,revocationRejected:!revokedAck.ok},cardP95Ms,...timings,idle:{durationMs:idleMs,cpuPercentOfOneCore:cpuSeconds/(idleMs/1000)*100,totalWorkingSetMiB:idleEnd.reduce((s,p)=>s+p.kib,0)/1024,processes:idleEnd},pageErrors:errors};
+  const report={today:{suggestionRendered:true,compactHeight:todayWindow.height,readingCreatedNoSession:true},recognition,verifiedAt:new Date().toISOString(),platform:process.platform,architecture:process.arch,softwareRendering:software,notebook:folder,traySvgEmpty,trayPngEmpty,pairing:{acknowledged:pairedAck.ok,revocationRejected:!revokedAck.ok},cardP95Ms,...timings,idle:{durationMs:idleMs,cpuPercentOfOneCore:cpuSeconds/(idleMs/1000)*100,totalWorkingSetMiB:idleEnd.reduce((s,p)=>s+p.kib,0)/1024,processes:idleEnd},pageErrors:errors};
   assert.deepEqual(errors,[]);
   await writeFile(join(output,'native-results.json'),JSON.stringify(report,null,2));
   console.log(JSON.stringify(report,null,2));

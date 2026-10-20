@@ -23,6 +23,18 @@ Settings lets you add a public Codeforces handle. Checks observe public author/v
 
 Due recall appears as a small offer when you are not actively practising. Memory opens only when you ask. Defer, snooze, hide, choose reduced motion, and change Light/Ink/system appearance from the card. The menu-bar fox recovers a hidden/off-screen window. The shortcut can be changed; occupied shortcuts are rejected before replacing a working one.
 
+## Today and a complete session
+
+1. Build/run with `npm run companion:dev` (or `npm run companion:start` after building). Use the existing local notebook, or import a website notebook in Settings after finishing any open sessions.
+2. Click Fenn while idle, or **Today with Fenn** in Practice. The shared website planner supplies one title, coding/recall type, reason and planned duration. Other activities stay folded. An empty or completed day is shown honestly.
+3. For coding, **Start & open problem** starts a measured session with its plan/track/upsolve context and opens the canonical Codeforces page. Open/import the solution normally in your paired VS Code folder. Forma never attaches Today to an arbitrary current editor file. **Continue current session** returns to the retained context; use Resume explicitly if paused.
+4. Use CPH for local tests and submit through your normal Codeforces workflow. Set your public handle before starting if you want automatic verdict follow-up. CPH test execution is not treated as authoritative platform evidence.
+5. **Finish & reflect** stops measured time immediately. Save your actual Independent/Hint/Editorial/Not solved yet reflection even while a submission is pending. The saved follow-up can discover submissions made within the original session interval for five more minutes, then follow pending judging for up to fifteen minutes from its first observation. Neither waiting nor offline time adds coding minutes.
+6. Open **Codeforces follow-up** in Practice to see saved statuses or **Refresh public verdicts**. An older result remains labelled with its own problem/profile after switching. Accepted never changes your learning outcome. Failure/expiry means unknown; checks cover only the latest 100 public submissions. Final/rejudge corrections are available through explicit refresh after automatic checks stop.
+7. For recall, **Try recall** opens the selected approach/complexity activity without showing old notes or starting a timer. **Later · tomorrow** uses the existing planner deferral, retaining coding/recall schedules; snoozing suggestions is a separate setting. Finish/save an open session's reflection before changing activities.
+
+No automatic daily reminder is enabled. Suggestions/verdicts use one quiet slot, respect snooze, and never focus or expand the companion. Background follow-up jobs stay on this device; export/import remains an explicit transfer of the canonical notebook, not live sync.
+
 ## Connect VS Code
 
 ```sh
