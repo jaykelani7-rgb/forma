@@ -37,6 +37,7 @@ import type { TrackContext } from "@/lib/tracks-types";
 import { nextTrackEntry, trackContextForEntry } from "@/lib/tracks";
 import { MISTAKES, type ReflectionMemory } from "@/lib/memory-types";
 import { ReflectionMemoryFields } from "./reflection-memory-fields";
+import { recordPracticeReflection } from "../../packages/core/src/companion";
 
 export function FocusedSession() {
   const {
@@ -232,31 +233,10 @@ export function FocusedSession() {
     setClosingDraft(closingDraft ?? { session, problem, reviewProblem });
     try {
       const saved = await (retry ? retryLocalSave : update)((d) => {
-        if (d.session && d.session.id !== session.id)
-          throw new Error(
-            "Another session is now active. Review your recovery copy before saving this reflection.",
-          );
-        return {
-          ...d,
-          session: null,
-          attempts: d.attempts.some((a) => a.id === attempt.id)
-            ? d.attempts.map((a) => (a.id === attempt.id ? attempt : a))
-            : [...d.attempts, attempt],
-          problems: d.problems.map((p) =>
-            p.id === problem.id
-              ? {
-                  ...p,
-                  ...review,
-                  reviewManual: reviewDate !== undefined,
-                  reviewUpdatedAt: attempt.completedAt,
-                  ...(p.cfHandle ? { reviewAttemptId: undefined } : {}),
-                  ...(reviewDate === null && p.reviewAt
-                    ? { reviewCompletedAt: attempt.completedAt }
-                    : {}),
-                }
-              : p,
-          ),
-        };
+        return recordPracticeReflection(d, attempt, review, {
+          reviewManual: reviewDate !== undefined,
+          completedRevisit: reviewDate === null,
+        });
       });
       if (!isCurrent()) return;
       if (!saved) {
