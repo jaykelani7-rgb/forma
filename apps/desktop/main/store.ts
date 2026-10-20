@@ -4,8 +4,10 @@ import { dirname } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { emptyData, elapsed, validateData, type Data } from "../../../src/lib/model";
 import { decodeBackup, encodeBackup, mergeWorkspaces } from "../../../src/lib/concurrency";
-import { applyCompanionCommand, initialCompanionState, validateCompanionState, type CompanionState } from "../../../packages/core/src/companion";
+import { applyCompanionCommand, applySessionFollowup, initialCompanionState, validateCompanionState, type CompanionState } from "../../../packages/core/src/companion";
 import { parseCommand, parseEvent } from "../../../packages/contracts/src/index";
+import { reconcilePracticePlan } from "../../../src/lib/practice-plan";
+import { expireFollowups } from "../../../packages/core/src/verdict-followup";
 import { defaultPreferences, validatePreferences } from "./preferences";
 
 export interface LocalSnapshot { data: Data; state: CompanionState; revision: number; savedAt: string }
@@ -44,12 +46,22 @@ export class CompanionStore {
     catch (error) { this.db.exec('ROLLBACK'); throw error; }
   }
   private persist(next: {data:Data;state:CompanionState}, revision:number, now:number, capture=true) {
+    next = { data: reconcilePracticePlan(next.data, new Date(now)), state: next.state };
     const device=JSON.stringify(validateCompanionState(next.state,next.data));
     if (Buffer.byteLength(device) > MAX_DEVICE_BYTES) throw new Error('The companion capture store is full. Export a companion backup before continuing. Nothing was truncated.');
     const at=new Date(now).toISOString();
     this.db.prepare('UPDATE workspace SET revision=?, notebook=?, device=?, saved_at=? WHERE id=1').run(revision,encodeBackup(next.data),device,at);
     if(capture)this.db.prepare("INSERT INTO outbox VALUES('notebook',?,'local',?) ON CONFLICT(id) DO UPDATE SET revision=excluded.revision, created_at=excluded.created_at").run(revision,at);
     return {...next, revision, savedAt:at};
+  }
+  reconcile(now=Date.now()) {
+    const before=this.snapshot();
+    const data=reconcilePracticePlan(before.data,new Date(now));
+    const restored=before.data.session&&before.data.session.phase!=="reflection"&&!(before.state.followups??[]).some(f=>f.id===before.data.session!.id)
+      ? applySessionFollowup(before.data,before.state,now).state : before.state;
+    const state=expireFollowups(restored,now);
+    if(JSON.stringify(data)===JSON.stringify(before.data)&&JSON.stringify(state)===JSON.stringify(before.state))return before;
+    return this.transaction(()=>this.persist({data,state},before.revision+1,now,false));
   }
   /** A live focus projection is not a new association, capture, or outbox obligation. */
   selectBinding(fileUri:string,clientId:string,now=Date.now()):LocalSnapshot {
@@ -108,7 +120,7 @@ export class CompanionStore {
       if(changed){
         const previous=new Map(before.state.submissions.map(s=>[`${s.handle.toLowerCase()}:${s.id}`,s]));
         const submissions=next.state.submissions.filter(s=>{const old=previous.get(`${s.handle.toLowerCase()}:${s.id}`);return !old||JSON.stringify({...old,observedAt:undefined})!==JSON.stringify({...s,observedAt:undefined});});
-        const event=parseEvent({eventId:id,eventVersion:1,eventType:'SubmissionBatchObserved',deviceId:this.deviceId(),producer:'codeforces',producerVersion:'public-api-v1',workspaceKey:'personal',occurredAt:saved.savedAt,receivedAt:saved.savedAt,correlationId:id,payload:{handle:next.state.handle,checkedAt:next.state.checkedAt,submissions}});
+        const event=parseEvent({eventId:id,eventVersion:1,eventType:'SubmissionBatchObserved',deviceId:this.deviceId(),producer:'codeforces',producerVersion:'public-api-v1',workspaceKey:'personal',occurredAt:saved.savedAt,receivedAt:saved.savedAt,correlationId:id,payload:{handle:(body as {handle:string}).handle,checkedAt:(body as {checkedAt:string}).checkedAt,submissions}});
         this.db.prepare('INSERT INTO observations VALUES(?,?,?,?)').run(id,'platform',JSON.stringify(event),saved.savedAt);
       }
       return saved;
@@ -149,7 +161,9 @@ export class CompanionStore {
     }
     return this.transaction(() => {
       this.db.prepare('INSERT INTO recoveries VALUES(?,?,?,?)').run(randomUUID(),encodeBackup(before.data),'Before notebook import',new Date(now).toISOString());
-      const saved=this.persist({data:merged.data,state:before.state},before.revision+1,now);
+      const handle=merged.data.codeforces.connectedHandle;
+      const next=before.state.handle===handle ? {data:merged.data,state:before.state} : applyCompanionCommand(merged.data,before.state,{id:randomUUID(),type:'set-handle',payload:{handle}},now);
+      const saved=this.persist(next,before.revision+1,now);
       this.db.prepare('INSERT INTO outbox VALUES(?,?,?,?)').run(randomUUID(),saved.revision,'local',saved.savedAt);
       return saved;
     });

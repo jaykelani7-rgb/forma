@@ -2,6 +2,9 @@ import { app, BrowserWindow, ipcMain, screen, Tray, Menu, nativeImage, globalSho
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { randomBytes, randomUUID } from "node:crypto";
+import { AttentionPolicy } from "./attention";
+import { companionToday } from "../../../packages/core/src/companion-today";
+import { localDate } from "../../../src/lib/model";
 import { RecognitionHub } from "./recognition";
 import { startBrowserTransport } from "./browser-transport";
 import { DatabaseClient } from "./database-client";
@@ -10,6 +13,8 @@ import { clampPosition, type CompanionPreferences } from "./preferences";
 import type { LocalSnapshot } from "./store";
 import { createCodeforcesAdapter } from "../../../src/lib/codeforces-api";
 import { parseVerifiedCodeforcesPage } from "../../../packages/integrations/codeforces";
+import { VerdictScheduler } from "../../../packages/integrations/verdict-scheduler";
+import { followupDue } from "../../../packages/core/src/verdict-followup";
 import type { SubmissionInput } from "../../../src/lib/codeforces-types";
 
 app.setName('Forma Companion');
@@ -28,8 +33,10 @@ let browserTransport: Awaited<ReturnType<typeof startBrowserTransport>> | undefi
 let recognition: RecognitionHub;
 const hostEpoch = randomUUID();
 let connected=false;
+const attention=new AttentionPolicy();
+let plannerDay="";
 let expanded=false;
-let panelRequest:{id:number;panel:'home'|'memory'}|undefined;
+let panelRequest:{id:number;panel:'home'|'memory'|'today'}|undefined;
 let quitting=false;
 let checkPromise:Promise<void>|null=null;
 let codeforces:{checking:boolean;checkedAt:string|null;error:string|null}={checking:false,checkedAt:null,error:null};
@@ -41,22 +48,23 @@ function platformStatus(state:LocalSnapshot['state']){
 }
 const snapshot=async()=>{
   const local=await database.call<LocalSnapshot>('snapshot');
-  return {...local,preferences,presentation:{expanded,panelRequest,activeFileUri:recognition?.activeFileUri()??null,recognition:recognition?.presentation()??null},integration:{connected,paired:!!credential,browserEnabled:!!browserCredential,browserSupported:process.platform==='darwin',status:connected?'VS Code connected':credential?'Waiting for VS Code':'Pair VS Code when you’re ready'},codeforces:platformStatus(local.state)};
+  const slot=attention.view(local.state,recognition?.presentation()??null,!!preferences.snoozedUntil&&Date.parse(preferences.snoozedUntil)>Date.now(),Date.now());
+  return {...local,today:companionToday(local.data),preferences,presentation:{expanded,panelRequest,activeFileUri:recognition?.activeFileUri()??null,recognition:slot.recognition,verdict:slot.verdict},integration:{connected,paired:!!credential,browserEnabled:!!browserCredential,browserSupported:process.platform==='darwin',status:connected?'VS Code connected':credential?'Waiting for VS Code':'Pair VS Code when you’re ready'},codeforces:platformStatus(local.state)};
 };
 async function broadcast() {
   if(!window||window.isDestroyed())return;
   const next=await snapshot();
   if(!expanded){
-    const bubble=!!next.presentation.recognition&&!(preferences.snoozedUntil&&Date.parse(preferences.snoozedUntil)>Date.now());
+    const bubble=!!(next.presentation.recognition||next.presentation.verdict)&&!(preferences.snoozedUntil&&Date.parse(preferences.snoozedUntil)>Date.now());
     const b=window.getBounds(), size={width:bubble?340:148,height:bubble?310:164};
     if(b.width!==size.width||b.height!==size.height){const area=screen.getDisplayMatching(b).workArea;const at=clampPosition({x:b.x+b.width-size.width,y:b.y+b.height-size.height},size,area);window.setBounds({...at,...size});}
   }
   window.webContents.send('forma:changed',next);
 }
 function constrain(){if(!window||window.isDestroyed())return;const b=window.getBounds();const a=screen.getDisplayMatching(b).workArea;window.setPosition(...Object.values(clampPosition(b,b,a)) as [number,number]);}
-function expand(value:boolean,focus=false){
+function expand(value:boolean,focus=false,glance=false){
   const b=window.getBounds();expanded=value;
-  const width=value?380:148, height=value?700:164;
+  const width=value?380:148, height=value?(glance?520:700):164;
   const a=screen.getDisplayMatching(b).workArea;
   const size={width:Math.min(width,a.width),height:Math.min(height,a.height)};
   const at=clampPosition({x:b.x+b.width-size.width,y:b.y+b.height-size.height},size,a);
@@ -73,6 +81,7 @@ function saveCredential(value:string|null){
 }
 async function applyCommand(command:unknown,producer='desktop') {
   await database.call<LocalSnapshot>('command',command,producer);
+  if(['finish','reflect'].includes((command as {type?:string})?.type??''))void checkCodeforces();
   if((command as {type?:string})?.type==='reflect')await recognition?.afterReflection();
   await broadcast();return snapshot();
 }
@@ -87,45 +96,41 @@ function registerShortcut(shortcut:string){
   if(!globalShortcut.register(shortcut,show))throw new Error('That shortcut is in use. Choose another shortcut.');
 }
 
-let verifiedContext:{handle:string;identity:string}|null=null;
+// One paced adapter and one in-flight batch coalesce all attempts for a handle.
+let verifiedContext:{handle:string;identities:string[]}|null=null;
 let verifiedSubmissions:SubmissionInput[]=[];
 const cf=createCodeforcesAdapter({fetcher:async(url,init)=>{
   const response=await fetch(url,init);
   if(!response.ok||!url.includes('/user.status'))return response;
-  const body=await response.clone().json();
+  const body=await response.clone().json(), context=verifiedContext;
   if(body.status!=='OK')return response;
-  const context=verifiedContext;
-  if(!context)throw new Error('No verified problem context.');
-  const [namespace,contestId]=context.identity.split(':');
-  if(!Array.isArray(body.result)||body.result.length>100)throw new Error('Invalid Codeforces page.');
-  const relevant=body.result.filter((item:{problem?:{contestId?:number}})=>item?.problem?.contestId===Number(contestId));
-  // Only the selected canonical namespace is known. Other problems remain
-  // unassigned. Public author membership is checked before accepting evidence.
-  verifiedSubmissions=parseVerifiedCodeforcesPage(relevant,{handle:context.handle,observedAt:new Date().toISOString(),namespaceForContest:id=>id===Number(contestId)?namespace as 'gym'|'contest':null}).map(e=>e.submission);
+  if(!context||!Array.isArray(body.result)||body.result.length>100)throw new Error('Invalid Codeforces page.');
+  const namespaces=new Map<number,Set<string>>();
+  for(const identity of context.identities){const [ns,id]=identity.split(':');const values=namespaces.get(Number(id))??new Set<string>();values.add(ns);namespaces.set(Number(id),values);}
+  const relevant=body.result.filter((item:{problem?:{contestId?:number}})=>namespaces.get(item?.problem?.contestId??0)?.size===1);
+  verifiedSubmissions=parseVerifiedCodeforcesPage(relevant,{handle:context.handle,observedAt:new Date().toISOString(),namespaceForContest:id=>{const values=namespaces.get(id);return values?.size===1?[...values][0] as 'gym'|'contest':null;}}).map(e=>e.submission);
   return Response.json({...body,result:relevant});
 }});
-async function checkCodeforces(){
+const verdictScheduler=new VerdictScheduler({
+  now:Date.now,
+  read:async()=>(await database.call<LocalSnapshot>('reconcile')).state,
+  fetch:async(handle,identities)=>{
+    verifiedContext={handle,identities};verifiedSubmissions=[];
+    await cf.activity(handle,1);return verifiedSubmissions;
+  },
+  write:async evidence=>{
+    await database.call('followup-evidence',evidence,randomUUID());
+    const current=await database.call<LocalSnapshot>('snapshot');
+    if(current.state.handle?.toLowerCase()===evidence.handle.toLowerCase())codeforces={checking:true,checkedAt:evidence.checkedAt,error:evidence.error??null};
+  },
+});
+async function checkCodeforces(manual=false){
   if(checkPromise)return checkPromise;
+  lastCheck=Date.now();
   checkPromise=(async()=>{
-    const before=await database.call<LocalSnapshot>('snapshot');
-    const handle=before.state.handle;
-    if(!handle)throw new Error('Add your Codeforces handle first.');
-    if(!before.state.identity)throw new Error('Attach a problem before checking its submissions.');
-    if(Date.now()-lastCheck<10000)throw new Error('The last check was recent. Please wait a moment.');
-    lastCheck=Date.now();codeforcesHandle=handle;codeforces={checking:true,checkedAt:before.state.checkedAt,error:null};await broadcast();
-    try{
-      verifiedContext={handle,identity:before.state.identity};
-      verifiedSubmissions=[];
-      await cf.activity(handle,1);
-      const current=await database.call<LocalSnapshot>('snapshot');
-      if(current.state.handle?.toLowerCase()!==handle.toLowerCase())return;
-      // Keep identities emitted by the author-verifying adapter. Its namespace
-      // comes from the selected URL, without the legacy numeric Gym heuristic.
-      const submissions=verifiedSubmissions;
-      const checkedAt=new Date().toISOString();
-      await database.call('evidence',{handle,submissions,checkedAt},randomUUID());
-      codeforces={checking:false,checkedAt,error:null};
-    }catch(error){codeforces={...codeforces,checking:false,error:error instanceof Error?error.message:'Waiting for platform confirmation.'};}
+    codeforcesHandle=(await database.call<LocalSnapshot>('snapshot')).state.handle;
+    codeforces={...codeforces,checking:true,error:null};await broadcast();
+    try{await verdictScheduler.run(manual);}
     finally{codeforces.checking=false;await broadcast();}
   })().finally(()=>{checkPromise=null;});
   return checkPromise;
@@ -136,6 +141,7 @@ function verifySender(event:Electron.IpcMainInvokeEvent){
 }
 async function ui(action:string,payload:unknown){
   switch(action){
+    case 'attention-dismiss':if(typeof payload==='string')attention.dismiss(payload);await broadcast();return null;
     case 'recognition-dismiss':recognition.dismiss(typeof payload==='string'?payload:undefined);return null;
     case 'recognition-resolve':await recognition.resolveConflict();return null;
     case 'recognition-finish':await recognition.finishAndSwitch();show();return null;
@@ -147,6 +153,7 @@ async function ui(action:string,payload:unknown){
       writeFileSync(join(app.getPath('userData'),'browser-pairing.enc'),safeStorage.encryptString(browserCredential??''),{mode:0o600});
       if(!payload)recognition.cancelBrowser();await broadcast();return null;
     }
+    case 'today':panelRequest={id:(panelRequest?.id??0)+1,panel:'today'};expand(true,false,true);return null;
     case 'expand':expand(typeof payload==='boolean'?payload:!!(payload as {expanded?:boolean})?.expanded);return null;
     case 'hide':window.hide();return null;
     case 'hitbox':if(typeof payload!=='boolean')throw new Error('Invalid hitbox.');window.setIgnoreMouseEvents(!payload,{forward:true});return null;
@@ -171,7 +178,7 @@ async function ui(action:string,payload:unknown){
       const secret=randomBytes(32).toString('base64url');saveCredential(secret);await broadcast();return {credential:secret,endpoint:transport?.endpoint};
     }
     case 'revoke-pairing':saveCredential(null);await broadcast();return null;
-    case 'check-codeforces':await checkCodeforces();return snapshot();
+    case 'check-codeforces':await checkCodeforces(true);return snapshot();
     case 'theme':if(!['light','ink','system'].includes(String(payload)))throw new Error('Choose Light, Ink, or System.');return setPreferences({theme:payload as CompanionPreferences['theme']});
     case 'reduced-motion':if(typeof payload!=='boolean')throw new Error('Invalid motion preference.');return setPreferences({reducedMotion:payload});
     case 'snooze':return setPreferences({snoozedUntil:payload===false?null:new Date(Date.now()+60*60*1000).toISOString()});
@@ -191,6 +198,7 @@ async function main(){
   const userData=app.getPath('userData');mkdirSync(userData,{recursive:true,mode:0o700});
   database=new DatabaseClient(join(userData,'notebook.sqlite'));
   preferences=await database.call('preferences');
+  await database.call('reconcile');
   recognition=new RecognitionHub({snapshot:()=>database.call<LocalSnapshot>('snapshot'),command:c=>database.call('command',c,'vscode'),select:(file,client)=>database.call('selectBinding',file,client),changed:()=>{void broadcast();}});
   const browserSecret=join(userData,'browser-pairing.enc');
   if(existsSync(browserSecret)&&secureAvailable())try{browserCredential=safeStorage.decryptString(readFileSync(browserSecret))||null;}catch{browserCredential=null;}
@@ -231,8 +239,9 @@ async function main(){
     if(gap<0||gap>45000){await database.call('pause','clock-discontinuity');await broadcast();return;}
     const local=await database.call<LocalSnapshot>('snapshot');
     if(local.data.session?.runningSince!==null&&local.data.session)await database.call('checkpoint');
-    const recentPending=local.state.platform==='pending'&&local.state.submissions.some(s=>s.verdict===null||s.verdict==='TESTING')&&local.state.submissions.some(s=>now-Date.parse(s.submittedAt)<10*60*1000);
-    if(local.state.handle&&(local.state.lifecycle==='working'||recentPending)&&now-lastCheck>=30000)void checkCodeforces().catch(()=>{});
+    const day=`${localDate(new Date(now))}:${new Date(now).getTimezoneOffset()}`;
+    if(day!==plannerDay){plannerDay=day;await database.call('reconcile');await broadcast();}
+    if((local.state.followups??[]).some(f=>followupDue(f,now))&&now-lastCheck>=30000)void checkCodeforces().catch(()=>{});
   },15000);timer.unref();
   if(process.argv.includes('--companion-smoke')){
     expand(true,true);await new Promise(r=>setTimeout(r,1500));

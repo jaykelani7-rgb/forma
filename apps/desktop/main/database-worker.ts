@@ -1,6 +1,7 @@
 import { parentPort, workerData } from "node:worker_threads";
 import { CompanionStore } from "./store";
 import { applySubmissionEvidence } from "../../../packages/core/src/companion";
+import { reconcileFollowups } from "../../../packages/core/src/verdict-followup";
 import { ClockContinuity } from "./clock-continuity";
 const store = new CompanionStore(workerData.path);
 store.pauseForLifecycle('restart');
@@ -12,6 +13,11 @@ parentPort!.on('message', (request: {id:number;method:string;args:unknown[]}) =>
     const a=request.args;
     let value: unknown;
     switch (request.method) {
+      case 'reconcile': value=store.reconcile(now); break;
+      case 'followup-evidence': {
+        const e=a[0] as {handle:string;submissions:Parameters<typeof reconcileFollowups>[2];checkedAt:string;error?:string};
+        value=store.updateEvidence(String(a[1]),(data,state)=>({data,state:reconcileFollowups(state,e.handle,e.submissions,now,e.error??null,data)}),e,now); break;
+      }
       case 'snapshot': value=store.snapshot(); break;
       case 'command': value=store.command(a[0],String(a[1]??'desktop'),now); break;
       case 'selectBinding': value=store.selectBinding(String(a[0]),String(a[1]),now); break;

@@ -7,10 +7,15 @@ import { validateReflectionMemory } from "../../../src/lib/memory-types";
 import { revisitItems } from "../../../src/lib/practice-state";
 import type { SubmissionInput } from "../../../src/lib/codeforces-types";
 
+import { DISCOVERY_MS, type VerdictFollowup } from "./verdict-followup";
+import { currentPracticePlan, decidePlanItem, reconcilePracticePlan, resolvePlanProblem } from "../../../src/lib/practice-plan";
+import { withPlannedPracticeSession } from "../../../src/lib/practice-plan-session";
+
 export interface CompanionThought { id: string; problemId: string; text: string; createdAt: string }
 export interface CompanionBinding { id: string; problemId: string; identity: string; fileUri: string; confirmedAt: string; workspaceId?: string; clientId?: string; source?: "manual" | "cph" | "browser"; adapterVersion?: string }
 export interface CompanionSubmission { id: number; handle: string; identity: string; verdict: string | null; submittedAt: string; observedAt: string; sessionId?: string }
 export interface CompanionState {
+  followups?: VerdictFollowup[];
   version: 1;
   problemId: string | null;
   identity: string | null;
@@ -80,10 +85,26 @@ export function applyCompanionCommand(data: Data, state: CompanionState, input: 
       const bindings = command.type === "forget-binding" ? state.bindings.filter((b) => !matches(b)) : state.bindings.map((b) => matches(b) ? { ...b, fileUri: command.payload.newFileUri } : b);
       return { data, state: { ...state, bindings } };
     }
+    case "plan-later": return { data: decidePlanItem(data, command.payload.itemId, "defer", command.payload.until, new Date(now)), state };
+    case "plan-select": {
+      const checked = reconcilePracticePlan(data, new Date(now));
+      const item = currentPracticePlan(checked, new Date(now))?.items.find(i => i.id === command.payload.itemId && i.status === "pending");
+      const choice = item && resolvePlanProblem(checked, item);
+      if (!item || !choice) throw new Error("This activity changed. Reopen Today.");
+      if (data.session && (item.activity !== "coding" || data.session.problemId !== choice.problem.id)) throw new Error("Finish and reflect on your current session before switching activities.");
+      const identity = canonicalProblemIdentity(choice.problem);
+      if (!identity) throw new Error("This activity has no supported Codeforces identity. Continue it on the website.");
+      if (choice.fresh && !command.payload.start) throw new Error("Start this track activity to save its practice context.");
+      const next = command.payload.start && item.activity === "coding" && !data.session ? withPlannedPracticeSession(checked, item.id, now, `companion:${command.id}`) : checked;
+      const reset = state.problemId !== choice.problem.id || (!!next.session && !data.session);
+      const selected = { ...state, problemId: choice.problem.id, identity, lifecycle: next.session ? state.lifecycle : "ready" as const, platform: reset ? "unknown" as const : state.platform, localTests: reset ? "unknown" as const : state.localTests, learning: reset ? "unrecorded" as const : state.learning };
+      if (next.session && !data.session) return applySessionFollowup(next, { ...selected, lifecycle: "working" }, now);
+      return { data: next, state: selected };
+    }
     case "start": {
       const problem = currentProblem(data, state);
       if (data.attempts.some((attempt) => attempt.id === `companion:${command.id}`)) throw new Error("This session ID already belongs to a saved attempt. Start again with a new command ID.");
-      return { data: withPracticeSession(data, problem, command.payload.durationMinutes ?? data.settings.defaultDuration, now, `companion:${command.id}`), state: { ...state, lifecycle: "working", learning: "unrecorded", platform: "unknown" } };
+      return applySessionFollowup(withPracticeSession(data, problem, command.payload.durationMinutes ?? data.settings.defaultDuration, now, `companion:${command.id}`), { ...state, lifecycle: "working", learning: "unrecorded", platform: "unknown" }, now);
     }
     case "pause": {
       currentSession(data, state);
@@ -97,7 +118,7 @@ export function applyCompanionCommand(data: Data, state: CompanionState, input: 
     }
     case "finish": {
       const session = currentSession(data, state);
-      return { data: { ...data, session: { ...session, runningSince: null, elapsedMs: elapsed(session, now), phase: "reflection" } }, state: { ...state, lifecycle: "paused" } };
+      return { data: { ...data, session: { ...session, runningSince: null, elapsedMs: elapsed(session, now), phase: "reflection" } }, state: { ...state, lifecycle: "paused", followups: (state.followups ?? []).map(f => f.id === session.id && !f.finishedAt ? { ...f, finishedAt: stamp, discoveryUntil: new Date(now + DISCOVERY_MS).toISOString(), nextCheckAt: stamp } : f) } };
     }
     case "thought": {
       const problem = currentProblem(data, state);
@@ -110,6 +131,7 @@ export function applyCompanionCommand(data: Data, state: CompanionState, input: 
     case "reflect": {
       const problem = currentProblem(data, state);
       const session = currentSession(data, state);
+      if ((state.followups ?? []).some(f=>f.id===session.id&&!f.finishedAt)) state = { ...state, followups: state.followups!.map(f=>f.id===session.id?{...f,finishedAt:stamp,discoveryUntil:new Date(now+DISCOVERY_MS).toISOString(),nextCheckAt:stamp}:f) };
       const result = finishPracticeReflection(data, session.id, command.payload, now);
       return { data: result, state: { ...state, learning: command.payload.outcome, lifecycle: "closed", problemId: problem.id } };
     }
@@ -128,7 +150,7 @@ export function applyCompanionCommand(data: Data, state: CompanionState, input: 
       const foreignProfile = !!selected?.cfHandle && selected.cfHandle.toLowerCase() !== handle?.toLowerCase();
       // Public-handle selection grants no account authorization and no learning credit.
       const profiles = handle && !data.codeforces.profiles.some((p) => p.handle.toLowerCase() === handle.toLowerCase()) ? [...data.codeforces.profiles, { handle, rating: null, rank: null, lastSyncAt: null, lastVisitAt: null, sinceAt: null, nextFrom: 1, historyComplete: false, gapUntilId: null }] : data.codeforces.profiles;
-      return { data: { ...data, codeforces: { ...data.codeforces, connectedHandle: handle, profiles } }, state: { ...state, ...(foreignProfile ? { problemId: null, identity: null, learning: "unrecorded" as const, lifecycle: "ready" as const, localTests: "unknown" as const } : {}), handle, platform: "unknown", checkedAt: null, submissions: [] } };
+      return { data: { ...data, codeforces: { ...data.codeforces, connectedHandle: handle, profiles } }, state: { ...state, ...(foreignProfile ? { problemId: null, identity: null, learning: "unrecorded" as const, lifecycle: "ready" as const, localTests: "unknown" as const } : {}), handle, platform: "unknown", checkedAt: null } };
     }
   }
 }
@@ -214,5 +236,22 @@ export function validateCompanionState(input: unknown, data: Data): CompanionSta
     if (!target || !problem || canonicalProblemIdentity(problem) !== s.identity || (problem.cfHandle && problem.cfHandle.toLowerCase() !== s.handle.toLowerCase()) || s.submittedAt < target.startedAt || s.submittedAt > ("completedAt" in target ? target.completedAt : s.observedAt)) throw new Error("Platform evidence does not belong to its recorded session.");
   }
   if (state.problemId && canonicalProblemIdentity(data.problems.find((p) => p.id === state.problemId)!) !== state.identity) throw new Error("The companion problem identity changed.");
+  if (state.followups !== undefined) {
+    if (!Array.isArray(state.followups) || state.followups.length > 1000 || new Set(state.followups.map(f => f.id)).size !== state.followups.length) throw new Error("Invalid verdict follow-ups.");
+    for (const f of state.followups) if (!f || typeof f.id !== 'string' || !ids.has(f.problemId) || !/^(contest|gym):\d+:[A-Z]\d*$/.test(f.identity) || !/^[A-Za-z0-9_.-]{3,24}$/.test(f.handle) || !stamp(f.startedAt) || !stamp(f.nextCheckAt) || ![f.finishedAt,f.discoveryUntil,f.pendingUntil,f.checkedAt].every(v=>v===null||stamp(v)) || !['searching','pending','final','temporary-failure','expired'].includes(f.status) || !(f.error===null||typeof f.error==='string')) throw new Error("Invalid verdict follow-up fields.");
+  }
+  for (const f of state.followups ?? []) {
+    const target=data.session?.id===f.id?data.session:data.attempts.find(a=>a.id===f.id);
+    const problem=data.problems.find(p=>p.id===f.problemId);
+    if(!target || target.problemId!==f.problemId || target.startedAt!==f.startedAt || !problem || canonicalProblemIdentity(problem)!==f.identity || (f.finishedAt && f.finishedAt<f.startedAt) || (f.finishedAt===null)!==(f.discoveryUntil===null) || (f.finishedAt && f.discoveryUntil!==new Date(Date.parse(f.finishedAt)+DISCOVERY_MS).toISOString())) throw new Error("Verdict follow-up does not match its immutable session interval.");
+    for(const row of state.submissions.filter(s=>s.sessionId===f.id)) if(row.handle.toLowerCase()!==f.handle.toLowerCase()||row.identity!==f.identity||row.submittedAt<f.startedAt||(f.finishedAt&&row.submittedAt>f.finishedAt)) throw new Error("Verdict evidence is outside its attempt interval.");
+  }
   return structuredClone(state);
+}
+
+export function applySessionFollowup(data: Data, state: CompanionState, now: number): CompanionSnapshot {
+  if (!state.handle || !state.identity || !data.session) return { data, state };
+  if ((state.followups?.length ?? 0) >= 1000) throw new Error("Export your companion history before starting more verdict follow-ups.");
+  const f: VerdictFollowup = { id: data.session.id, problemId: data.session.problemId, identity: state.identity, handle: state.handle, startedAt: data.session.startedAt, finishedAt: null, discoveryUntil: null, pendingUntil: null, checkedAt: null, nextCheckAt: new Date(now).toISOString(), status: 'searching', error: null };
+  return { data, state: { ...state, followups: [...(state.followups ?? []).filter(row=>row.id!==f.id), f] } };
 }

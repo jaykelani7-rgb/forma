@@ -9,6 +9,8 @@ export type CommandPayloads = {
   attach: { url: string; title?: string; fileUri?: string; workspaceId?: string; clientId?: string; source?: "manual" | "cph" | "browser"; adapterVersion?: string; activate?: boolean; replace?: boolean };
   "forget-binding": { fileUri: string; bindingId?: string; clientId?: string; workspaceId?: string };
   "rename-binding": { fileUri: string; newFileUri: string; bindingId?: string; clientId?: string; workspaceId?: string };
+  "plan-select": { itemId: string; start: boolean };
+  "plan-later": { itemId: string; until: string };
   start: { durationMinutes?: number };
   pause: Record<string, never>;
   resume: Record<string, never>;
@@ -82,6 +84,8 @@ export function parseCommand(input: unknown, now = Date.now()): CompanionCommand
       optionalText(p, "clientId", 100); optionalText(p, "workspaceId", 200); optionalText(p, "bindingId", 90);
       break;
     }
+    case "plan-select": fields(p, ["itemId", "start"]); if (!string(p.itemId, 200, 1) || typeof p.start !== "boolean") return fail("Choose a current planned activity."); break;
+    case "plan-later": fields(p, ["itemId", "until"]); if (!string(p.itemId, 200, 1) || !day(p.until)) return fail("Choose an activity and future date."); break;
     case "start":
       fields(p, ["durationMinutes"]);
       if (p.durationMinutes !== undefined && (typeof p.durationMinutes !== "number" || !Number.isInteger(p.durationMinutes) || p.durationMinutes < 1 || p.durationMinutes > 180)) return fail("Choose a timebox from 1 to 180 minutes.");
