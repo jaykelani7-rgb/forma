@@ -2,6 +2,8 @@ import { app, BrowserWindow, ipcMain, screen, Tray, Menu, nativeImage, globalSho
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { randomBytes, randomUUID } from "node:crypto";
+import { RecognitionHub } from "./recognition";
+import { startBrowserTransport } from "./browser-transport";
 import { DatabaseClient } from "./database-client";
 import { startTransport } from "./transport";
 import { clampPosition, type CompanionPreferences } from "./preferences";
@@ -21,6 +23,10 @@ let database: DatabaseClient;
 let preferences: CompanionPreferences;
 let transport: Awaited<ReturnType<typeof startTransport>> | undefined;
 let credential:string|null=null;
+let browserCredential:string|null=null;
+let browserTransport: Awaited<ReturnType<typeof startBrowserTransport>> | undefined;
+let recognition: RecognitionHub;
+const hostEpoch = randomUUID();
 let connected=false;
 let expanded=false;
 let panelRequest:{id:number;panel:'home'|'memory'}|undefined;
@@ -35,9 +41,18 @@ function platformStatus(state:LocalSnapshot['state']){
 }
 const snapshot=async()=>{
   const local=await database.call<LocalSnapshot>('snapshot');
-  return {...local,preferences,presentation:{expanded,panelRequest},integration:{connected,paired:!!credential,status:connected?'VS Code connected':credential?'Waiting for VS Code':'Pair VS Code when you’re ready'},codeforces:platformStatus(local.state)};
+  return {...local,preferences,presentation:{expanded,panelRequest,activeFileUri:recognition?.activeFileUri()??null,recognition:recognition?.presentation()??null},integration:{connected,paired:!!credential,browserEnabled:!!browserCredential,browserSupported:process.platform==='darwin',status:connected?'VS Code connected':credential?'Waiting for VS Code':'Pair VS Code when you’re ready'},codeforces:platformStatus(local.state)};
 };
-async function broadcast() {if(window&&!window.isDestroyed())window.webContents.send('forma:changed',await snapshot());}
+async function broadcast() {
+  if(!window||window.isDestroyed())return;
+  const next=await snapshot();
+  if(!expanded){
+    const bubble=!!next.presentation.recognition&&!(preferences.snoozedUntil&&Date.parse(preferences.snoozedUntil)>Date.now());
+    const b=window.getBounds(), size={width:bubble?340:148,height:bubble?310:164};
+    if(b.width!==size.width||b.height!==size.height){const area=screen.getDisplayMatching(b).workArea;const at=clampPosition({x:b.x+b.width-size.width,y:b.y+b.height-size.height},size,area);window.setBounds({...at,...size});}
+  }
+  window.webContents.send('forma:changed',next);
+}
 function constrain(){if(!window||window.isDestroyed())return;const b=window.getBounds();const a=screen.getDisplayMatching(b).workArea;window.setPosition(...Object.values(clampPosition(b,b,a)) as [number,number]);}
 function expand(value:boolean,focus=false){
   const b=window.getBounds();expanded=value;
@@ -54,11 +69,12 @@ function credentialPath(){return join(app.getPath('userData'),'pairing.enc');}
 function secureAvailable(){return safeStorage.isEncryptionAvailable() && (process.platform!=='linux'||safeStorage.getSelectedStorageBackend()!=='basic_text');}
 function saveCredential(value:string|null){
   if(!secureAvailable())throw new Error('OS credential storage is unavailable. Enable Keychain or a supported secret store to pair VS Code.');
-  writeFileSync(credentialPath(),safeStorage.encryptString(value??''),{mode:0o600});credential=value;transport?.revoke();connected=false;
+  writeFileSync(credentialPath(),safeStorage.encryptString(value??''),{mode:0o600});credential=value;transport?.revoke();recognition?.reset();connected=false;
 }
 async function applyCommand(command:unknown,producer='desktop') {
-  const result=await database.call<LocalSnapshot>('command',command,producer);
-  await broadcast();return {...result,preferences,presentation:{expanded,panelRequest},integration:{connected,paired:!!credential,status:connected?'VS Code connected':'Local notebook'},codeforces:platformStatus(result.state)};
+  await database.call<LocalSnapshot>('command',command,producer);
+  if((command as {type?:string})?.type==='reflect')await recognition?.afterReflection();
+  await broadcast();return snapshot();
 }
 async function saveFile(kind:'notebook'|'companion'){
   const choice=await dialog.showSaveDialog(window,{defaultPath:`forma-${kind}-${new Date().toISOString().slice(0,10)}.json`,filters:[{name:'JSON backup',extensions:['json']}]});
@@ -120,6 +136,17 @@ function verifySender(event:Electron.IpcMainInvokeEvent){
 }
 async function ui(action:string,payload:unknown){
   switch(action){
+    case 'recognition-dismiss':recognition.dismiss(typeof payload==='string'?payload:undefined);return null;
+    case 'recognition-resolve':await recognition.resolveConflict();return null;
+    case 'recognition-finish':await recognition.finishAndSwitch();show();return null;
+    case 'enable-browser':{
+      if(process.platform!=='darwin')throw new Error('Chrome capture is currently available on macOS. CPH recognition remains available.');
+      if(typeof payload!=='boolean')throw new Error('Choose whether Chrome capture is enabled.');
+      if(!secureAvailable())throw new Error('OS-protected storage is required for Chrome capture.');
+      browserCredential=payload?randomBytes(32).toString('base64url'):null;
+      writeFileSync(join(app.getPath('userData'),'browser-pairing.enc'),safeStorage.encryptString(browserCredential??''),{mode:0o600});
+      if(!payload)recognition.cancelBrowser();await broadcast();return null;
+    }
     case 'expand':expand(typeof payload==='boolean'?payload:!!(payload as {expanded?:boolean})?.expanded);return null;
     case 'hide':window.hide();return null;
     case 'hitbox':if(typeof payload!=='boolean')throw new Error('Invalid hitbox.');window.setIgnoreMouseEvents(!payload,{forward:true});return null;
@@ -129,6 +156,7 @@ async function ui(action:string,payload:unknown){
       if(url.protocol!=='https:'||url.username||url.password||url.port||!['codeforces.com','www.codeforces.com'].includes(url.hostname))throw new Error('Only verified Codeforces links may open from the companion.');
       await shell.openExternal(url.toString());return null;
     }
+    case 'open-vscode':await shell.openExternal('vscode://');return null;
     case 'open-forma':await shell.openExternal('http://localhost:3001');return null;
     case 'export-notebook':return saveFile('notebook');
     case 'export-companion':return saveFile('companion');
@@ -163,6 +191,10 @@ async function main(){
   const userData=app.getPath('userData');mkdirSync(userData,{recursive:true,mode:0o700});
   database=new DatabaseClient(join(userData,'notebook.sqlite'));
   preferences=await database.call('preferences');
+  recognition=new RecognitionHub({snapshot:()=>database.call<LocalSnapshot>('snapshot'),command:c=>database.call('command',c,'vscode'),select:(file,client)=>database.call('selectBinding',file,client),changed:()=>{void broadcast();}});
+  const browserSecret=join(userData,'browser-pairing.enc');
+  if(existsSync(browserSecret)&&secureAvailable())try{browserCredential=safeStorage.decryptString(readFileSync(browserSecret))||null;}catch{browserCredential=null;}
+
   if(existsSync(credentialPath())&&secureAvailable())try{credential=safeStorage.decryptString(readFileSync(credentialPath()))||null;}catch{credential=null;}
   const a=screen.getPrimaryDisplay().workArea;
   const size={width:148,height:164};const position=clampPosition(preferences.position??{x:a.x+a.width-180,y:a.y+a.height-200},size,a);
@@ -188,7 +220,8 @@ async function main(){
   tray.setContextMenu(Menu.buildFromTemplate([{label:'Open Fenn',click:show},{label:'Pet only',click:()=>expand(false)},{label:'Hide companion',click:()=>window.hide()},{label:'Snooze for an hour',click:()=>void setPreferences({snoozedUntil:new Date(Date.now()+3600000).toISOString()})},{type:'separator'},{label:'Export notebook…',click:()=>void saveFile('notebook')},{label:'Unsigned development build',enabled:false},{label:'Quit Forma Companion',click:()=>app.quit()}]));
   tray.on('click',show);
   try{registerShortcut(preferences.shortcut);}catch{ /* Tray recovery stays available when the shortcut is occupied. */ }
-  transport=await startTransport({...(developmentData?{endpoint:join(userData,'runtime','companion.sock')}:{}),credential:()=>credential,command:command=>applyCommand(command,'vscode'),action:async action=>{if(action==='open'||action==='memory'){panelRequest={id:(panelRequest?.id??0)+1,panel:action==='memory'?'memory':'home'};show();}return (await database.call<LocalSnapshot>('snapshot')).revision;},context:async()=>{const local=await database.call<LocalSnapshot>('snapshot');return {identity:local.state.identity,sessionId:local.data.session?.id??null};},connected:value=>{connected=value;void broadcast();}});
+  transport=await startTransport({...(developmentData?{endpoint:join(userData,'runtime','companion.sock')}:{}),credential:()=>credential,command:command=>applyCommand(command,'vscode'),recognition:request=>recognition.request(request),action:async action=>{if(action==='open'||action==='memory'){panelRequest={id:(panelRequest?.id??0)+1,panel:action==='memory'?'memory':'home'};show();}return (await database.call<LocalSnapshot>('snapshot')).revision;},context:async()=>{const local=await database.call<LocalSnapshot>('snapshot');return {identity:local.state.identity,sessionId:local.data.session?.id??null,hostEpoch};},connected:value=>{connected=value;void broadcast();}});
+  if(process.platform==='darwin')browserTransport=await startBrowserTransport({endpoint:join(userData,'runtime','browser.sock'),credential:()=>browserCredential,message:m=>recognition.browser(m)});
   powerMonitor.on('suspend',()=>void database.call('pause','suspend').then(broadcast));
   powerMonitor.on('lock-screen',()=>void database.call('pause','screen-lock').then(broadcast));
   powerMonitor.on('resume',()=>{lastTick=Date.now();void broadcast();});
@@ -211,7 +244,7 @@ app.on('second-instance',()=>{if(window)show();});
 app.on('activate',()=>{if(window)show();});
 app.on('before-quit',event=>{
   if(quitting)return;
-  quitting=true;globalShortcut.unregisterAll();transport?.close();
+  quitting=true;globalShortcut.unregisterAll();transport?.close();browserTransport?.close();recognition?.reset();
   if(database){event.preventDefault();void database.call('pause','quit').catch(()=>{}).then(()=>database.close()).finally(()=>app.exit());}
 });
 if(lock)main().catch(error=>{console.error('Forma Companion startup:',error.message);dialog.showErrorBox('Forma Companion could not start',String(error.message));app.quit();});

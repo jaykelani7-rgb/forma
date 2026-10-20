@@ -19,7 +19,7 @@ export class CompanionStore {
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
     this.db = new DatabaseSync(path);
     const version=Number(this.db.prepare('PRAGMA user_version').get()?.user_version??0);
-    if(version>1){this.db.close();throw new Error('This notebook was written by a newer Forma Companion. Upgrade the app before opening it; the original file is preserved.');}
+    if(version>2){this.db.close();throw new Error('This notebook was written by a newer Forma Companion. Upgrade the app before opening it; the original file is preserved.');}
     if (path !== ':memory:') chmodSync(path, 0o600);
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;
       CREATE TABLE IF NOT EXISTS workspace (id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL, notebook TEXT NOT NULL, device TEXT NOT NULL, saved_at TEXT NOT NULL);
@@ -29,7 +29,7 @@ export class CompanionStore {
       CREATE TABLE IF NOT EXISTS recoveries (id TEXT PRIMARY KEY, notebook TEXT NOT NULL, reason TEXT NOT NULL, created_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS preferences (id TEXT PRIMARY KEY, value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS sync_checkpoints (id TEXT PRIMARY KEY, value TEXT NOT NULL);
-      PRAGMA user_version=1;`);
+      PRAGMA user_version=2;`);
     this.db.prepare('INSERT OR IGNORE INTO workspace VALUES(1,0,?,?,?)').run(encodeBackup(emptyData()), JSON.stringify(initialCompanionState()), new Date().toISOString());
   }
   close() { this.db.close(); }
@@ -43,13 +43,25 @@ export class CompanionStore {
     try { const result = work(); this.db.exec('COMMIT'); return result; }
     catch (error) { this.db.exec('ROLLBACK'); throw error; }
   }
-  private persist(next: {data:Data;state:CompanionState}, revision:number, now:number) {
+  private persist(next: {data:Data;state:CompanionState}, revision:number, now:number, capture=true) {
     const device=JSON.stringify(validateCompanionState(next.state,next.data));
     if (Buffer.byteLength(device) > MAX_DEVICE_BYTES) throw new Error('The companion capture store is full. Export a companion backup before continuing. Nothing was truncated.');
     const at=new Date(now).toISOString();
     this.db.prepare('UPDATE workspace SET revision=?, notebook=?, device=?, saved_at=? WHERE id=1').run(revision,encodeBackup(next.data),device,at);
-    this.db.prepare("INSERT INTO outbox VALUES('notebook',?,'local',?) ON CONFLICT(id) DO UPDATE SET revision=excluded.revision, created_at=excluded.created_at").run(revision,at);
+    if(capture)this.db.prepare("INSERT INTO outbox VALUES('notebook',?,'local',?) ON CONFLICT(id) DO UPDATE SET revision=excluded.revision, created_at=excluded.created_at").run(revision,at);
     return {...next, revision, savedAt:at};
+  }
+  /** A live focus projection is not a new association, capture, or outbox obligation. */
+  selectBinding(fileUri:string,clientId:string,now=Date.now()):LocalSnapshot {
+    return this.transaction(()=>{
+      const before=this.snapshot(),binding=before.state.bindings.find(b=>b.fileUri===fileUri&&(!b.clientId||b.clientId===clientId));
+      if(!binding)throw new Error('This solution association is no longer available.');
+      const problem=before.data.problems.find(p=>p.id===binding.problemId)!;
+      if(problem.cfHandle&&problem.cfHandle.toLowerCase()!==before.state.handle?.toLowerCase())throw new Error('Confirm this file for the selected Codeforces profile before continuing.');
+      if(before.data.session&&before.data.session.problemId!==problem.id)throw new Error('Finish the open session before switching problems.');
+      if(before.state.problemId===problem.id)return before;
+      return this.persist({data:before.data,state:{...before.state,problemId:problem.id,identity:binding.identity,lifecycle:'ready',localTests:'unknown',platform:'unknown',learning:'unrecorded'}},before.revision+1,now,false);
+    });
   }
   command(input: unknown, producer = 'desktop', now=Date.now()): LocalSnapshot {
     const command = parseCommand(input,now);

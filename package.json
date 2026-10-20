@@ -21,7 +21,11 @@
     "companion:preview": "vite --config apps/desktop/vite.config.mjs",
     "companion:package": "npm run companion:build && electron-builder --projectDir .companion-build --config ../apps/desktop/electron-builder.json --dir --mac --arm64",
     "extension:build": "node scripts/companion/build-extension.mjs",
-    "companion:verify": "node scripts/companion/verify-native.mjs"
+    "companion:verify": "node scripts/companion/verify-native.mjs",
+    "browser:build": "node scripts/browser/build.mjs",
+    "browser:install": "node scripts/browser/install.mjs",
+    "browser:uninstall": "node scripts/browser/uninstall.mjs",
+    "extension:verify": "node --import tsx scripts/companion/verify-vscode-recognition.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "2.117.2",

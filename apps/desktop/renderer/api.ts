@@ -1,3 +1,4 @@
+import type { RecognitionView } from "../../../packages/integrations/recognition";
 import type { Data } from "../../../src/lib/model";
 import type { CompanionState } from "../../../packages/core/src/companion";
 import type { CompanionCommand } from "../../../packages/contracts/src";
@@ -7,10 +8,10 @@ export interface CompanionSnapshot {
   state: CompanionState;
   revision: number;
   savedAt: string;
-  integration: { connected: boolean; paired: boolean; status: string };
+  integration: { connected: boolean; paired: boolean; browserEnabled?: boolean; browserSupported?: boolean; status: string };
   preferences: { theme: "light" | "ink" | "system"; reducedMotion: boolean; snoozedUntil: string | null; shortcut?: string };
   codeforces: { checking: boolean; checkedAt: string | null; error: string | null };
-  presentation?: { expanded: boolean; panelRequest?: { id: number; panel: "home" | "memory" } };
+  presentation?: { expanded: boolean; activeFileUri?: string | null; recognition?: RecognitionView; panelRequest?: { id: number; panel: "home" | "memory" } };
 }
 export interface FormaBridge {
   getSnapshot(): Promise<CompanionSnapshot>;

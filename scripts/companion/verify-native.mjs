@@ -66,6 +66,54 @@ try {
     socket.on('data',chunk=>{socket.end();resolve(JSON.parse(chunk.toString()));});
   });
   const pairedAck=await ping();assert.equal(pairedAck.ok,true);
+  await application.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].blur());
+  const recognitionAck=await new Promise((resolve,reject)=>{
+    const socket=connect(pairing.endpoint);let data='';socket.setTimeout(4000,()=>{socket.destroy();reject(new Error('Recognition acknowledgement timeout'));});socket.on('error',reject);
+    socket.on('connect',()=>socket.write(JSON.stringify({version:1,id:'native-recognition',credential:pairing.credential,recognition:{clientId:'native-client',workspaceId:'native-workspace',instanceId:'native-window',generation:1,observedAt:Date.now(),automatic:true,focused:true,fileUri:'file:///fixture/native.cpp',reason:'focus',binding:{url:'https://codeforces.com/contest/4/problem/B',title:'Before an Exam',source:'cph',adapterVersion:'2026.10.1792170155'}}})+'\n'));
+    socket.on('data',chunk=>{data+=chunk;if(data.includes('\n')){socket.end();resolve(JSON.parse(data));}});
+  });
+  assert.equal(recognitionAck.ok,true);
+  await page.getByRole('status',{name:'Problem recognition'}).waitFor({state:'visible'});
+  const didNotFocus=await application.evaluate(({BrowserWindow})=>!BrowserWindow.getAllWindows()[0].isFocused());
+  assert.equal(didNotFocus,true);
+  await page.screenshot({path:join(output,'native-recognition.png')});
+  const recognised=await page.evaluate(()=>window.forma.getSnapshot());
+  assert.equal(recognised.state.identity,'contest:4:B');assert.equal(recognised.presentation.expanded,false);
+  const recognition={identity:recognised.state.identity,status:recognised.presentation.recognition.status,didNotFocus,fixtureClient:true};
+  await page.evaluate(()=>window.forma.ui('expand',true));
+  const sendRecognition = recognition => new Promise((resolve,reject)=>{
+    const socket=connect(pairing.endpoint);let data='';socket.setTimeout(4000,()=>{socket.destroy();reject(new Error('File switch acknowledgement timeout'));});socket.on('error',reject);
+    socket.on('connect',()=>socket.write(JSON.stringify({version:1,id:`switch-${recognition.generation}`,credential:pairing.credential,recognition})+'\n'));
+    socket.on('data',chunk=>{data+=chunk;if(data.includes('\n')){socket.end();resolve(JSON.parse(data));}});
+  });
+  const source={clientId:'native-client',workspaceId:'native-workspace',instanceId:'native-window',automatic:true,focused:true,reason:'focus'};
+  for (const [generation,fileUri] of [[2,'file:///fixture/B_Prefiquence.cpp'],[3,'file:///fixture/1968B.cpp']]) {
+    const reply=await sendRecognition({...source,generation,fileUri,observedAt:Date.now(),binding:{url:'https://codeforces.com/contest/4/problem/B',title:'Before an Exam',source:'cph',adapterVersion:'2026.10.1792170155'}});
+    assert.equal(reply.ok,true);
+    await page.locator('.binding-source').filter({hasText:fileUri.split('/').at(-1)}).waitFor({state:'visible'});
+    const snap=await page.evaluate(()=>window.forma.getSnapshot());
+    await page.evaluate(id=>window.forma.ui('recognition-dismiss',id),snap.presentation.recognition.id);
+  }
+  await sendRecognition({...source,generation:4,fileUri:'file:///fixture/B_Prefiquence.cpp',observedAt:Date.now()});
+  await page.locator('.binding-source').filter({hasText:'B_Prefiquence.cpp'}).waitFor({state:'visible'});
+  await sendRecognition({...source,generation:5,fileUri:'file:///fixture/1968B.cpp',observedAt:Date.now()});
+  await page.locator('.binding-source').filter({hasText:'1968B.cpp'}).waitFor({state:'visible'});
+  await page.screenshot({path:join(output,'native-active-own-file.png')});
+  recognition.ownFileShownAfterClosingGenerated=true;
+  await page.getByRole('status',{name:'Problem recognition'}).waitFor({state:'hidden',timeout:12000});
+  recognition.recognisedBubbleDismissed=true;
+  await page.getByRole('button',{name:'Just leave a thought',exact:true}).click();
+  await page.locator('#thought').fill('Controlled draft for Before an Exam');
+  await page.evaluate(()=>window.forma.command({id:'native-draft-context-change',type:'attach',payload:{url:'https://codeforces.com/contest/4/problem/A'}}));
+  await page.getByRole('button',{name:'Save thought locally',exact:true}).click();
+  await page.getByRole('alert').filter({hasText:'active problem changed'}).waitFor({state:'visible'});
+  assert.equal(await page.locator('#thought').inputValue(),'Controlled draft for Before an Exam');
+  assert.equal((await page.evaluate(()=>window.forma.getSnapshot())).state.thoughts.length,20);
+  recognition.desktopDraftGuard=true;
+  await page.screenshot({path:join(output,'native-draft-guard.png')});
+  await page.evaluate(()=>window.forma.ui('expand',false));
+
+
   await page.evaluate(()=>window.forma.ui('revoke-pairing'));
   const revokedAck=await ping();assert.equal(revokedAck.ok,false);
   const idleStart=await application.evaluate(({app})=>app.getAppMetrics().map(p=>({pid:p.pid,type:p.type,cpu:p.cpu.cumulativeCPUUsage,kib:p.memory.workingSetSize})));
@@ -76,7 +124,7 @@ try {
   const traySvgEmpty=await application.evaluate(({nativeImage})=>nativeImage.createFromBuffer(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22"><circle cx="11" cy="11" r="9"/></svg>')).isEmpty());
   const trayPngEmpty=await application.evaluate(({nativeImage},path)=>nativeImage.createFromPath(path).isEmpty(),resolve('.companion-build/assets/fenn-tray.png'));
   assert.equal(trayPngEmpty,false);
-  const report={verifiedAt:new Date().toISOString(),platform:process.platform,architecture:process.arch,softwareRendering:software,notebook:folder,traySvgEmpty,trayPngEmpty,pairing:{acknowledged:pairedAck.ok,revocationRejected:!revokedAck.ok},cardP95Ms,...timings,idle:{durationMs:idleMs,cpuPercentOfOneCore:cpuSeconds/(idleMs/1000)*100,totalWorkingSetMiB:idleEnd.reduce((s,p)=>s+p.kib,0)/1024,processes:idleEnd},pageErrors:errors};
+  const report={recognition,verifiedAt:new Date().toISOString(),platform:process.platform,architecture:process.arch,softwareRendering:software,notebook:folder,traySvgEmpty,trayPngEmpty,pairing:{acknowledged:pairedAck.ok,revocationRejected:!revokedAck.ok},cardP95Ms,...timings,idle:{durationMs:idleMs,cpuPercentOfOneCore:cpuSeconds/(idleMs/1000)*100,totalWorkingSetMiB:idleEnd.reduce((s,p)=>s+p.kib,0)/1024,processes:idleEnd},pageErrors:errors};
   assert.deepEqual(errors,[]);
   await writeFile(join(output,'native-results.json'),JSON.stringify(report,null,2));
   console.log(JSON.stringify(report,null,2));

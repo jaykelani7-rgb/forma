@@ -1,0 +1,17 @@
+import { createHash } from 'node:crypto';
+import { readFile, mkdir, writeFile, access } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { join, resolve } from 'node:path';
+import electron from 'electron';
+if(process.platform!=='darwin')throw new Error('This development installer supports macOS Google Chrome.');
+const manifest=JSON.parse(await readFile(new URL('../../apps/chrome-extension/manifest.json',import.meta.url),'utf8'));
+const bytes=createHash('sha256').update(Buffer.from(manifest.key,'base64')).digest().subarray(0,16);
+const id=[...bytes].map(n=>String.fromCharCode(97+(n>>4))+String.fromCharCode(97+(n&15))).join('');
+const host=resolve('.companion-build/browser-native-host.cjs');await access(host);
+const directory=join(homedir(),'Library/Application Support/Forma Companion');await mkdir(directory,{recursive:true,mode:0o700});
+const launcher=join(directory,'chrome-native-launcher');
+const quote=s=>`'${s.replaceAll("'","'\\''")}'`;
+await writeFile(launcher,`#!/bin/sh\nunset ELECTRON_RUN_AS_NODE\nexec ${quote(electron)} ${quote(host)} "$@"\n`,{mode:0o700});
+const registration=join(homedir(),'Library/Application Support/Google/Chrome/NativeMessagingHosts');await mkdir(registration,{recursive:true,mode:0o700});
+await writeFile(join(registration,'app.forma.problem_capture.json'),JSON.stringify({name:'app.forma.problem_capture',description:'Forma explicit Codeforces capture',path:launcher,type:'stdio',allowed_origins:[`chrome-extension://${id}/`]},null,2)+'\n',{mode:0o600});
+console.log(`Registered user-level native host for Chrome extension ${id}. Load dist/chrome-extension unpacked, then enable Chrome capture in Fenn settings.`);

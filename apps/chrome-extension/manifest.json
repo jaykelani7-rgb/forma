@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "Forma · Use this problem",
+  "version": "0.1.0",
+  "description": "Explicitly connect a Codeforces problem to a permitted VS Code solution.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAuOWt+0uy1G5poHjFKLP7bTkcK2TkzPivJlSM1l7Mk9yBEitEAFHL9GBx9moNv01tJS3RwJfwU5ByzPt/BvPPi5BijVe6aRLohSBtJVxvtn71ulFqzyM2qo+2/K9UVSKgWuJCTTc1TRb0twJe7DHcQ0xmmZlqIKh0bSFYvA0hzhCEW0fCnBQe5mxyIeJb9fNGr0Mqi5oRZDJxeT1T0MpzndqrQm+ARkiVqaHCzu9cAQf7bOoP/jbP+RewEEVFX/OvryJBW0Qwz1FDgUiqvXgyq+Df03WNEIGH79KzKOjkfjU8Tn9uMKxWFZ7StJlGJiZBzBW5TGA0C+EklW2Q11i7FQIDAQAB",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "nativeMessaging"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Use in Forma"
+  }
+}

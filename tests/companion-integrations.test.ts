@@ -44,7 +44,7 @@ test("CPH bounded reader rejects symlink escape, oversized files and disabled ve
     const target = cphMetadataPath(source);
     await writeFile(target, JSON.stringify(metadata(source)));
     assert.equal((await readCphBinding({ solutionPath: source, version, permittedFolders: [directory] })).ok, true);
-    assert.deepEqual(await readCphBinding({ solutionPath: source, version, permittedFolders: [path.join(directory, "no-permission")] }), { ok: false, reason: "missing" });
+    assert.deepEqual(await readCphBinding({ solutionPath: source, version, permittedFolders: [path.join(directory, "no-permission")] }), { ok: false, reason: "outside-permitted-folder" });
     await writeFile(target, "x".repeat(1024 * 1024 + 1));
     assert.deepEqual(await readCphBinding({ solutionPath: source, version, permittedFolders: [directory] }), { ok: false, reason: "oversized" });
     await rm(target);

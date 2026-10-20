@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
-import { open, realpath } from "node:fs/promises";
+import { lstat, open, realpath } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { normalizeCodeforcesIdentity } from "../../src/lib/codeforces-identity";
@@ -26,10 +26,10 @@ export function parseCphMetadata(value: unknown, solutionPath: string, version: 
   if (!SUPPORTED_CPH_VERSIONS.includes(version as typeof SUPPORTED_CPH_VERSIONS[number])) return { ok: false, reason: "unsupported-version" };
   if (typeof value !== "object" || value === null || Array.isArray(value)) return { ok: false, reason: "invalid-metadata" };
   const record = value as Record<string, unknown>;
-  if (typeof record.srcPath !== "string" || !path.isAbsolute(record.srcPath) || path.normalize(record.srcPath) !== path.normalize(solutionPath) || typeof record.name !== "string" || !record.name.trim() || record.name.length > 500 || typeof record.url !== "string" || record.url.length > 2048 || !/^https?:\/\//.test(record.url) || !Array.isArray(record.tests) || record.tests.length > 10000 || record.local === true) return { ok: false, reason: "invalid-metadata" };
+  if (typeof record.srcPath !== "string" || !path.isAbsolute(record.srcPath) || path.normalize(record.srcPath) !== path.normalize(solutionPath) || typeof record.name !== "string" || !record.name.trim() || record.name.length > 10000 || typeof record.url !== "string" || record.url.length > 2048 || !/^https?:\/\//.test(record.url) || !Array.isArray(record.tests) || record.tests.length > 10000 || record.local === true) return { ok: false, reason: "invalid-metadata" };
   const identity = normalizeCodeforcesIdentity({ url: record.url });
   if (!identity) return { ok: false, reason: "invalid-metadata" };
-  return { ok: true, binding: { url: identity.url, title: record.name.trim(), problemKey: identity.key, fileUri: pathToFileURL(solutionPath).toString(), source: "cph", adapterVersion: version, confidence: "metadata" } };
+  return { ok: true, binding: { url: identity.url, title: record.name.trim().slice(0, 240), problemKey: identity.key, fileUri: pathToFileURL(solutionPath).toString(), source: "cph", adapterVersion: version, confidence: "metadata" } };
 }
 
 /** Reads one exact metadata file only. Never reads or writes solution contents. */
@@ -37,15 +37,18 @@ export async function readCphBinding(options: { solutionPath: string; version: s
   if (!SUPPORTED_CPH_VERSIONS.includes(options.version as typeof SUPPORTED_CPH_VERSIONS[number])) return { ok: false, reason: "unsupported-version" };
   let handle;
   try {
-    const source = await realpath(options.solutionPath);
     const metadata = cphMetadataPath(options.solutionPath, options.saveLocation);
+    if (!options.permittedFolders.some(root => pathWithinFolder(options.solutionPath, root)) || !options.permittedFolders.some(root => pathWithinFolder(metadata, root))) return { ok: false, reason: "outside-permitted-folder" };
+    const source = await realpath(options.solutionPath);
+    if ((await lstat(metadata)).isSymbolicLink()) return { ok: false, reason: "invalid-metadata" };
     const actualMetadata = await realpath(metadata);
     const roots = await Promise.all(options.permittedFolders.map((folder) => realpath(folder)));
     if (!roots.some((folder) => pathWithinFolder(source, folder)) || !roots.some((folder) => pathWithinFolder(actualMetadata, folder))) return { ok: false, reason: "outside-permitted-folder" };
-    handle = await open(metadata, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    handle = await open(actualMetadata, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
     const stat = await handle.stat();
     if (!stat.isFile()) return { ok: false, reason: "invalid-metadata" };
     if (stat.size > MAX_CPH_METADATA_BYTES) return { ok: false, reason: "oversized" };
+    if (await realpath(metadata) !== actualMetadata) return { ok: false, reason: "invalid-metadata" };
     const buffer = Buffer.alloc(MAX_CPH_METADATA_BYTES + 1);
     const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
     if (bytesRead > MAX_CPH_METADATA_BYTES) return { ok: false, reason: "oversized" };
@@ -53,4 +56,16 @@ export async function readCphBinding(options: { solutionPath: string; version: s
   } catch (error) {
     return { ok: false, reason: (error as NodeJS.ErrnoException).code === "ENOENT" ? "missing" : "invalid-metadata" };
   } finally { await handle?.close(); }
+}
+
+/** A CPH write may be missing/partial during atomic replacement. Never clear a known binding. */
+export async function readCphBindingWithRetry(options: Parameters<typeof readCphBinding>[0], current: () => boolean, wait = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms))): Promise<CphResult | null> {
+  for (const delay of [0, 100, 300, 700]) {
+    if (delay) await wait(delay);
+    if (!current()) return null;
+    const result = await readCphBinding(options);
+    if (!current()) return null;
+    if (result.ok || !["missing", "invalid-metadata"].includes(result.reason) || delay === 700) return result;
+  }
+  return null;
 }

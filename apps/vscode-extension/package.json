@@ -3,39 +3,119 @@
   "displayName": "Forma Companion",
   "description": "A local, paired connection between VS Code and Forma Companion.",
   "publisher": "forma",
-  "version": "0.1.1",
+  "version": "0.2.1",
   "private": true,
-  "engines": { "vscode": "^1.95.0" },
-  "categories": ["Other"],
-  "extensionKind": ["ui"],
-  "main": "./dist/extension.js",
-  "activationEvents": ["onStartupFinished"],
-  "capabilities": {
-    "untrustedWorkspaces": { "supported": "limited", "description": "Status remains available. Pairing, file association, queued delivery, and CPH access require a trusted, explicitly selected local folder." },
-    "virtualWorkspaces": { "supported": false, "description": "Only local file workspaces are supported." }
+  "engines": {
+    "vscode": "^1.95.0"
   },
-  "scripts": { "build": "node scripts/build.mjs", "vscode:prepublish": "npm run build" },
+  "categories": [
+    "Other"
+  ],
+  "extensionKind": [
+    "ui"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "Status remains available. Pairing, file association, queued delivery, and CPH access require a trusted, explicitly selected local folder."
+    },
+    "virtualWorkspaces": {
+      "supported": false,
+      "description": "Only local file workspaces are supported."
+    }
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "vscode:prepublish": "npm run build"
+  },
   "contributes": {
     "commands": [
-      { "command": "formaCompanion.pair", "title": "Forma: Pair with Companion" },
-      { "command": "formaCompanion.unpair", "title": "Forma: Remove Pairing" },
-      { "command": "formaCompanion.selectFolders", "title": "Forma: Select Allowed Folders" },
-      { "command": "formaCompanion.attachProblem", "title": "Forma: Attach Codeforces Problem" },
-      { "command": "formaCompanion.open", "title": "Forma: Open Companion" },
-      { "command": "formaCompanion.saveThought", "title": "Forma: Save Thought" },
-      { "command": "formaCompanion.start", "title": "Forma: Start Session" },
-      { "command": "formaCompanion.pause", "title": "Forma: Pause Session" },
-      { "command": "formaCompanion.resume", "title": "Forma: Resume Session" },
-      { "command": "formaCompanion.finish", "title": "Forma: Finish and Reflect" },
-      { "command": "formaCompanion.memory", "title": "Forma: Open Prior Memory" },
-      { "command": "formaCompanion.runCphTests", "title": "Forma: Run CPH Tests" },
-      { "command": "formaCompanion.retry", "title": "Forma: Retry Pending Captures" },
-      { "command": "formaCompanion.exportQueue", "title": "Forma: Export Pending Captures for Recovery" }
+      {
+        "command": "formaCompanion.pair",
+        "title": "Forma: Pair with Companion"
+      },
+      {
+        "command": "formaCompanion.unpair",
+        "title": "Forma: Remove Pairing"
+      },
+      {
+        "command": "formaCompanion.selectFolders",
+        "title": "Forma: Select Allowed Folders"
+      },
+      {
+        "command": "formaCompanion.attachProblem",
+        "title": "Forma: Attach Codeforces Problem"
+      },
+      {
+        "command": "formaCompanion.open",
+        "title": "Forma: Open Companion"
+      },
+      {
+        "command": "formaCompanion.saveThought",
+        "title": "Forma: Save Thought"
+      },
+      {
+        "command": "formaCompanion.start",
+        "title": "Forma: Start Session"
+      },
+      {
+        "command": "formaCompanion.pause",
+        "title": "Forma: Pause Session"
+      },
+      {
+        "command": "formaCompanion.resume",
+        "title": "Forma: Resume Session"
+      },
+      {
+        "command": "formaCompanion.finish",
+        "title": "Forma: Finish and Reflect"
+      },
+      {
+        "command": "formaCompanion.memory",
+        "title": "Forma: Open Prior Memory"
+      },
+      {
+        "command": "formaCompanion.runCphTests",
+        "title": "Forma: Run CPH Tests"
+      },
+      {
+        "command": "formaCompanion.retry",
+        "title": "Forma: Retry Pending Captures"
+      },
+      {
+        "command": "formaCompanion.exportQueue",
+        "title": "Forma: Export Pending Captures for Recovery"
+      },
+      {
+        "command": "formaCompanion.setup",
+        "title": "Forma: Setup and Connection"
+      },
+      {
+        "command": "formaCompanion.recognition",
+        "title": "Forma: Recognise Problems from CPH"
+      },
+      {
+        "command": "formaCompanion.forget",
+        "title": "Forma: Forget This File Association"
+      },
+      {
+        "command": "formaCompanion.useCph",
+        "title": "Forma: Rebind This File from CPH"
+      }
     ],
     "configuration": {
       "title": "Forma Companion",
       "properties": {
-        "formaCompanion.cphMetadataEnabled": { "type": "boolean", "default": false, "description": "Observe identity metadata for the active file in selected folders. Does not report local test results.", "scope": "machine" }
+        "formaCompanion.cphMetadataEnabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Recognise problems from supported CPH metadata for the active permitted solution. Explicit consent; no source reading, automatic timer, or test-result claims.",
+          "scope": "machine"
+        }
       }
     }
   }

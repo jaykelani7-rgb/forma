@@ -213,3 +213,12 @@ input[type=checkbox]:focus-visible { outline: 2px solid var(--sage); outline-off
 
 .binding-source { display: block; font-size: 8px; color: var(--muted); margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pet-status { padding: 8px 10px; background: color-mix(in srgb, var(--paper) 90%, transparent); border: 1px solid color-mix(in srgb, var(--rule) 70%, transparent); border-radius: 9px; box-shadow: 0 1px 4px #00000005; backdrop-filter: blur(10px); }
+
+.companion-window.is-collapsed.has-recognition { width: 316px; }
+.recognition-bubble { position: relative; display: flex; flex-wrap: wrap; gap: 8px; background: var(--paper); border: 1px solid var(--rule); border-radius: 14px; padding: 13px 15px; margin-bottom: 4px; box-shadow: var(--shadow); }
+.recognition-bubble > div:first-child { flex: 1; min-width: 0; }
+.recognition-bubble strong { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12px; font-weight: 500; margin-top: 5px; }
+.recognition-bubble p { font-size: 10px; line-height: 1.5; color: var(--muted); margin: 5px 0 0; }
+.recognition-bubble > .icon-button { align-self: flex-start; padding: 2px; }
+.recognition-actions { display: flex; width: 100%; gap: 12px; flex-wrap: wrap; }
+.recognition-actions button { display: flex; gap: 5px; align-items: center; border: 0; background: transparent; color: var(--sage-deep); font-size: 10px; padding: 3px 0; }

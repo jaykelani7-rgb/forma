@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { homedir, userInfo } from "node:os";
 import path from "node:path";
+import { parseRecognition, type RecognitionRequest } from "./recognition";
 
 export const PROTOCOL_VERSION = 1;
 export const MAX_MESSAGE_BYTES = 64 * 1024;
@@ -9,7 +10,7 @@ export type TransportRequest = {
   version: 1;
   id: string;
   credential: string;
-} & ({ command: TransportCommand; action?: never } | { action: "open" | "memory" | "ping"; command?: never });
+} & ({ command: TransportCommand; action?: never; recognition?: never } | { action: "open" | "memory" | "ping"; command?: never; recognition?: never } | { recognition: RecognitionRequest; command?: never; action?: never });
 export type TransportResponse =
   | { version: 1; id: string; ok: true; revision: number; [key: string]: unknown }
   | { version: 1; id: string; ok: false; error: string; [key: string]: unknown };
@@ -34,7 +35,12 @@ export function defaultCompanionEndpoint(options: {
 
 export function validateTransportRequest(value: unknown): TransportRequest {
   if (!object(value) || value.version !== 1 || !id(value.id) || typeof value.credential !== "string" || !/^[A-Za-z0-9_-]{32,256}$/.test(value.credential)) throw new Error("Invalid protocol envelope or unsupported protocol version.");
-  if (Object.keys(value).some((key) => !["version", "id", "credential", "command", "action"].includes(key))) throw new Error("Unexpected protocol field.");
+  if (Object.keys(value).some((key) => !["version", "id", "credential", "command", "action", "recognition"].includes(key))) throw new Error("Unexpected protocol field.");
+  if (value.recognition !== undefined) {
+    if (value.command !== undefined || value.action !== undefined) throw new Error("Recognition cannot contain commands.");
+    parseRecognition(value.recognition);
+    return value as TransportRequest;
+  }
   if (value.command !== undefined && value.action === undefined) {
     if (!object(value.command) || !id(value.command.id) || !id(value.command.type) || !object(value.command.payload) || (value.command.expectedProblemKey !== undefined && !id(value.command.expectedProblemKey)) || (value.command.expectedSessionId !== undefined && !id(value.command.expectedSessionId)) || (value.command.occurredAt !== undefined && (typeof value.command.occurredAt !== "string" || value.command.occurredAt.length > 40 || !Number.isFinite(Date.parse(value.command.occurredAt)))) || Object.keys(value.command).some((key) => !["id", "type", "payload", "expectedProblemKey", "expectedSessionId", "occurredAt"].includes(key))) throw new Error("Invalid command envelope.");
   } else if (value.command !== undefined || !["open", "memory", "ping"].includes(value.action as string)) throw new Error("Unsupported integration action.");

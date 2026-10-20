@@ -1,0 +1,10 @@
+{
+  "name": "A. Watermelon",
+  "url": "https://codeforces.com/contest/4/problem/A",
+  "srcPath": "/fixture/practice/watermelon.cpp",
+  "group": "Codeforces",
+  "interactive": false,
+  "memoryLimit": 256,
+  "timeLimit": 1000,
+  "tests": [{ "id": "fixture", "input": "8\n", "output": "YES\n" }]
+}

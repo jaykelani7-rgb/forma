@@ -6,7 +6,9 @@ export type LearningOutcome = "independent" | "hint" | "editorial" | "unsolved";
 export type ReflectionDifficulty = "approach" | "coding" | "edges" | "complexity" | "debugging";
 export type Mistake = "statement" | "approach" | "invariant" | "edges" | "indexing" | "numeric" | "complexity" | "implementation" | "other";
 export type CommandPayloads = {
-  attach: { url: string; title?: string; fileUri?: string; workspaceId?: string; source?: "manual" | "cph"; adapterVersion?: string };
+  attach: { url: string; title?: string; fileUri?: string; workspaceId?: string; clientId?: string; source?: "manual" | "cph" | "browser"; adapterVersion?: string; activate?: boolean; replace?: boolean };
+  "forget-binding": { fileUri: string; bindingId?: string; clientId?: string; workspaceId?: string };
+  "rename-binding": { fileUri: string; newFileUri: string; bindingId?: string; clientId?: string; workspaceId?: string };
   start: { durationMinutes?: number };
   pause: Record<string, never>;
   resume: Record<string, never>;
@@ -62,11 +64,22 @@ export function parseCommand(input: unknown, now = Date.now()): CompanionCommand
   const p = input.payload;
   switch (input.type) {
     case "attach": {
-      fields(p, ["url", "title", "fileUri", "workspaceId", "source", "adapterVersion"]);
+      fields(p, ["url", "title", "fileUri", "workspaceId", "clientId", "source", "adapterVersion", "activate", "replace"]);
       if (!string(p.url, 2000, 1)) return fail("Attach requires a Codeforces URL.");
       optionalText(p, "title", 240); optionalText(p, "fileUri", 4096); optionalText(p, "workspaceId", 200); optionalText(p, "adapterVersion", 100);
-      if (p.source !== undefined && !choices(p.source, ["manual", "cph"])) return fail("Invalid problem source.");
+      optionalText(p, "clientId", 100);
+      for (const key of ["activate", "replace"]) if (p[key] !== undefined && typeof p[key] !== "boolean") return fail(`Invalid ${key}.`);
+      if (p.source !== undefined && !choices(p.source, ["manual", "cph", "browser"])) return fail("Invalid problem source.");
       if (p.fileUri !== undefined) { try { const u = new URL(p.fileUri as string); if (u.protocol !== "file:" || (u.hostname && u.hostname !== "localhost") || u.search || u.hash) return fail("Only a local solution file URI is supported."); } catch { return fail("Invalid local solution file URI."); } }
+      break;
+    }
+    case "forget-binding": case "rename-binding": {
+      fields(p, ["fileUri", "bindingId", "clientId", "workspaceId", ...(input.type === "rename-binding" ? ["newFileUri"] : [])]);
+      for (const key of input.type === "rename-binding" ? ["fileUri", "newFileUri"] : ["fileUri"]) {
+        if (!string(p[key], 4096, 1)) return fail("Invalid solution file.");
+        try { const u = new URL(p[key] as string); if (u.protocol !== "file:" || (u.hostname && u.hostname !== "localhost") || u.search || u.hash) return fail("Only local solution files are supported."); } catch { return fail("Invalid solution file."); }
+      }
+      optionalText(p, "clientId", 100); optionalText(p, "workspaceId", 200); optionalText(p, "bindingId", 90);
       break;
     }
     case "start":

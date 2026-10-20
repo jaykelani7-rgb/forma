@@ -14,6 +14,7 @@ parentPort!.on('message', (request: {id:number;method:string;args:unknown[]}) =>
     switch (request.method) {
       case 'snapshot': value=store.snapshot(); break;
       case 'command': value=store.command(a[0],String(a[1]??'desktop'),now); break;
+      case 'selectBinding': value=store.selectBinding(String(a[0]),String(a[1]),now); break;
       case 'preferences': value=store.preferences(); break;
       case 'setPreferences': value=store.setPreferences(a[0]); break;
       case 'pause': value=store.pauseForLifecycle(String(a[0])); break;

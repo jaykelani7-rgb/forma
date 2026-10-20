@@ -8,7 +8,7 @@ import { revisitItems } from "../../../src/lib/practice-state";
 import type { SubmissionInput } from "../../../src/lib/codeforces-types";
 
 export interface CompanionThought { id: string; problemId: string; text: string; createdAt: string }
-export interface CompanionBinding { id: string; problemId: string; identity: string; fileUri: string; confirmedAt: string; workspaceId?: string; source?: "manual" | "cph"; adapterVersion?: string }
+export interface CompanionBinding { id: string; problemId: string; identity: string; fileUri: string; confirmedAt: string; workspaceId?: string; clientId?: string; source?: "manual" | "cph" | "browser"; adapterVersion?: string }
 export interface CompanionSubmission { id: number; handle: string; identity: string; verdict: string | null; submittedAt: string; observedAt: string; sessionId?: string }
 export interface CompanionState {
   version: 1;
@@ -59,16 +59,26 @@ export function applyCompanionCommand(data: Data, state: CompanionState, input: 
       const identity = normalizeCodeforcesIdentity(command.payload.url);
       // Manual attach accepts URLs only, never a title, guessed number or arbitrary link.
       if (!identity || !/^https?:\/\//i.test(command.payload.url)) throw new Error("Attach a supported Codeforces problem URL.");
-      if (data.session && canonicalProblemIdentity(currentProblem(data, { ...state, problemId: data.session.problemId })) !== identity.key) throw new Error("Finish the open session before switching problems.");
+      const activate = command.payload.activate !== false;
+      if (activate && data.session && canonicalProblemIdentity(currentProblem(data, { ...state, problemId: data.session.problemId })) !== identity.key) throw new Error("Finish the open session before switching problems.");
+      const previous = state.bindings.find((b) => b.fileUri === command.payload.fileUri && (!b.clientId || b.clientId === command.payload.clientId));
+      if (previous && command.payload.source === "cph" && !command.payload.replace && (previous.identity !== identity.key || previous.source === "manual" || previous.source === "browser")) throw new Error("This file already has a confirmed association. Resolve it explicitly before using CPH metadata.");
       const candidates = data.problems.filter((p) => canonicalProblemIdentity(p) === identity.key && (!p.cfHandle || p.cfHandle.toLowerCase() === state.handle?.toLowerCase()));
       const existing = (data.session ? candidates.find((p) => p.id === data.session!.problemId) : undefined) ?? candidates.find((p) => !p.cfHandle) ?? candidates[0];
       const problem: Problem = existing ?? { id: `companion:${command.id}`, title: command.payload.title?.trim() || `Codeforces ${identity.code}`, platform: "Codeforces", url: identity.url, problemCode: identity.code, tags: [], rating: null, createdAt: stamp, reviewAt: null, reviewCount: 0 };
       const same = state.problemId === problem.id;
       const sameFile = !command.payload.fileUri || state.bindings.some((b) => b.problemId === problem.id && b.fileUri === command.payload.fileUri);
-      const binding: CompanionBinding | null = command.payload.fileUri ? { id: command.id, problemId: problem.id, identity: identity.key, fileUri: command.payload.fileUri, confirmedAt: stamp, ...(command.payload.workspaceId ? { workspaceId: command.payload.workspaceId } : {}), ...(command.payload.source ? { source: command.payload.source } : {}), ...(command.payload.adapterVersion ? { adapterVersion: command.payload.adapterVersion } : {}) } : null;
-      const bindings = binding ? [...state.bindings.filter((b) => b.fileUri !== binding.fileUri), binding] : state.bindings;
+      const binding: CompanionBinding | null = command.payload.fileUri ? { id: command.id, problemId: problem.id, identity: identity.key, fileUri: command.payload.fileUri, confirmedAt: stamp, ...(command.payload.workspaceId ? { workspaceId: command.payload.workspaceId } : {}), ...(command.payload.clientId ? { clientId: command.payload.clientId } : {}), ...(command.payload.source ? { source: command.payload.source } : {}), ...(command.payload.adapterVersion ? { adapterVersion: command.payload.adapterVersion } : {}) } : null;
+      const bindings = binding ? [...state.bindings.filter((b) => b !== previous), binding] : state.bindings;
       if (bindings.length > 500) throw new Error("This device has reached its 500 solution binding limit. Export your notebook and remove an old binding before attaching another file.");
-      return { data: existing ? data : { ...data, problems: [...data.problems, problem] }, state: { ...state, problemId: problem.id, identity: identity.key, lifecycle: same ? state.lifecycle : "ready", localTests: same && sameFile ? state.localTests : "unknown", platform: same ? state.platform : "unknown", learning: same ? state.learning : "unrecorded", bindings } };
+      return { data: existing ? data : { ...data, problems: [...data.problems, problem] }, state: { ...state, ...(activate ? { problemId: problem.id, identity: identity.key, lifecycle: same ? state.lifecycle : "ready", localTests: same && sameFile ? state.localTests : "unknown", platform: same ? state.platform : "unknown", learning: same ? state.learning : "unrecorded" } : {}), bindings } };
+    }
+    case "forget-binding": case "rename-binding": {
+      const matches = (b: CompanionBinding) => b.fileUri === command.payload.fileUri && (!b.clientId || b.clientId === command.payload.clientId);
+      if (command.payload.bindingId && state.bindings.some(b => matches(b) && b.id !== command.payload.bindingId)) throw new Error("The file association changed. Keep this capture for recovery before retrying.");
+      if (command.type === "rename-binding" && state.bindings.some((b) => b.fileUri === command.payload.newFileUri)) throw new Error("The renamed file already has an association. Resolve it before transferring this binding.");
+      const bindings = command.type === "forget-binding" ? state.bindings.filter((b) => !matches(b)) : state.bindings.map((b) => matches(b) ? { ...b, fileUri: command.payload.newFileUri } : b);
+      return { data, state: { ...state, bindings } };
     }
     case "start": {
       const problem = currentProblem(data, state);
@@ -194,7 +204,7 @@ export function validateCompanionState(input: unknown, data: Data): CompanionSta
   const ids = new Set(data.problems.map((p) => p.id));
   if (state.version !== 1 || !(state.problemId === null || ids.has(state.problemId)) || !(state.identity === null || (typeof state.identity === "string" && /^(contest|gym):\d+:[A-Z]\d*$/.test(state.identity))) || !member(state.lifecycle, ["ready", "working", "paused", "closed"]) || !member(state.localTests, ["unknown", "running", "passed", "failed", "stale"]) || !member(state.platform, ["unknown", "pending", "accepted", "rejected"]) || !member(state.learning, ["unrecorded", "independent", "hint", "editorial", "unsolved"]) || !(state.handle === null || (typeof state.handle === "string" && /^[A-Za-z0-9_.-]{3,24}$/.test(state.handle))) || !(state.checkedAt === null || stamp(state.checkedAt)) || !Array.isArray(state.thoughts) || state.thoughts.length > 1000 || !Array.isArray(state.bindings) || state.bindings.length > 500 || !Array.isArray(state.submissions) || state.submissions.length > 1000) throw new Error("Invalid companion state fields.");
   for (const thought of state.thoughts) if (!thought || typeof thought.id !== "string" || !ids.has(thought.problemId) || typeof thought.text !== "string" || thought.text.length > 10000 || !stamp(thought.createdAt)) throw new Error("Invalid saved thought.");
-  for (const binding of state.bindings) { if (!binding || typeof binding.id !== "string" || !ids.has(binding.problemId) || canonicalProblemIdentity(data.problems.find((p) => p.id === binding.problemId)!) !== binding.identity || !stamp(binding.confirmedAt)) throw new Error("Invalid solution binding."); parseCommand({ id: binding.id, type: "attach", payload: { url: data.problems.find((p) => p.id === binding.problemId)!.url, fileUri: binding.fileUri, ...(binding.workspaceId ? { workspaceId: binding.workspaceId } : {}), ...(binding.source ? { source: binding.source } : {}), ...(binding.adapterVersion ? { adapterVersion: binding.adapterVersion } : {}) } }); }
+  for (const binding of state.bindings) { if (!binding || typeof binding.id !== "string" || !ids.has(binding.problemId) || canonicalProblemIdentity(data.problems.find((p) => p.id === binding.problemId)!) !== binding.identity || !stamp(binding.confirmedAt)) throw new Error("Invalid solution binding."); parseCommand({ id: binding.id, type: "attach", payload: { url: data.problems.find((p) => p.id === binding.problemId)!.url, fileUri: binding.fileUri, ...(binding.workspaceId ? { workspaceId: binding.workspaceId } : {}), ...(binding.clientId ? { clientId: binding.clientId } : {}), ...(binding.source ? { source: binding.source } : {}), ...(binding.adapterVersion ? { adapterVersion: binding.adapterVersion } : {}) } }); }
   for (const s of state.submissions) if (!s || !Number.isSafeInteger(s.id) || s.id < 1 || typeof s.handle !== "string" || !/^[A-Za-z0-9_.-]{3,24}$/.test(s.handle) || typeof s.identity !== "string" || !/^(contest|gym):\d+:[A-Z]\d*$/.test(s.identity) || !(s.verdict === null || (typeof s.verdict === "string" && s.verdict.length <= 100)) || !stamp(s.submittedAt) || !stamp(s.observedAt)) throw new Error("Invalid platform evidence.");
   for (const s of state.submissions) {
     if (s.sessionId === undefined) continue; // Older local projections predate explicit attribution.

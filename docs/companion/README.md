@@ -17,7 +17,7 @@ The unsigned Apple Silicon app can be prepared with `npm run companion:package`;
 
 ## Practice
 
-Click Fenn or press **Control+Option+F** (⌃+⌥+F). Attach a full Codeforces problem URL, begin a session, and continue using VS Code/CPH normally. Pause whenever you want. Save a thought without creating a learning attempt. Finish and choose Independent, Hint, Editorial or Not solved yet; Later leaves the real session awaiting its reflection. A saved reflection uses the website's learning and revisit rules.
+Click Fenn or press **Control+Option+F** (⌃+⌥+F). Open a solution in paired VS Code, opt in to recognition from CPH, and begin a session when ready. Supported CPH metadata supplies the exact problem without a URL prompt. Pause whenever you want. Save a thought without creating a learning attempt. Finish and choose Independent, Hint, Editorial or Not solved yet; Later leaves the real session awaiting its reflection. A saved reflection uses the website's learning and revisit rules.
 
 Settings lets you add a public Codeforces handle. Checks observe public author/verdict evidence and show freshness. A Codeforces acceptance is distinct from independent learning; no background check silently saves a reflection. No CPH test result is claimed by this version.
 
@@ -29,7 +29,9 @@ Due recall appears as a small offer when you are not actively practising. Memory
 npm run extension:build
 ```
 
-See [VS Code setup](../../apps/vscode-extension/README.md) to launch the local Extension Development Host. In Fenn Settings choose Pair, copy the one-time credential, and run **Forma: Pair with Companion**. Select trusted local folders explicitly. Optional CPH metadata detection is off until enabled. The pairing credential is OS-encrypted in the desktop and stored in VS Code SecretStorage, never in a project file. Revoke it from either app.
+See [VS Code setup](../../apps/vscode-extension/README.md) to launch the local Extension Development Host. In Fenn Settings choose Pair, copy the one-time credential, and run **Forma: Pair with Companion**. Select trusted local folders explicitly. Choose “Recognise problems from CPH” explicitly; it remains off until enabled. The pairing credential is OS-encrypted in the desktop and stored in VS Code SecretStorage, never in a project file. Revoke it from either app.
+
+See [automatic recognition and optional Chrome capture](automatic-recognition.md) for the normal workflow, safe switching, binding recovery and user-level Native Messaging installation.
 
 ## Data and continuity
 
