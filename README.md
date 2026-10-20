@@ -4,6 +4,8 @@ A daily competitive-programming notebook with a clean light appearance and black
 
 ## Run locally
 
+Forma Companion's local desktop milestone is also available: `npm run companion:dev`. It adds Fenn, SQLite-backed practice/reflections and a paired VS Code extension while keeping this website independently usable. Desktop account sync is pending; see [companion setup and current scope](docs/companion/README.md).
+
 Requires Node.js 22 or later. CI uses Node.js 22.
 
 ```sh
