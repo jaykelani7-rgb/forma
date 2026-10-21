@@ -3,9 +3,42 @@
   "productName": "Forma Companion",
   "electronVersion": "44.9.0",
   "asar": true,
-  "directories": { "output": "../dist/companion", "buildResources": "../packages/pet-ui/assets" },
-  "files": ["main.cjs", "database-worker.cjs", "preload.cjs", "renderer/**/*", "assets/**/*", "package.json"],
-  "mac": { "icon": "fenn.icns", "target": [{ "target": "dir", "arch": ["arm64"] }], "category": "public.app-category.education", "identity": null },
-  "win": { "target": ["dir"] },
-  "linux": { "target": ["dir"] }
+  "directories": {
+    "output": "../dist/companion",
+    "buildResources": "../packages/pet-ui/assets"
+  },
+  "files": [
+    "main.cjs",
+    "database-worker.cjs",
+    "preload.cjs",
+    "renderer/**/*",
+    "assets/**/*",
+    "package.json"
+  ],
+  "mac": {
+    "icon": "fenn.icns",
+    "target": [
+      {
+        "target": "dir",
+        "arch": [
+          "arm64"
+        ]
+      }
+    ],
+    "category": "public.app-category.education",
+    "identity": null,
+    "extendInfo": {
+      "NSMicrophoneUsageDescription": "Record a voice question only when you choose the microphone. Review its transcript before sending to Forma Tutor."
+    }
+  },
+  "win": {
+    "target": [
+      "dir"
+    ]
+  },
+  "linux": {
+    "target": [
+      "dir"
+    ]
+  }
 }

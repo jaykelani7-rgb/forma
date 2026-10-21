@@ -103,7 +103,7 @@ test('changed verdicts append validated small batches while prior evidence and l
 });
 test('an older desktop cannot overwrite a newer SQLite schema version',()=>{
   const folder=mkdtempSync(join(tmpdir(),'forma-newer-'));const path=join(folder,'notebook.sqlite');
-  const store=new CompanionStore(path);store.db.exec('PRAGMA user_version=3');store.close();
+  const store=new CompanionStore(path);store.db.exec('PRAGMA user_version=4');store.close();
   try{assert.throws(()=>new CompanionStore(path),/newer Forma Companion/);}finally{rmSync(folder,{recursive:true,force:true});}
 });
 test('version-one notebooks migrate without dropping bindings, thoughts, receipts or outbox captures',()=>{
@@ -115,6 +115,6 @@ test('version-one notebooks migrate without dropping bindings, thoughts, receipt
     const before=store.snapshot();const receipts=store.db.prepare('SELECT * FROM applied_commands').all();const outbox=store.db.prepare('SELECT * FROM outbox').all();
     store.db.exec('PRAGMA user_version=1');store.close();store=new CompanionStore(path);
     assert.deepEqual(store.snapshot(),before);assert.deepEqual(store.db.prepare('SELECT * FROM applied_commands').all(),receipts);assert.deepEqual(store.db.prepare('SELECT * FROM outbox').all(),outbox);
-    assert.equal(store.db.prepare('PRAGMA user_version').get()!.user_version,2);
+    assert.equal(store.db.prepare('PRAGMA user_version').get()!.user_version,3);
   }finally{store.close();rmSync(folder,{recursive:true,force:true});}
 });

@@ -9,6 +9,8 @@ import { CPH_EXTENSION_ID, SUPPORTED_CPH_VERSIONS, cphMetadataPath, pathWithinFo
 import { BoundedJsonLines, defaultCompanionEndpoint, encodeTransportMessage, parseTransportResponse, type TransportCommand, type TransportRequest, type TransportResponse } from "../../../packages/integrations/protocol";
 import { RecognitionGeneration, type RecognisedBinding, type EditorContext, type BrowserDelivery } from "../../../packages/integrations/recognition";
 import { enqueueCommand, restoreQueue, retryCommand, type QueuedCommand } from "../../../packages/integrations/queue";
+import { collectExplicitCode, sameCodeSource, type CodeSourceFence } from "../../../packages/integrations/tutor-code";
+import { companionConnectionError } from "../../../packages/integrations/connection-error";
 
 const SECRET = "forma-companion.pairing.v1", QUEUE = "forma-companion.queue.v1", FOLDERS = "forma-companion.allowed-folders.v1", BINDINGS = "forma-companion.bindings.v1";
 type Binding = RecognisedBinding & { id?: string; key: string; fileUri: string; sessionId?: string };
@@ -28,7 +30,7 @@ function send(request: TransportRequest, signal?: AbortSignal): Promise<Transpor
     socket.setTimeout(request.recognition?.reason === "poll" ? 25000 : 5000, () => finish(new Error("Companion did not acknowledge this capture.")));
     socket.on("connect", () => { try { socket.write(encodeTransportMessage(request)); } catch (error) { finish(error as Error); } });
     socket.on("data", (chunk: Buffer) => { try { const batch = lines.push(chunk); if (batch.length) finish(undefined, parseTransportResponse(batch[0], request.id)); } catch (error) { finish(error as Error); } });
-    socket.on("error", error => finish(error)); socket.on("end", () => finish(new Error("Companion closed before acknowledging.")));
+    socket.on("error", error => finish(companionConnectionError(error))); socket.on("end", () => finish(new Error("Companion closed before acknowledging.")));
   });
 }
 
@@ -51,6 +53,8 @@ export async function activate(context: vscode.ExtensionContext) {
   let registeredEpoch: unknown = null;
   let observing: EditorContext | null = null, flushing = false, queueTail = Promise.resolve();
   let publishing: Promise<unknown> = Promise.resolve();
+  let testTutorChoice: { mode: "selection" | "file" | "cancel"; afterChoice?: () => Promise<void> } | undefined;
+  let testCommandError: string | null = null;
   let pollAbort: AbortController | undefined, observationAbort = new AbortController();
   const local = () => !disposed && !vscode.env.remoteName && vscode.workspace.isTrusted;
   const enabled = () => vscode.workspace.getConfiguration("formaCompanion").get<boolean>("cphMetadataEnabled", false);
@@ -151,6 +155,42 @@ export async function activate(context: vscode.ExtensionContext) {
     await enqueue({ id, type, payload, expectedProblemKey: target.key, ...(type !== "start" && target.sessionId ? { expectedSessionId: target.sessionId } : {}) }, target);
     if (timerControl && queue.some(e => e.command.id === id)) throw new Error("The session change is waiting for acknowledgement. Reconnect and retry explicitly before continuing.");
     if (type === "start" && !queue.some(e => e.command.id === id)) { bindings[target.fileUri].sessionId = `companion:${id}`; await saveBindings(); }
+  }
+  async function askSelectedCode() {
+    const uri = await selected(), editor = vscode.window.activeTextEditor;
+    if (!editor || editor.document.uri.toString() !== uri.toString()) throw new Error("The editor changed. Choose the code again.");
+    const fileUri = uri.toString(), binding = bindings[fileUri];
+    if (!binding) throw new Error("Associate this solution with a Codeforces problem before sharing code.");
+    await credential();
+    const fence: CodeSourceFence = { fileUri, identity: binding.key, bindingId: binding.id ?? binding.url, generation: activeGeneration, version: editor.document.version };
+    const current = (): CodeSourceFence | null => {
+      const active = vscode.window.activeTextEditor, linked = bindings[fileUri];
+      return local() && paired && active === editor && active.document.uri.toString() === fileUri && linked ? { fileUri, identity: linked.key, bindingId: linked.id ?? linked.url, generation: activeGeneration, version: active.document.version } : null;
+    };
+    const selection = editor.selection;
+    const choices = [
+      ...(!selection.isEmpty ? [{ label: "Selected code", detail: `Lines ${selection.start.line + 1}–${Math.max(selection.start.line + 1, selection.end.line + (selection.end.character ? 1 : 0))}`, selected: true }] : []),
+      { label: "Current file", detail: "Up to 24,000 characters; choose a selection for a smaller snapshot.", selected: false },
+    ];
+    // Only VS Code's isolated extension-test host may supply a deterministic UI choice.
+    const fixtureChoice = context.extensionMode === vscode.ExtensionMode.Test ? testTutorChoice : undefined;
+    testTutorChoice = undefined;
+    if (fixtureChoice?.afterChoice) await fixtureChoice.afterChoice();
+    const choice = fixtureChoice ? fixtureChoice.mode === "cancel" ? undefined : choices.find(item => item.selected === (fixtureChoice.mode === "selection")) : await vscode.window.showQuickPick(choices, { title: `Ask Fenn · ${binding.title || binding.key} · ${path.basename(uri.fsPath)}`, placeHolder: "Choose code to review locally in Fenn. Inspect it and press Send there to share with your configured AI provider.", ignoreFocusOut: true });
+    if (!choice) return;
+    if (!sameCodeSource(fence, current())) throw new Error("The editor, source, or problem changed. Choose the code again.");
+    const size = choice.selected ? editor.document.offsetAt(selection.end) - editor.document.offsetAt(selection.start) : editor.document.offsetAt(editor.document.lineAt(editor.document.lineCount - 1).range.end);
+    if (size > 24000) throw new Error("This code exceeds 24,000 characters. Select a smaller relevant section.");
+    const shared = await collectExplicitCode({ fence, current, permitted: () => permitted(fileUri), credential, id: randomUUID(), workspaceId, clientId,
+      read: () => ({ text: editor.document.getText(choice.selected ? selection : undefined), startLine: choice.selected ? selection.start.line + 1 : 1, endLine: choice.selected ? Math.max(selection.start.line + 1, selection.end.line + (selection.end.character ? 1 : 0)) : editor.document.lineCount, language: editor.document.languageId, filename: path.basename(uri.fsPath) }),
+    });
+    // No offline source queue: an uncertain acknowledgement requires another explicit share.
+    await permitted(fileUri);
+    const finalCredential = await credential();
+    if (!sameCodeSource(fence, current()) || finalCredential !== shared.credential) throw new Error("Sharing permission or source changed. Choose the code again.");
+    const response = await send({ version: 1, id: shared.code.id, credential: shared.credential, tutorCode: shared.code });
+    if (!response.ok) throw new Error(response.error);
+    void vscode.window.showInformationMessage("Code snapshot saved locally in Fenn. Inspect Context included and press Send there to use your AI provider.");
   }
   async function publish(input: EditorContext, signal = observationAbort.signal) {
     const run = publishing.then(async () => {
@@ -259,8 +299,8 @@ export async function activate(context: vscode.ExtensionContext) {
     if (!choice) return;
     await withdraw(); allowed = choice.map(item => item.folder.uri.fsPath); await context.workspaceState.update(FOLDERS, allowed); await watchActive();
   }
-  function register(name: string, run: () => unknown) { context.subscriptions.push(vscode.commands.registerCommand(`formaCompanion.${name}`, async () => { try { await run(); } catch (error) { void vscode.window.showErrorMessage(error instanceof Error ? error.message : "Forma could not complete this action."); } })); }
-  register("setup", async () => { const choice = await vscode.window.showQuickPick(["Open Fenn", "Recognise problems from CPH", "Select allowed folders", "Advanced: Attach Codeforces Problem", "Forget this file’s association"], { title: `Forma · ${connection}`, ignoreFocusOut: true }); if (choice === "Open Fenn") await action("open"); else if (choice === "Recognise problems from CPH") await consent(); else if (choice === "Select allowed folders") await selectFolders(); else if (choice === "Advanced: Attach Codeforces Problem") await vscode.commands.executeCommand("formaCompanion.attachProblem"); else if (choice) await vscode.commands.executeCommand("formaCompanion.forget"); });
+  function register(name: string, run: () => unknown) { context.subscriptions.push(vscode.commands.registerCommand(`formaCompanion.${name}`, async () => { try { testCommandError = null; await run(); } catch (error) { const message = error instanceof Error ? error.message : "Forma could not complete this action."; if (context.extensionMode === vscode.ExtensionMode.Test) testCommandError = message; void vscode.window.showErrorMessage(message); } })); }
+  register("setup", async () => { const choice = await vscode.window.showQuickPick(["Open Fenn", "Ask about selected code", "Recognise problems from CPH", "Select allowed folders", "Advanced: Attach Codeforces Problem", "Forget this file’s association"], { title: `Forma · ${connection}`, ignoreFocusOut: true }); if (choice === "Open Fenn") await action("open"); else if (choice === "Ask about selected code") await askSelectedCode(); else if (choice === "Recognise problems from CPH") await consent(); else if (choice === "Select allowed folders") await selectFolders(); else if (choice === "Advanced: Attach Codeforces Problem") await vscode.commands.executeCommand("formaCompanion.attachProblem"); else if (choice) await vscode.commands.executeCommand("formaCompanion.forget"); });
   register("recognition", consent);
   register("pair", async () => {
     requireLocal(); const token = await vscode.window.showInputBox({ title: "Pair Forma Companion", prompt: "Paste the pairing credential from Fenn settings", password: true, ignoreFocusOut: true, validateInput: value => /^[A-Za-z0-9_-]{32,256}$/.test(value.trim()) ? undefined : "Use the pairing credential shown by Fenn." });
@@ -295,6 +335,7 @@ export async function activate(context: vscode.ExtensionContext) {
     ignored.delete(uri.toString()); await context.workspaceState.update("forma-companion.ignored-files.v1", [...ignored]); await watchActive();
   });
   register("open", () => action("open"));
+  register("askSelectedCode", askSelectedCode);
   register("memory", async () => { const target = await frozenTarget(); const host = await action("ping"); if (host.identity !== target.key) throw new Error("Switch to this file’s problem in Fenn first."); return action("memory"); });
   register("saveThought", async () => { const target = await frozenTarget(); const text = await vscode.window.showInputBox({ title: "Save Thought", prompt: "An observation for this problem", ignoreFocusOut: true, validateInput: value => value.trim() && value.length <= 10000 ? undefined : "Write up to 10,000 characters." }); if (text) await capture("thought", { text }, target); });
   register("start", () => capture("start")); register("pause", () => capture("pause")); register("resume", () => capture("resume"));
@@ -332,6 +373,8 @@ export async function activate(context: vscode.ExtensionContext) {
     seed: async (token: string, folders: string[]) => { await context.secrets.store(SECRET, token); paired = true; allowed = folders; await context.workspaceState.update(FOLDERS, folders); await vscode.workspace.getConfiguration("formaCompanion").update("cphMetadataEnabled", true, vscode.ConfigurationTarget.Global); await watchActive(); },
     state: () => ({ bindings: structuredClone(bindings), queue: structuredClone(queue), observing: observing && { ...observing }, connection }),
     reconcile: () => watchActive(),
+    setTutorCodeChoice: (mode: "selection" | "file" | "cancel", afterChoice?: () => Promise<void>) => { testTutorChoice = { mode, afterChoice }; },
+    tutorCommandError: () => testCommandError,
     capture, frozenTarget,
   };
 }

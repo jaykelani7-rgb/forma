@@ -15,6 +15,10 @@ npm run companion:dev
 
 The unsigned Apple Silicon app can be prepared with `npm run companion:package`; it is placed in `dist/companion/mac-arm64/Forma Companion.app`. There is no installer, updater or notarization in this milestone. Nothing is published.
 
+## Forma Tutor
+
+**Ask Fenn** opens optional local conversations with inspectable problem/statement/code context, streamed text, progressive hints, approved learning notes and recorded voice questions. Add your own key in Tutor Setup when ready; practice stays usable without it. See [Tutor setup, privacy, voice and walkthrough](tutor.md).
+
 ## Practice
 
 Click Fenn or press **Control+Option+F** (⌃+⌥+F). Open a solution in paired VS Code, opt in to recognition from CPH, and begin a session when ready. Supported CPH metadata supplies the exact problem without a URL prompt. Pause whenever you want. Save a thought without creating a learning attempt. Finish and choose Independent, Hint, Editorial or Not solved yet; Later leaves the real session awaiting its reflection. A saved reflection uses the website's learning and revisit rules.

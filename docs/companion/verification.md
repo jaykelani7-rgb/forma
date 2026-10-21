@@ -1,3 +1,36 @@
+# Companion recovery verification — 21 October 2026
+
+The installed companion was restarted and its real VS Code connection was confirmed in settings. Both local sockets were restored. VS Code now explains missing/refused endpoints with “Start Forma Companion, then retry this action” while preserving pairing, permission and other errors. Desktop shutdown now completes even if startup failed before Tutor initialization, avoiding a hidden process retaining the single-instance lock.
+
+Before committing: **506 unit tests passed** with `TZ=UTC`, lint, generated route types, root/extension TypeScript, production web build, Chrome/native-host build and five Tutor quality fixtures passed. The sandbox initially denied temporary test sockets; the complete suite passed with local socket access. Companion/extension builds and the isolated native companion regression suite also passed after the recovery fixes. Existing Tutor browser/sharing/native verification below remains applicable; no live model or speech validation is claimed.
+
+The updated unsigned companion is running locally. The updated VS Code VSIX is installed; an existing VS Code window needs a reload to activate the new extension bundle. “Open Companion” still contacts an already running desktop; automatic launching/login startup is not implemented.
+
+---
+
+# Forma Tutor verification — 20 October 2026
+
+| Check | Result |
+| --- | --- |
+| `TZ=UTC npm test` | **504 passed**, zero skipped. Existing recognition/Today/verdict/learning/transport tests remain; new tests cover Tutor schema migration, bounded/missing/mismatched context, source hashes/permissions/races, explicit notes, Stop/Retry/restart, visible exposure, approved original-target notes, contest mode, export/delete/retention, provider SSE/errors/timeouts/concurrency, voice cancellation and credential configuration. |
+| `npm run lint`; root and VS Code extension strict TypeScript | Passed. |
+| Web, companion, VS Code and Chrome/native-host builds | Passed. Default text/audio model IDs are configurable; the real provider adapter uses fixed OpenAI HTTPS endpoints, not a mock fallback. |
+| `CI=1 npm run test:browser -- --output=/tmp/forma-tutor-full-browser` | **288 passed**, two existing intentional skips. Includes eight compiled Tutor renderer cases with explicitly mocked bridge/provider/audio, plus two scoped statement DOM fixtures across desktop/mobile. An earlier simultaneous test run collided in Playwright's shared trace folder; an isolated full rerun passed without retry failures. No application behavior or check was disabled. Generated existing website screenshots were restored. |
+| `npm run test:share-links` | **24 passed** using its isolated fixture service; nothing published to a real account. |
+| `npm run tutor:verify` | Real Electron, SQLite worker and paired local socket passed: missing-key setup, statement storage, inspected code snapshot, frozen draft after another problem, zero implicit provider turns, unchanged practice selection, contest mode, restart/delete and zero renderer errors. A fake unused key exercised actual OS encryption, renderer-snapshot exclusion and removal; no model call or real microphone permission was made. Light/Ink screenshots and report under `dist/tutor-verification/` were inspected. |
+| `npm run companion:verify` | Existing real native durability, Today, pairing/revocation, recognition, own/generated file switching, focus and draft-target regressions passed with zero renderer errors. |
+| `npm run extension:verify` | Actual isolated macOS VS Code Extension Development Host, installed supported CPH **2026.10.1792170155**, authenticated socket and SQLite passed. The registered Ask About Selected Code action froze selected line/language/workspace/hash, staged exactly one preview and zero provider turns; cancel, edit and editor-switch races were rejected. Earlier recognition/browser delivery checks remained passing. Only ExtensionMode.Test can supply the deterministic picker fixture. |
+| Local artifacts | Unsigned arm64 companion app packaged with the installed Electron runtime and microphone purpose string. VS Code **0.3.0** VSIX built/installed locally; reload VS Code to activate it. Chrome **0.2.0** unpacked/native host built; installed Chrome reload/capture remains a user action. |
+| Quality cases | `npm run tutor:evaluate -- --fixtures` validates five checked-in teaching rubrics only: small-hint disclosure, correct approach, missing statement, false counterexample and explicit full explanation. No live responses were generated and no quality success claim is made. The explicit opt-in charged live runner records real outputs/usage/heuristic failures and requires human review. CI validates fixtures without model calls. |
+
+The user chose **“Build the setup; I’ll configure it later.”** No real provider key was configured for generation; live text quality, actual microphone capture/transcription/speech and installed Chrome statement capture remain **not run**, not silently passed or simulated. Text/voice model plumbing is covered with injected transport/device tests; native tests cover actual host/storage/setup/preview boundaries. No user practice source was uploaded, executed, compiled or submitted. No account sync, public proxy, model tools or automatic learning outcome was introduced.
+
+Important fixed regressions include source changes during explicit collection, late/cancelled voice results, stale stream reads, missing-context Retry staying frozen, note approval surviving a lost acknowledgement without duplicate writes, and combined context over 64k respecting the shared 90k budget. Assistance is acknowledged only after visible rendering, not just provider delivery. Old source answers remain labelled by their captured filename/line/time.
+
+[Run/setup/privacy/voice/retention and walkthrough](tutor.md). Earlier sections below are historical verification reports.
+
+---
+
 # Durable verdict follow-up and Today — 20 October 2026
 
 | Check | Result |

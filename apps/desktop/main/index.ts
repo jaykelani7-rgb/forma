@@ -1,7 +1,11 @@
-import { app, BrowserWindow, ipcMain, screen, Tray, Menu, nativeImage, globalShortcut, shell, dialog, safeStorage, powerMonitor, nativeTheme } from "electron";
+import { app, BrowserWindow, ipcMain, screen, Tray, Menu, nativeImage, globalShortcut, shell, dialog, safeStorage, powerMonitor, nativeTheme, systemPreferences } from "electron";
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { randomBytes, randomUUID } from "node:crypto";
+import { TutorConfiguration } from "./tutor-config";
+import { OpenAITutorProvider, speechReadyText } from "./tutor-provider";
+import { TutorService } from "./tutor-service";
+import type { SharedCode, TutorConversation, TutorSendInput, TutorStoredView, TutorTurn } from "../../../packages/tutor/types";
 import { AttentionPolicy } from "./attention";
 import { companionToday } from "../../../packages/core/src/companion-today";
 import { localDate } from "../../../src/lib/model";
@@ -36,20 +40,78 @@ let connected=false;
 const attention=new AttentionPolicy();
 let plannerDay="";
 let expanded=false;
-let panelRequest:{id:number;panel:'home'|'memory'|'today'}|undefined;
+let panelRequest:{id:number;panel:'home'|'memory'|'today'|'tutor';conversationId?:string}|undefined;
 let quitting=false;
 let checkPromise:Promise<void>|null=null;
 let codeforces:{checking:boolean;checkedAt:string|null;error:string|null}={checking:false,checkedAt:null,error:null};
 let codeforcesHandle:string|null=null;
 let lastCheck=0;
 let lastTick=Date.now();
+let tutorConfiguration:TutorConfiguration;
+let tutorProvider:OpenAITutorProvider;
+let tutorService:TutorService;
+let microphoneLeaseUntil=0;
+let voiceController:AbortController|null=null;
+function cancelVoice(){microphoneLeaseUntil=0;voiceController?.abort();voiceController=null;}
+async function openTutor(input:unknown={}){
+  let choice=input;
+  if(input&&typeof input==='object'&&!Object.keys(input).length){const current=await database.call<LocalSnapshot>('snapshot');if(!current.state.problemId){const prior=(await database.call<TutorStoredView>('tutor-view')).conversations[0];if(prior)choice={conversationId:prior.id};}}
+  const conversation=await database.call<TutorConversation>('tutor-open',choice);
+  panelRequest={id:(panelRequest?.id??0)+1,panel:'tutor',conversationId:conversation.id};expanded=true;
+  const b=window.getBounds(),area=screen.getDisplayMatching(b).workArea,size={width:Math.min(560,area.width),height:Math.min(820,area.height)};
+  const at=clampPosition({x:b.x+b.width-size.width,y:b.y+b.height-size.height},size,area);
+  window.setIgnoreMouseEvents(false);window.setBounds({...at,...size});window.showInactive();await broadcast();return conversation;
+}
+async function tutorUi(action:string,payload:unknown){
+  switch(action){
+    case 'tutor-show':return openTutor(payload??{});
+    case 'tutor-view':{const stored=await database.call<TutorStoredView>('tutor-view');return {...stored,provider:tutorProvider.status(),activeRequestId:tutorService.activeRequestId};}
+    case 'tutor-open':return database.call('tutor-open',payload??{});
+    case 'tutor-turns':case 'tutor-context':case 'tutor-statement':case 'tutor-exposed':case 'tutor-propose':return database.call(action,payload);
+    case 'tutor-code-remove':return database.call(action);
+    case 'tutor-approve':{const result=await database.call(action,payload);await broadcast();return result;}
+    case 'tutor-send':return tutorService.send(payload as TutorSendInput);
+    case 'tutor-stop':if(typeof payload!=='string')throw new Error('Choose a running response.');await tutorService.stop(payload);return null;
+    case 'tutor-settings':{const result=await database.call(action,payload);if((payload as {contestMode?:boolean})?.contestMode){cancelVoice();await tutorService.cancelAll();}return result;}
+    case 'tutor-configure':await tutorService.cancelAll();cancelVoice();tutorConfiguration.update(payload);return tutorProvider.status();
+    case 'tutor-delete':await tutorService.cancelAll();cancelVoice();return database.call(action,payload);
+    case 'tutor-export':{
+      const json=await database.call<string>(action,payload);const choice=await dialog.showSaveDialog(window,{defaultPath:'forma-tutor-conversation.json',filters:[{name:'Tutor conversation',extensions:['json']}]});
+      if(choice.canceled||!choice.filePath)return {saved:false};writeFileSync(choice.filePath,json,{mode:0o600});return {saved:true};
+    }
+    case 'tutor-microphone':{
+      const settings=(await database.call<TutorStoredView>('tutor-view')).settings;if(settings.contestMode)throw new Error('Contest mode disables voice assistance.');
+      if(!tutorProvider.status().configured)throw new Error('Set up your OpenAI API key before voice transcription.');
+      cancelVoice();if(process.platform==='darwin'&&!await systemPreferences.askForMediaAccess('microphone'))throw new Error('Microphone access was denied. Enable it in macOS Privacy settings, or type your question.');
+      microphoneLeaseUntil=Date.now()+15000;return {allowed:true};
+    }
+    case 'tutor-voice-cancel':cancelVoice();return null;
+    case 'tutor-transcribe':{
+      const settings=(await database.call<TutorStoredView>('tutor-view')).settings;if(settings.contestMode)throw new Error('Contest mode disables voice assistance.');
+      if(!payload||typeof payload!=='object'||Object.keys(payload).some(k=>!['bytes','mime'].includes(k)))throw new Error('Invalid voice recording.');
+      const {bytes,mime}=payload as {bytes:Uint8Array;mime:string};if(!(bytes instanceof Uint8Array)||bytes.byteLength>8*1024*1024||typeof mime!=='string')throw new Error('Use a recording smaller than 8 MB.');
+      cancelVoice();const controller=new AbortController();voiceController=controller;
+      try{return {text:await tutorProvider.transcribe(bytes,mime,controller.signal)};}finally{if(voiceController===controller)voiceController=null;}
+    }
+    case 'tutor-speech':{
+      const settings=(await database.call<TutorStoredView>('tutor-view')).settings;if(settings.contestMode||!settings.voiceOutput)throw new Error('Enable spoken replies to hear a completed response.');
+      if(!payload||typeof payload!=='object'||Object.keys(payload).some(k=>!['conversationId','turnId'].includes(k)))throw new Error('Choose a completed response.');
+      const {conversationId,turnId}=payload as {conversationId:string;turnId:string};const turn=(await database.call<TutorTurn[]>('tutor-turns',conversationId)).find(t=>t.id===turnId&&t.status==='completed');
+      if(!turn)throw new Error('Only completed responses can be spoken.');const text=speechReadyText(turn.assistantText);if(!text)throw new Error('This response is best read as text.');
+      cancelVoice();const controller=new AbortController();voiceController=controller;try{return await tutorProvider.speech(text,controller.signal);}finally{if(voiceController===controller)voiceController=null;}
+    }
+    default:throw new Error('Unsupported Tutor action.');
+  }
+}
+
 function platformStatus(state:LocalSnapshot['state']){
   return codeforcesHandle===state.handle?{...codeforces,checkedAt:codeforces.checkedAt??state.checkedAt}:{checking:false,checkedAt:state.checkedAt,error:null};
 }
 const snapshot=async()=>{
   const local=await database.call<LocalSnapshot>('snapshot');
   const slot=attention.view(local.state,recognition?.presentation()??null,!!preferences.snoozedUntil&&Date.parse(preferences.snoozedUntil)>Date.now(),Date.now());
-  return {...local,today:companionToday(local.data),preferences,presentation:{expanded,panelRequest,activeFileUri:recognition?.activeFileUri()??null,recognition:slot.recognition,verdict:slot.verdict},integration:{connected,paired:!!credential,browserEnabled:!!browserCredential,browserSupported:process.platform==='darwin',status:connected?'VS Code connected':credential?'Waiting for VS Code':'Pair VS Code when you’re ready'},codeforces:platformStatus(local.state)};
+  const tutorAssistance=local.data.session?.phase==='reflection'?await database.call('tutor-assistance',{problemId:local.data.session.problemId,sessionId:local.data.session.id}):null;
+  return {...local,tutorAssistance,today:companionToday(local.data),preferences,presentation:{expanded,panelRequest,activeFileUri:recognition?.activeFileUri()??null,recognition:slot.recognition,verdict:slot.verdict},integration:{connected,paired:!!credential,browserEnabled:!!browserCredential,browserSupported:process.platform==='darwin',status:connected?'VS Code connected':credential?'Waiting for VS Code':'Pair VS Code when you’re ready'},codeforces:platformStatus(local.state)};
 };
 async function broadcast() {
   if(!window||window.isDestroyed())return;
@@ -140,6 +202,7 @@ function verifySender(event:Electron.IpcMainInvokeEvent){
   if(event.sender!==window.webContents||event.senderFrame!==window.webContents.mainFrame||event.senderFrame.url.split('?')[0]!==new URL(`file://${join(__dirname,'renderer','index.html')}`).href)throw new Error('Untrusted companion sender.');
 }
 async function ui(action:string,payload:unknown){
+  if(action.startsWith('tutor-'))return tutorUi(action,payload);
   switch(action){
     case 'attention-dismiss':if(typeof payload==='string')attention.dismiss(payload);await broadcast();return null;
     case 'recognition-dismiss':recognition.dismiss(typeof payload==='string'?payload:undefined);return null;
@@ -155,7 +218,7 @@ async function ui(action:string,payload:unknown){
     }
     case 'today':panelRequest={id:(panelRequest?.id??0)+1,panel:'today'};expand(true,false,true);return null;
     case 'expand':expand(typeof payload==='boolean'?payload:!!(payload as {expanded?:boolean})?.expanded);return null;
-    case 'hide':window.hide();return null;
+    case 'hide':cancelVoice();window.hide();return null;
     case 'hitbox':if(typeof payload!=='boolean')throw new Error('Invalid hitbox.');window.setIgnoreMouseEvents(!payload,{forward:true});return null;
     case 'open-external': {
       if(typeof payload!=='string')throw new Error('Invalid link.');
@@ -198,6 +261,9 @@ async function main(){
   const userData=app.getPath('userData');mkdirSync(userData,{recursive:true,mode:0o700});
   database=new DatabaseClient(join(userData,'notebook.sqlite'));
   preferences=await database.call('preferences');
+  tutorConfiguration=new TutorConfiguration(join(userData,'tutor-provider.enc'),{available:secureAvailable,encrypt:v=>safeStorage.encryptString(v),decrypt:v=>safeStorage.decryptString(v)});
+  tutorProvider=new OpenAITutorProvider(()=>tutorConfiguration.get());
+  tutorService=new TutorService({call:(method,...args)=>database.call(method,...args),emit:event=>{if(window&&!window.isDestroyed())window.webContents.send('forma:tutor-event',event);}},tutorProvider);
   await database.call('reconcile');
   recognition=new RecognitionHub({snapshot:()=>database.call<LocalSnapshot>('snapshot'),command:c=>database.call('command',c,'vscode'),select:(file,client)=>database.call('selectBinding',file,client),changed:()=>{void broadcast();}});
   const browserSecret=join(userData,'browser-pairing.enc');
@@ -210,13 +276,14 @@ async function main(){
   window.setVisibleOnAllWorkspaces(true,{visibleOnFullScreen:true});
   window.webContents.setWindowOpenHandler(()=>({action:'deny'}));
   window.webContents.on('will-navigate',event=>event.preventDefault());
-  window.webContents.session.setPermissionRequestHandler((_contents,_permission,callback)=>callback(false));
-  window.webContents.session.setPermissionCheckHandler(()=>false);
+  window.webContents.session.setPermissionRequestHandler((contents,permission,callback,details)=>callback(contents===window.webContents&&permission==='media'&&Date.now()<microphoneLeaseUntil&&'mediaTypes' in details&&details.mediaTypes?.length===1&&details.mediaTypes[0]==='audio'));
+  window.webContents.session.setPermissionCheckHandler((contents,permission,_origin,details)=>contents===window.webContents&&permission==='media'&&Date.now()<microphoneLeaseUntil&&details.mediaType==='audio');
   ipcMain.handle('forma:snapshot',event=>{verifySender(event);return snapshot();});
   ipcMain.handle('forma:command',(event,command)=>{verifySender(event);return applyCommand(command);});
   ipcMain.handle('forma:ui',(event,action,payload)=>{verifySender(event);return ui(action,payload);});
   await window.loadFile(join(__dirname,'renderer','index.html'));
   window.showInactive();
+  window.on('hide',cancelVoice);
   window.on('close',event=>{if(!quitting){event.preventDefault();window.hide();}});
   let moveTimer:ReturnType<typeof setTimeout>;
   window.on('moved',()=>{clearTimeout(moveTimer);moveTimer=setTimeout(()=>{constrain();const b=window.getBounds();void setPreferences({position:{x:b.x+b.width-148,y:b.y+b.height-164}});},400);});
@@ -228,8 +295,8 @@ async function main(){
   tray.setContextMenu(Menu.buildFromTemplate([{label:'Open Fenn',click:show},{label:'Pet only',click:()=>expand(false)},{label:'Hide companion',click:()=>window.hide()},{label:'Snooze for an hour',click:()=>void setPreferences({snoozedUntil:new Date(Date.now()+3600000).toISOString()})},{type:'separator'},{label:'Export notebook…',click:()=>void saveFile('notebook')},{label:'Unsigned development build',enabled:false},{label:'Quit Forma Companion',click:()=>app.quit()}]));
   tray.on('click',show);
   try{registerShortcut(preferences.shortcut);}catch{ /* Tray recovery stays available when the shortcut is occupied. */ }
-  transport=await startTransport({...(developmentData?{endpoint:join(userData,'runtime','companion.sock')}:{}),credential:()=>credential,command:command=>applyCommand(command,'vscode'),recognition:request=>recognition.request(request),action:async action=>{if(action==='open'||action==='memory'){panelRequest={id:(panelRequest?.id??0)+1,panel:action==='memory'?'memory':'home'};show();}return (await database.call<LocalSnapshot>('snapshot')).revision;},context:async()=>{const local=await database.call<LocalSnapshot>('snapshot');return {identity:local.state.identity,sessionId:local.data.session?.id??null,hostEpoch};},connected:value=>{connected=value;void broadcast();}});
-  if(process.platform==='darwin')browserTransport=await startBrowserTransport({endpoint:join(userData,'runtime','browser.sock'),credential:()=>browserCredential,message:m=>recognition.browser(m)});
+  transport=await startTransport({...(developmentData?{endpoint:join(userData,'runtime','companion.sock')}:{}),credential:()=>credential,command:command=>applyCommand(command,'vscode'),tutorCode:async(code:SharedCode)=>{await database.call('tutor-code',code);const local=await database.call<LocalSnapshot>('snapshot');const binding=local.state.bindings.find(b=>b.fileUri===code.fileUri&&b.identity===code.identity&&(!b.clientId||b.clientId===code.clientId));if(!binding)throw new Error('Confirm the shared code association first.');await openTutor({problemId:binding.problemId,workspaceId:code.workspaceId});return {revision:local.revision};},recognition:request=>recognition.request(request),action:async action=>{if(action==='open'||action==='memory'){panelRequest={id:(panelRequest?.id??0)+1,panel:action==='memory'?'memory':'home'};show();}return (await database.call<LocalSnapshot>('snapshot')).revision;},context:async()=>{const local=await database.call<LocalSnapshot>('snapshot');return {identity:local.state.identity,sessionId:local.data.session?.id??null,hostEpoch};},connected:value=>{connected=value;void broadcast();}});
+  if(process.platform==='darwin')browserTransport=await startBrowserTransport({endpoint:join(userData,'runtime','browser.sock'),credential:()=>browserCredential,message:async m=>{if((m as {kind?:string})?.kind==='statement'){await database.call('tutor-statement',(m as {statement:unknown}).statement);return {ok:true,status:'saved'};}return recognition.browser(m);}});
   powerMonitor.on('suspend',()=>void database.call('pause','suspend').then(broadcast));
   powerMonitor.on('lock-screen',()=>void database.call('pause','screen-lock').then(broadcast));
   powerMonitor.on('resume',()=>{lastTick=Date.now();void broadcast();});
@@ -254,6 +321,6 @@ app.on('activate',()=>{if(window)show();});
 app.on('before-quit',event=>{
   if(quitting)return;
   quitting=true;globalShortcut.unregisterAll();transport?.close();browserTransport?.close();recognition?.reset();
-  if(database){event.preventDefault();void database.call('pause','quit').catch(()=>{}).then(()=>database.close()).finally(()=>app.exit());}
+  if(database){event.preventDefault();cancelVoice();void Promise.resolve(tutorService?.dispose()).catch(()=>{}).then(()=>database.call('pause','quit')).catch(()=>{}).then(()=>database.close()).finally(()=>app.exit());}
 });
 if(lock)main().catch(error=>{console.error('Forma Companion startup:',error.message);dialog.showErrorBox('Forma Companion could not start',String(error.message));app.quit();});

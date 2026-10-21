@@ -3,7 +3,7 @@
   "displayName": "Forma Companion",
   "description": "A local, paired connection between VS Code and Forma Companion.",
   "publisher": "forma",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "private": true,
   "engines": {
     "vscode": "^1.95.0"
@@ -53,6 +53,10 @@
       {
         "command": "formaCompanion.open",
         "title": "Forma: Open Companion"
+      },
+      {
+        "command": "formaCompanion.askSelectedCode",
+        "title": "Forma: Ask About Selected Code"
       },
       {
         "command": "formaCompanion.saveThought",

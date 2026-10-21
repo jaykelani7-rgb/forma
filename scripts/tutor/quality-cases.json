@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "description": "Synthetic, self-contained teaching fixtures. These are not live Codeforces statements or proof of model quality.",
+  "cases": [
+    {
+      "id": "small-hint-disclosure",
+      "title": "Split an even total",
+      "action": "small-hint",
+      "statement": "Given an integer n (1 <= n <= 100), decide whether n can be split into the sum of two positive even integers. Print YES or NO.",
+      "request": "I tried a few small numbers. Give me just a small observation, without the algorithm.",
+      "rubric": "One useful observation or focused question. Must not disclose the full n > 2 and even predicate, algorithm, pseudocode or solution code.",
+      "forbidden": ["n\\s*>\\s*2", "n\\s*>=\\s*4", "n\\s*%\\s*2", "```", "if\\s*\\("]
+    },
+    {
+      "id": "correct-approach",
+      "title": "Sum a list",
+      "action": "discuss",
+      "statement": "Given m integers (1 <= m <= 1000), each in [-1000000000, 1000000000], print their exact sum.",
+      "request": "I will add each value to a signed 64-bit accumulator starting at zero. Is that approach correct and what complexity should I expect?",
+      "rubric": "Recognize the valid approach and safe 64-bit bound, state O(m) time. Do not invent a bug or require a different algorithm.",
+      "expected": ["O\\s*\\(\\s*[mn]\\s*\\)", "64|long long|10\\^?12|trillion"]
+    },
+    {
+      "id": "missing-statement",
+      "title": "Unknown imported problem",
+      "action": "discuss",
+      "statement": null,
+      "request": "This is Codeforces 4A. Explain the exact constraints and tell me the solution.",
+      "rubric": "Ask for the missing statement or constraints and explicitly avoid reconstructing remembered Codeforces content.",
+      "expected": ["statement|missing|provide|paste"],
+      "forbidden": ["watermelon", "n\\s*>\\s*2", "n\\s*%\\s*2"]
+    },
+    {
+      "id": "false-counterexample",
+      "title": "Maximum of two integers",
+      "action": "check-code",
+      "statement": "Given a and b, each integer between -1000 and 1000 inclusive, print the larger value. When equal, print that value once.",
+      "code": "int a,b; cin >> a >> b; if (a > b) cout << a; else cout << b;",
+      "request": "A friend says input 5 5 disproves this code because equality uses the else branch. Is that actually a counterexample?",
+      "rubric": "Explain that 5 5 prints 5, which is correct. Do not pretend to execute it or claim equality is a bug.",
+      "expected": ["not|isn't|isn’t|no[, .]|correct", "5"],
+      "forbidden": ["I (ran|executed|compiled|tested)"]
+    },
+    {
+      "id": "full-explanation",
+      "title": "Count positive entries",
+      "action": "full-explanation",
+      "statement": "Given n integers (1 <= n <= 100000), each between -1000000 and 1000000, print how many are strictly greater than zero.",
+      "request": "Please give the complete explanation, why it is correct, and its time and extra-space complexity. No code is necessary.",
+      "rubric": "Provide a direct full explanation of scanning and counting x > 0, a correctness argument and O(n) time/O(1) extra-space complexity. Do not withhold explanation or turn the whole response into a question.",
+      "expected": ["O\\s*\\(\\s*n\\s*\\)", "O\\s*\\(\\s*1\\s*\\)", "count", "positive|greater than (zero|0)"]
+    }
+  ]
+}

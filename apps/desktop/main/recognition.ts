@@ -150,6 +150,7 @@ export class RecognitionHub {
   async afterReflection() { return this.serial(async () => { const c = this.switchTarget; this.switchTarget = null; if (!c) return; const current = this.clients.get(c.instanceId); if (current && current.fileUri === c.fileUri && current.generation === c.generation && this.eligible(current)) await this.select(current, await this.host.snapshot()); }); }
   browser(raw: unknown): Promise<BrowserReply> { return this.serial(async () => {
     const message = parseBrowserMessage(raw); this.expire();
+    if(message.kind === "statement") throw new Error("Use the Tutor statement handler for this capture.");
     if (message.kind === "propose") {
       if (this.proposals.size >= 32) throw new Error("Too many pending browser proposals. Cancel one or wait for expiry.");
       const targets = new Map<string, Client>();

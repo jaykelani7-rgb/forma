@@ -4,17 +4,25 @@ import { normalizeCodeforcesIdentity } from "../core/src/codeforces-identity";
 import { defaultCompanionEndpoint } from "./protocol";
 import { validId } from "./recognition";
 import { BROWSER_ORIGIN } from "./browser-id";
+import { parseStatementInput } from "../tutor/context";
+import type { StatementInput } from "../tutor/types";
 
 export const MAX_NATIVE_BYTES = 64 * 1024;
-export type BrowserMessage = { kind: "propose"; url: string; title: string } | { kind: "confirm"; proposalId: string; targetId: string } | { kind: "status" | "cancel"; proposalId: string };
+export type BrowserMessage = { kind: "propose"; url: string; title: string } | { kind: "confirm"; proposalId: string; targetId: string } | { kind: "status" | "cancel"; proposalId: string } | { kind: "statement"; statement: StatementInput };
 export type BrowserReply = { ok: boolean; error?: string; proposalId?: string; expiresAt?: number; status?: string; targets?: { id: string; label: string }[] };
 export const browserEndpoint = () => join(dirname(defaultCompanionEndpoint()), "browser.sock");
 export function assertBrowserOrigin(origin: string) { if (origin !== BROWSER_ORIGIN) throw new Error("This browser extension is not registered with Forma."); }
 export function parseBrowserMessage(value: unknown): BrowserMessage {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid browser capture.");
+  if (Buffer.byteLength(JSON.stringify(value), "utf8") > MAX_NATIVE_BYTES) throw new Error("Browser capture exceeds 64 KiB.");
   const v = value as Record<string, unknown>;
-  const fields = v.kind === "propose" ? ["kind", "url", "title"] : v.kind === "confirm" ? ["kind", "proposalId", "targetId"] : ["kind", "proposalId"];
+  const fields = v.kind === "statement" ? ["kind", "statement"] : v.kind === "propose" ? ["kind", "url", "title"] : v.kind === "confirm" ? ["kind", "proposalId", "targetId"] : ["kind", "proposalId"];
   if (Object.keys(v).some(k => !fields.includes(k))) throw new Error("Browser capture has no command or filesystem capability.");
+  if (v.kind === "statement") {
+    const statement = parseStatementInput(v.statement);
+    if (statement.source !== "browser") throw new Error("Browser statements must identify their capture source.");
+    return { kind: "statement", statement };
+  }
   if (v.kind === "propose") {
     if (typeof v.url !== "string" || v.url.length > 2000 || !/^https?:\/\//.test(v.url) || typeof v.title !== "string" || v.title.length > 240) throw new Error("Open an exact Codeforces problem page.");
     const identity = normalizeCodeforcesIdentity({ url: v.url });

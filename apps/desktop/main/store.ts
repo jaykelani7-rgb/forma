@@ -4,11 +4,14 @@ import { dirname } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { emptyData, elapsed, validateData, type Data } from "../../../src/lib/model";
 import { decodeBackup, encodeBackup, mergeWorkspaces } from "../../../src/lib/concurrency";
-import { applyCompanionCommand, applySessionFollowup, initialCompanionState, validateCompanionState, type CompanionState } from "../../../packages/core/src/companion";
+import { applyCompanionCommand, applySessionFollowup, initialCompanionState, recordPracticeReflection, validateCompanionState, type CompanionState } from "../../../packages/core/src/companion";
+import { canonicalProblemIdentity } from "../../../packages/core/src/codeforces-identity";
+import type { TutorProposal } from "../../../packages/tutor/types";
 import { parseCommand, parseEvent } from "../../../packages/contracts/src/index";
 import { reconcilePracticePlan } from "../../../src/lib/practice-plan";
 import { expireFollowups } from "../../../packages/core/src/verdict-followup";
 import { defaultPreferences, validatePreferences } from "./preferences";
+import { TutorStore } from './tutor-store';
 
 export interface LocalSnapshot { data: Data; state: CompanionState; revision: number; savedAt: string }
 const MAX_DEVICE_BYTES = 8 * 1024 * 1024;
@@ -17,11 +20,12 @@ const hash = (value: string) => createHash('sha256').update(value).digest('hex')
 /** One instance, in the database worker, owns all notebook writes. */
 export class CompanionStore {
   readonly db: DatabaseSync;
+  readonly tutor: TutorStore;
   constructor(path: string) {
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
     this.db = new DatabaseSync(path);
     const version=Number(this.db.prepare('PRAGMA user_version').get()?.user_version??0);
-    if(version>2){this.db.close();throw new Error('This notebook was written by a newer Forma Companion. Upgrade the app before opening it; the original file is preserved.');}
+    if(version>3){this.db.close();throw new Error('This notebook was written by a newer Forma Companion. Upgrade the app before opening it; the original file is preserved.');}
     if (path !== ':memory:') chmodSync(path, 0o600);
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;
       CREATE TABLE IF NOT EXISTS workspace (id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL, notebook TEXT NOT NULL, device TEXT NOT NULL, saved_at TEXT NOT NULL);
@@ -30,9 +34,9 @@ export class CompanionStore {
       CREATE TABLE IF NOT EXISTS outbox (id TEXT PRIMARY KEY, revision INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'local', created_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS recoveries (id TEXT PRIMARY KEY, notebook TEXT NOT NULL, reason TEXT NOT NULL, created_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS preferences (id TEXT PRIMARY KEY, value TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS sync_checkpoints (id TEXT PRIMARY KEY, value TEXT NOT NULL);
-      PRAGMA user_version=2;`);
+      CREATE TABLE IF NOT EXISTS sync_checkpoints (id TEXT PRIMARY KEY, value TEXT NOT NULL);`);
     this.db.prepare('INSERT OR IGNORE INTO workspace VALUES(1,0,?,?,?)').run(encodeBackup(emptyData()), JSON.stringify(initialCompanionState()), new Date().toISOString());
+    this.tutor=new TutorStore(this.db,this);
   }
   close() { this.db.close(); }
   snapshot(): LocalSnapshot {
@@ -41,6 +45,9 @@ export class CompanionStore {
     return {data, state: validateCompanionState(JSON.parse(String(row.device)),data), revision:Number(row.revision), savedAt:String(row.saved_at)};
   }
   private transaction<T>(work: () => T): T {
+    // Tutor approval joins this same synchronous writer transaction so a note and
+    // its explicit approval receipt are committed together.
+    if(this.db.isTransaction)return work();
     this.db.exec('BEGIN IMMEDIATE');
     try { const result = work(); this.db.exec('COMMIT'); return result; }
     catch (error) { this.db.exec('ROLLBACK'); throw error; }
@@ -169,6 +176,34 @@ export class CompanionStore {
     });
   }
   exportNotebook() { return encodeBackup(this.snapshot().data); }
+  /** Called only by TutorStore.approve, after the renderer shows a reviewed proposal. */
+  approveTutorLearning(proposal:TutorProposal,now:number) {
+    return this.transaction(()=>{
+      const id=`tutor:${hash(proposal.id)}`,fingerprint=hash(JSON.stringify(proposal));
+      const receipt=this.db.prepare('SELECT fingerprint FROM applied_commands WHERE id=?').get(id);
+      if(receipt){if(receipt.fingerprint!==fingerprint)throw new Error('This tutor approval was already used for different text.');return;}
+      const before=this.snapshot(),problem=before.data.problems.find(row=>row.id===proposal.problemId);
+      if(!problem||canonicalProblemIdentity(problem)!==proposal.identity)throw new Error('The original problem is unavailable. The proposed note is preserved.');
+      const attempt=proposal.sessionId?before.data.attempts.find(row=>row.id===proposal.sessionId&&row.problemId===proposal.problemId):null;
+      if(before.data.session&&before.data.session.id!==proposal.sessionId)throw new Error('Another session is active. Finish it before saving a note to the original session.');
+      if(proposal.sessionId&&!attempt&&before.data.session?.id!==proposal.sessionId)throw new Error('The original session is unavailable. The proposed note is preserved.');
+      if(proposal.kind==='thought'){
+        if(before.state.problemId!==proposal.problemId||before.state.identity!==proposal.identity)throw new Error('Return to the original problem before approving this thought. The proposed text is preserved.');
+        this.command({id,type:'thought',expectedProblemKey:proposal.identity,...(before.data.session?{expectedSessionId:before.data.session.id}:{}),payload:{text:proposal.text}},'desktop',now);
+        return;
+      }
+      if(!proposal.sessionId)throw new Error('This untimed conversation has no saved attempt. Save it as a thought instead; no attempt or elapsed time will be invented.');
+      if(!attempt||before.data.session)throw new Error('Finish and save the original reflection before saving this takeaway. The proposed draft is preserved.');
+      // Reuse reflection validation while retaining the user's outcome, time,
+      // notes, review dates and all scheduling metadata exactly as approved.
+      const validated=recordPracticeReflection(before.data,{...attempt,takeaway:proposal.text},{reviewAt:problem.reviewAt,reviewCount:problem.reviewCount},{reviewManual:problem.reviewManual});
+      const data=validateData({...validated,problems:before.data.problems});
+      const saved=this.persist({data,state:before.state},before.revision+1,now);
+      this.db.prepare('INSERT INTO applied_commands VALUES(?,?,?)').run(id,fingerprint,saved.revision);
+      this.db.prepare('INSERT INTO observations VALUES(?,?,?,?)').run(id,'TutorTakeawayApproved',JSON.stringify({version:1,id,problemId:proposal.problemId,sessionId:proposal.sessionId,text:proposal.text,approvedAt:saved.savedAt}),saved.savedAt);
+      this.db.prepare('INSERT INTO outbox VALUES(?,?,?,?)').run(id,saved.revision,'local',saved.savedAt);
+    });
+  }
   exportCompanion() {
     return JSON.stringify({format:'forma-companion',version:1,exportedAt:new Date().toISOString(),...this.snapshot(),preferences:this.preferences(),observations:this.db.prepare('SELECT * FROM observations').all(),commands:this.db.prepare('SELECT * FROM applied_commands').all(),outbox:this.db.prepare('SELECT * FROM outbox').all(),recoveries:this.db.prepare('SELECT * FROM recoveries').all()},null,2);
   }

@@ -28,6 +28,7 @@ jobs:
           npm run companion:build
           npm run extension:build
           npm run browser:build
+          npm run tutor:evaluate -- --fixtures
       - run: npm test
       - run: npm run build
       - run: npx playwright install --with-deps chromium

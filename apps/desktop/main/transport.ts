@@ -4,13 +4,14 @@ import { dirname } from "node:path";
 import { timingSafeEqual } from "node:crypto";
 import { defaultCompanionEndpoint, BoundedJsonLines, parseTransportRequest, encodeTransportMessage } from "../../../packages/integrations/protocol";
 import type { RecognitionRequest } from "../../../packages/integrations/recognition";
+import type { SharedCode } from "../../../packages/tutor/types";
 
 export function sameCredential(expected:string|null,actual:string) {
   if(!expected)return false;
   const a=Buffer.from(expected), b=Buffer.from(actual);
   return a.length===b.length&&timingSafeEqual(a,b);
 }
-export async function startTransport(options:{endpoint?:string;credential:()=>string|null;command:(command:unknown)=>Promise<{revision:number}>;action:(action:string)=>Promise<number>;recognition?:(request:RecognitionRequest)=>Promise<Record<string,unknown>>;context?:()=>Promise<{identity:string|null;sessionId:string|null}>;connected:(value:boolean)=>void}) {
+export async function startTransport(options:{endpoint?:string;credential:()=>string|null;command:(command:unknown)=>Promise<{revision:number}>;action:(action:string)=>Promise<number>;recognition?:(request:RecognitionRequest)=>Promise<Record<string,unknown>>;tutorCode?:(code:SharedCode)=>Promise<{revision:number}>;context?:()=>Promise<{identity:string|null;sessionId:string|null}>;connected:(value:boolean)=>void}) {
   const endpoint=options.endpoint??defaultCompanionEndpoint();
   if(process.platform!=='win32') {
     mkdirSync(dirname(endpoint),{recursive:true,mode:0o700});chmodSync(dirname(endpoint),0o700);
@@ -40,6 +41,12 @@ export async function startTransport(options:{endpoint?:string;credential:()=>st
               const request=parseTransportRequest(line);id=request.id;
               if(!sameCredential(options.credential(),request.credential))throw new Error('Pair this extension with Forma Companion again.');
               alive();
+              if(request.tutorCode){
+                if(!options.tutorCode)throw new Error('Update Forma Companion to share code with Tutor.');
+                const result=await options.tutorCode(request.tutorCode);
+                socket.write(encodeTransportMessage({version:1,id,ok:true,revision:result.revision,...(options.context?await options.context():{})}));
+                return;
+              }
               if(request.recognition){
                 if(!options.recognition)throw new Error('Update Forma Companion to use recognition.');
                 const result=await options.recognition(request.recognition);

@@ -25,7 +25,9 @@
     "browser:build": "node scripts/browser/build.mjs",
     "browser:install": "node scripts/browser/install.mjs",
     "browser:uninstall": "node scripts/browser/uninstall.mjs",
-    "extension:verify": "node --import tsx scripts/companion/verify-vscode-recognition.ts"
+    "extension:verify": "node --import tsx scripts/companion/verify-vscode-recognition.ts",
+    "tutor:verify": "node scripts/companion/verify-tutor.mjs",
+    "tutor:evaluate": "node --import tsx scripts/tutor/evaluate.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "2.117.2",

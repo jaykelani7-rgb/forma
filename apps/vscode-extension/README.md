@@ -49,3 +49,9 @@ API references: [VS Code Workspace Trust](https://code.visualstudio.com/api/exte
 See [recognition setup and Chrome native-host installation](../../docs/companion/automatic-recognition.md). Recognition never starts time, reports a test pass, or silently replaces an open session. **Forma: Setup and Connection** exposes the opt-in choice, allowed folders and advanced actions. **Forget This File Association** preserves notebook history; **Rebind This File from CPH** resolves a conflicting mapping explicitly. Known permitted rename events transfer associations. Offline notes retain frozen targets; focus itself is reconciled fresh, never replayed from the queue.
 
 Run `npm run extension:verify` for the isolated real macOS VS Code host check. It activates the exact installed CPH version but supplies controlled metadata and browser proposals; it is not evidence of a live CPH import or Chrome page capture.
+
+## Forma Tutor (0.3.0)
+
+Run **Forma: Ask About Selected Code** in an already approved local folder. Choose selected code or the current file (24,000 characters maximum). The command freezes the problem, folder/client, filename, line range, document version and content hash, rechecks permissions/source changes, then sends only this explicit local snapshot to the paired companion. Fenn opens an inspectable preview; no model request occurs until you choose Send there. Source code is not collected by background recognition.
+
+Rebuild with `npm run extension:build` and install the local 0.3.0 VSIX/reload VS Code. Existing folder permissions and pairing remain in place. Text/voice provider keys stay in the desktop host. Full setup, statement capture, context controls, privacy and a walkthrough: [Forma Tutor](../../docs/companion/tutor.md).

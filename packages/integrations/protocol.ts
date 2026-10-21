@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import { homedir, userInfo } from "node:os";
 import path from "node:path";
 import { parseRecognition, type RecognitionRequest } from "./recognition";
+import { parseSharedCode } from "../tutor/context";
+import type { SharedCode } from "../tutor/types";
 
 export const PROTOCOL_VERSION = 1;
 export const MAX_MESSAGE_BYTES = 64 * 1024;
@@ -10,7 +12,7 @@ export type TransportRequest = {
   version: 1;
   id: string;
   credential: string;
-} & ({ command: TransportCommand; action?: never; recognition?: never } | { action: "open" | "memory" | "ping"; command?: never; recognition?: never } | { recognition: RecognitionRequest; command?: never; action?: never });
+} & ({ command: TransportCommand; action?: never; recognition?: never; tutorCode?: never } | { action: "open" | "memory" | "ping"; command?: never; recognition?: never; tutorCode?: never } | { recognition: RecognitionRequest; command?: never; action?: never; tutorCode?: never } | { tutorCode: SharedCode; command?: never; action?: never; recognition?: never });
 export type TransportResponse =
   | { version: 1; id: string; ok: true; revision: number; [key: string]: unknown }
   | { version: 1; id: string; ok: false; error: string; [key: string]: unknown };
@@ -35,7 +37,12 @@ export function defaultCompanionEndpoint(options: {
 
 export function validateTransportRequest(value: unknown): TransportRequest {
   if (!object(value) || value.version !== 1 || !id(value.id) || typeof value.credential !== "string" || !/^[A-Za-z0-9_-]{32,256}$/.test(value.credential)) throw new Error("Invalid protocol envelope or unsupported protocol version.");
-  if (Object.keys(value).some((key) => !["version", "id", "credential", "command", "action", "recognition"].includes(key))) throw new Error("Unexpected protocol field.");
+  if (Object.keys(value).some((key) => !["version", "id", "credential", "command", "action", "recognition", "tutorCode"].includes(key))) throw new Error("Unexpected protocol field.");
+  if (value.tutorCode !== undefined) {
+    if (value.command !== undefined || value.action !== undefined || value.recognition !== undefined) throw new Error("Code sharing cannot contain another action.");
+    parseSharedCode(value.tutorCode);
+    return value as TransportRequest;
+  }
   if (value.recognition !== undefined) {
     if (value.command !== undefined || value.action !== undefined) throw new Error("Recognition cannot contain commands.");
     parseRecognition(value.recognition);

@@ -19,6 +19,22 @@ parentPort!.on('message', (request: {id:number;method:string;args:unknown[]}) =>
         value=store.updateEvidence(String(a[1]),(data,state)=>({data,state:reconcileFollowups(state,e.handle,e.submissions,now,e.error??null,data)}),e,now); break;
       }
       case 'snapshot': value=store.snapshot(); break;
+      case 'tutor-view': value=store.tutor.view(now); break;
+      case 'tutor-open': value=store.tutor.open(a[0],now); break;
+      case 'tutor-context': value=store.tutor.context(a[0]); break;
+      case 'tutor-turns': value=store.tutor.turns(a[0]); break;
+      case 'tutor-statement': value=store.tutor.statement(a[0],now); break;
+      case 'tutor-code': value=store.tutor.code(a[0]); break;
+      case 'tutor-prepare': value=store.tutor.prepare(a[0],a[1],now); break;
+      case 'tutor-append': value=store.tutor.append(a[0]); break;
+      case 'tutor-exposed': value=store.tutor.exposed(a[0]); break;
+      case 'tutor-assistance': value=store.tutor.assistance(a[0]); break;
+      case 'tutor-finalize': value=store.tutor.finalize(a[0],now); break;
+      case 'tutor-delete': value=store.tutor.delete(a[0]); break;
+      case 'tutor-export': value=store.tutor.export(a[0]); break;
+      case 'tutor-settings': value=store.tutor.setSettings(a[0],now); break;
+      case 'tutor-propose': value=store.tutor.propose(a[0],now); break;
+      case 'tutor-approve': value=store.tutor.approve(a[0],now); break;
       case 'command': value=store.command(a[0],String(a[1]??'desktop'),now); break;
       case 'selectBinding': value=store.selectBinding(String(a[0]),String(a[1]),now); break;
       case 'preferences': value=store.preferences(); break;
