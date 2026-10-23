@@ -27,6 +27,7 @@
     "browser:uninstall": "node scripts/browser/uninstall.mjs",
     "extension:verify": "node --import tsx scripts/companion/verify-vscode-recognition.ts",
     "tutor:verify": "node scripts/companion/verify-tutor.mjs",
+    "local:verify": "node scripts/companion/verify-local.mjs",
     "tutor:evaluate": "node --import tsx scripts/tutor/evaluate.ts"
   },
   "dependencies": {

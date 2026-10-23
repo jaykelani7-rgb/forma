@@ -114,6 +114,12 @@
     "configuration": {
       "title": "Forma Companion",
       "properties": {
+        "formaCompanion.developmentLaunchPath": {
+          "type": "string",
+          "default": "",
+          "description": "Optional trusted absolute path to a Forma Companion.app or self-contained executable development launcher on this Mac. Read only from User Settings; workspace values and shell arguments are never executed. Leave empty to use /Applications/Forma Companion.app, then ~/Applications/Forma Companion.app.",
+          "scope": "machine"
+        },
         "formaCompanion.cphMetadataEnabled": {
           "type": "boolean",
           "default": false,

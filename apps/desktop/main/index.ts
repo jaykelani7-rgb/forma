@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain, screen, Tray, Menu, nativeImage, globalShortcut, shell, dialog, safeStorage, powerMonitor, nativeTheme, systemPreferences } from "electron";
-import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync, existsSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { homedir } from 'node:os';
 import { randomBytes, randomUUID } from "node:crypto";
 import { TutorConfiguration } from "./tutor-config";
 import { ConfiguredTutorProvider, speechReadyText, TutorProviderError } from "./tutor-provider";
@@ -22,6 +23,10 @@ import { parseVerifiedCodeforcesPage } from "../../../packages/integrations/code
 import { VerdictScheduler } from "../../../packages/integrations/verdict-scheduler";
 import { followupDue } from "../../../packages/core/src/verdict-followup";
 import type { SubmissionInput } from "../../../src/lib/codeforces-types";
+import { createLoginStartup } from './login-startup';
+import { deriveSetupStatus, type BackupRestorePreview } from '../../../packages/setup/status';
+import { BACKUP_LIMIT } from './backup-schema';
+import { RecoveryFence, writeVerifiedRecovery } from './local-recovery';
 
 app.setName('Forma Companion');
 const developmentData = !app.isPackaged || process.argv.includes('--companion-smoke') ? process.env.FORMA_COMPANION_DATA_DIR : undefined;
@@ -37,7 +42,7 @@ let credential:string|null=null;
 let browserCredential:string|null=null;
 let browserTransport: Awaited<ReturnType<typeof startBrowserTransport>> | undefined;
 let recognition: RecognitionHub;
-const hostEpoch = randomUUID();
+let hostEpoch = randomUUID();
 let connected=false;
 const attention=new AttentionPolicy();
 let plannerDay="";
@@ -54,18 +59,72 @@ let tutorProvider:ConfiguredTutorProvider;
 let tutorService:TutorService;
 let microphoneLeaseUntil=0;
 const hostVoice=new TutorHostVoice();
+const recoveryFence=new RecoveryFence();
+const loginStartup=createLoginStartup({platform:process.platform,isPackaged:app.isPackaged,getLoginItemSettings:()=>app.getLoginItemSettings(),setLoginItemSettings:settings=>app.setLoginItemSettings(settings)});
+let browserVerifiedAt:string|null=null;
+let pendingRestore:{token:string;json:string;expiresAt:number}|null=null;
+let restoring=false;
+const draftFlushes=new Map<string,(error?:string)=>void>();
+function flushTutorDrafts(timeout=2500):Promise<void>{
+  if(!window||window.isDestroyed()||window.webContents.isDestroyed())return Promise.resolve();
+  return new Promise((resolve,reject)=>{const requestId=randomUUID();const timer=setTimeout(()=>{draftFlushes.delete(requestId);reject(new Error('Draft saving did not finish in time. Return to Tutor, check the saved status, and retry.'));},timeout);draftFlushes.set(requestId,error=>{clearTimeout(timer);draftFlushes.delete(requestId);if(error)reject(new Error(error));else resolve();});emitTutor({kind:'flush-drafts',requestId});});
+}
+async function setupStatus(){
+  let storage:{available:boolean;savedAt?:string;error?:string};
+  try{const health=await database.call<{healthy:boolean;savedAt:string}>('health');storage={available:health.healthy,savedAt:health.savedAt};}catch{storage={available:false,error:'Local storage could not be read. Reopen Fenn; the original notebook is preserved.'};}
+  const login=loginStartup.read(),provider=tutorProvider.status();let hostInstalled:boolean|null=null;
+  if(process.platform==='darwin')try{const path=join(homedir(),'Library/Application Support/Google/Chrome/NativeMessagingHosts/app.forma.problem_capture.json');hostInstalled=existsSync(path)&&statSync(path).size<32_000; if(hostInstalled){const m=JSON.parse(readFileSync(path,'utf8'));hostInstalled=m.name==='app.forma.problem_capture'&&m.type==='stdio'&&typeof m.path==='string'&&existsSync(m.path);}}catch{hostInstalled=null;}
+  return deriveSetupStatus({storage,vscode:{paired:!!credential,connected},practiceFolders:connected?recognition.folderObservation():{observable:false},browser:{supported:process.platform==='darwin',enabled:!!browserCredential,hostInstalled,verifiedAt:browserVerifiedAt},provider:{provider:provider.provider,configured:provider.configured},login:{supported:process.platform==='darwin',packaged:app.isPackaged,enabled:login.enabled,detail:login.detail,...(login.status==='unavailable'&&app.isPackaged?{error:login.detail}:{})}});
+}
+async function chooseRestore():Promise<BackupRestorePreview|null>{
+  const current=recoveryFence.lease();
+  const choice=await dialog.showOpenDialog(window,{properties:['openFile'],filters:[{name:'Forma local backup',extensions:['json']}]});current();
+  if(choice.canceled||!choice.filePaths[0])return null;
+  if(statSync(choice.filePaths[0]).size>BACKUP_LIMIT)throw new Error('Choose a Forma backup no larger than 64 MiB.');
+  const json=readFileSync(choice.filePaths[0],'utf8'),preview=await database.call<Omit<BackupRestorePreview,'token'>>('backup-preview',json);current();
+  const token=randomUUID(),expiresAt=Date.now()+600_000;pendingRestore={token,json,expiresAt};return {...preview,token,expiresAt:new Date(expiresAt).toISOString()};
+}
+async function confirmRestore(payload:unknown){
+  if(restoring)throw new Error('A local restore is already in progress.');
+  if(!payload||typeof payload!=='object'||Object.keys(payload).some(k=>k!=='token')||(payload as {token:unknown}).token!==pendingRestore?.token||!pendingRestore||pendingRestore.expiresAt<Date.now())throw new Error('This restore preview expired. Choose the backup again.');
+  const chosen=pendingRestore;restoring=true;
+  try{
+  await flushTutorDrafts();
+  const release=recoveryFence.begin();
+  let backupPath='';
+  try{
+    transport?.revoke();recognition.reset();await recognition.idle();
+    // This snapshot is validated by the writer, fsynced, reread and verified
+    // before cancelling requests or replacing any persisted record.
+    const json=await database.call<string>('backup-export',{scope:'companion',includeTutor:true});
+    const recovery=writeVerifiedRecovery(join(app.getPath('userData'),'recovery-backups'),json);
+    backupPath=recovery.path;
+    cancelVoice();
+    await tutorService.configure(async()=>{await database.call('backup-restore',chosen.json,recovery.receipt);});
+    hostEpoch=randomUUID();codeforces={checking:false,checkedAt:null,error:null};browserVerifiedAt=null;
+  }finally{release();}
+  pendingRestore=null;
+  emitTutor({kind:'recovery'});await broadcast();
+  return {backupPath,summary:'The selected records were replaced. Timers are paused; Tutor requests and drafts were not sent.'};
+  }finally{restoring=false;}
+}
 function cancelVoice(){microphoneLeaseUntil=0;hostVoice.cancel();}
 function emitTutor(event:TutorEvent){if(window&&!window.isDestroyed())window.webContents.send('forma:tutor-event',event);}
 async function captureTutorStatement(input:unknown){
+  const current=recoveryFence.lease();
   const saved=await database.call<StatementSnapshot|null>('tutor-statement',input);
+  current();
   if(saved&&input&&typeof input==='object'&&Object.keys(input).length>1)emitTutor({kind:'context',identity:saved.identity,source:'statement'});
   return saved;
 }
 async function shareTutorCode(code:SharedCode){
+  const current=recoveryFence.lease();
   await database.call('tutor-code',code);
+  current();
   const local=await database.call<LocalSnapshot>('snapshot');
   const binding=local.state.bindings.find(b=>b.fileUri===code.fileUri&&b.identity===code.identity&&b.clientId===code.clientId&&b.workspaceId===code.workspaceId);
   if(!binding)throw new Error('Confirm the shared code association first.');
+  current();
   const conversation=await database.call<TutorConversation>('tutor-open',{problemId:binding.problemId,workspaceId:code.workspaceId});
   emitTutor({kind:'context',identity:code.identity,conversationId:conversation.id,source:'code'});
   // An explicit share opens Fenn when needed; an existing draft stays on screen.
@@ -79,9 +138,11 @@ function voiceReady(capability:'transcription'|'speech'){
   if(!status.capabilities[capability])throw new TutorProviderError('model-capability',status.provider);
 }
 async function openTutor(input:unknown={}){
+  const current=recoveryFence.lease();
   cancelVoice();
   let choice=input;
-  if(input&&typeof input==='object'&&!Object.keys(input).length){const current=await database.call<LocalSnapshot>('snapshot');if(!current.state.problemId){const prior=(await database.call<TutorStoredView>('tutor-view')).conversations[0];if(prior)choice={conversationId:prior.id};}}
+  if(input&&typeof input==='object'&&!Object.keys(input).length){const local=await database.call<LocalSnapshot>('snapshot'),view=await database.call<TutorStoredView>('tutor-view');if(view.lastConversationId){const prior=view.conversations.find(c=>c.id===view.lastConversationId&&(!local.state.problemId||c.problemId===local.state.problemId));if(prior)choice={conversationId:prior.id};}else if(!local.state.problemId&&view.conversations[0])choice={conversationId:view.conversations[0].id};}
+  current();
   const conversation=await database.call<TutorConversation>('tutor-open',choice);
   panelRequest={id:(panelRequest?.id??0)+1,panel:'tutor',conversationId:conversation.id};expanded=true;
   const b=window.getBounds(),area=screen.getDisplayMatching(b).workArea,size={width:Math.min(560,area.width),height:Math.min(820,area.height)};
@@ -95,7 +156,7 @@ async function tutorUi(action:string,payload:unknown){
     case 'tutor-provider-options':return [tutorProvider.statusFor('gemini'),tutorProvider.statusFor('openai')];
     case 'tutor-open':return database.call('tutor-open',payload??{});
     case 'tutor-statement':return captureTutorStatement(payload);
-    case 'tutor-turns':case 'tutor-context':case 'tutor-exposed':case 'tutor-propose':return database.call(action,payload);
+    case 'tutor-turns':case 'tutor-context':case 'tutor-exposed':case 'tutor-propose':case 'tutor-draft':case 'tutor-draft-save':return database.call(action,payload);
     case 'tutor-code-remove':return database.call(action);
     case 'tutor-approve':{const result=await database.call(action,payload);await broadcast();return result;}
     case 'tutor-send':return tutorService.send(payload as TutorSendInput);
@@ -183,8 +244,10 @@ function saveCredential(value:string|null){
   if(!secureAvailable())throw new Error('OS credential storage is unavailable. Enable Keychain or a supported secret store to pair VS Code.');
   writeFileSync(credentialPath(),safeStorage.encryptString(value??''),{mode:0o600});credential=value;transport?.revoke();recognition?.reset();connected=false;
 }
-async function applyCommand(command:unknown,producer='desktop') {
-  await database.call<LocalSnapshot>('command',command,producer);
+async function applyCommand(command:unknown,producer='desktop',expectedRecoveryEpoch?:string) {
+  const current=recoveryFence.lease();
+  await database.call<LocalSnapshot>('command',command,producer,expectedRecoveryEpoch);
+  current();
   if(['finish','reflect'].includes((command as {type?:string})?.type??''))void checkCodeforces();
   if((command as {type?:string})?.type==='reflect')await recognition?.afterReflection();
   await broadcast();return snapshot();
@@ -203,6 +266,7 @@ function registerShortcut(shortcut:string){
 // One paced adapter and one in-flight batch coalesce all attempts for a handle.
 let verifiedContext:{handle:string;identities:string[]}|null=null;
 let verifiedSubmissions:SubmissionInput[]=[];
+let verdictLease=()=>{};
 const cf=createCodeforcesAdapter({fetcher:async(url,init)=>{
   const response=await fetch(url,init);
   if(!response.ok||!url.includes('/user.status'))return response;
@@ -217,18 +281,20 @@ const cf=createCodeforcesAdapter({fetcher:async(url,init)=>{
 }});
 const verdictScheduler=new VerdictScheduler({
   now:Date.now,
-  read:async()=>(await database.call<LocalSnapshot>('reconcile')).state,
+  read:async()=>{verdictLease=recoveryFence.lease();return (await database.call<LocalSnapshot>('reconcile')).state;},
   fetch:async(handle,identities)=>{
     verifiedContext={handle,identities};verifiedSubmissions=[];
     await cf.activity(handle,1);return verifiedSubmissions;
   },
   write:async evidence=>{
+    verdictLease();
     await database.call('followup-evidence',evidence,randomUUID());
     const current=await database.call<LocalSnapshot>('snapshot');
     if(current.state.handle?.toLowerCase()===evidence.handle.toLowerCase())codeforces={checking:true,checkedAt:evidence.checkedAt,error:evidence.error??null};
   },
 });
 async function checkCodeforces(manual=false){
+  recoveryFence.lease();
   if(checkPromise)return checkPromise;
   lastCheck=Date.now();
   checkPromise=(async()=>{
@@ -244,8 +310,22 @@ function verifySender(event:Electron.IpcMainInvokeEvent){
   if(event.sender!==window.webContents||event.senderFrame!==window.webContents.mainFrame||event.senderFrame.url.split('?')[0]!==new URL(`file://${join(__dirname,'renderer','index.html')}`).href)throw new Error('Untrusted companion sender.');
 }
 async function ui(action:string,payload:unknown){
+  if(action==='tutor-drafts-flushed'){
+    if(payload&&typeof payload==='object'){const p=payload as {requestId?:unknown;error?:unknown};if(typeof p.requestId==='string')draftFlushes.get(p.requestId)?.(typeof p.error==='string'?p.error.slice(0,500):undefined);}return null;
+  }
+  recoveryFence.lease();
   if(action.startsWith('tutor-'))return tutorUi(action,payload);
   switch(action){
+    case 'setup-status':return setupStatus();
+    case 'launch-at-login':return loginStartup.set(payload as boolean);
+    case 'backup-export':{
+      await flushTutorDrafts();const current=recoveryFence.lease();
+      const json=await database.call<string>('backup-export',payload);current();
+      const choice=await dialog.showSaveDialog(window,{defaultPath:`forma-local-${new Date().toISOString().slice(0,10)}.json`,filters:[{name:'Forma local backup',extensions:['json']}]});current();
+      if(choice.canceled||!choice.filePath)return null;writeFileSync(choice.filePath,json,{mode:0o600});return {saved:true,path:choice.filePath};
+    }
+    case 'restore-choose':return chooseRestore();
+    case 'restore-confirm':return confirmRestore(payload);
     case 'attention-dismiss':if(typeof payload==='string')attention.dismiss(payload);await broadcast();return null;
     case 'recognition-dismiss':recognition.dismiss(typeof payload==='string'?payload:undefined);return null;
     case 'recognition-resolve':await recognition.resolveConflict();return null;
@@ -270,11 +350,7 @@ async function ui(action:string,payload:unknown){
     case 'export-notebook':return saveFile('notebook');
     case 'export-companion':return saveFile('companion');
     case 'import-notebook':{
-      const choice=await dialog.showOpenDialog(window,{properties:['openFile'],filters:[{name:'Forma notebook',extensions:['json']}]});
-      if(choice.canceled)return {saved:false};
-      const {statSync}=await import('node:fs');
-      if(statSync(choice.filePaths[0]).size>64*1024*1024)throw new Error('Choose a Forma notebook no larger than 64 MB.');
-      await database.call('importNotebook',readFileSync(choice.filePaths[0],'utf8'));await broadcast();return {saved:true};
+      return chooseRestore();
     }
     case 'pair':{
       const secret=randomBytes(32).toString('base64url');saveCredential(secret);await broadcast();return {credential:secret,endpoint:transport?.endpoint};
@@ -304,7 +380,7 @@ async function main(){
   tutorProvider=new ConfiguredTutorProvider(provider=>tutorConfiguration.get(provider));
   tutorService=new TutorService({call:(method,...args)=>database.call(method,...args),emit:emitTutor},tutorProvider);
   await database.call('reconcile');
-  recognition=new RecognitionHub({snapshot:()=>database.call<LocalSnapshot>('snapshot'),command:c=>database.call('command',c,'vscode'),select:(file,client)=>database.call('selectBinding',file,client),changed:()=>{void broadcast();}});
+  recognition=new RecognitionHub({snapshot:()=>database.call<LocalSnapshot>('snapshot'),command:c=>{recoveryFence.lease();return database.call('command',c,'vscode');},select:(file,client)=>{recoveryFence.lease();return database.call('selectBinding',file,client);},changed:()=>{void broadcast();}});
   const browserSecret=join(userData,'browser-pairing.enc');
   if(existsSync(browserSecret)&&secureAvailable())try{browserCredential=safeStorage.decryptString(readFileSync(browserSecret))||null;}catch{browserCredential=null;}
 
@@ -334,13 +410,14 @@ async function main(){
   tray.setContextMenu(Menu.buildFromTemplate([{label:'Open Fenn',click:show},{label:'Pet only',click:()=>expand(false)},{label:'Hide companion',click:()=>window.hide()},{label:'Snooze for an hour',click:()=>void setPreferences({snoozedUntil:new Date(Date.now()+3600000).toISOString()})},{type:'separator'},{label:'Export notebook…',click:()=>void saveFile('notebook')},{label:'Unsigned development build',enabled:false},{label:'Quit Forma Companion',click:()=>app.quit()}]));
   tray.on('click',show);
   try{registerShortcut(preferences.shortcut);}catch{ /* Tray recovery stays available when the shortcut is occupied. */ }
-  transport=await startTransport({...(developmentData?{endpoint:join(userData,'runtime','companion.sock')}:{}),credential:()=>credential,command:command=>applyCommand(command,'vscode'),tutorCode:shareTutorCode,recognition:request=>recognition.request(request),action:async action=>{if(action==='open'||action==='memory'){panelRequest={id:(panelRequest?.id??0)+1,panel:action==='memory'?'memory':'home'};show();}return (await database.call<LocalSnapshot>('snapshot')).revision;},context:async()=>{const local=await database.call<LocalSnapshot>('snapshot');return {identity:local.state.identity,sessionId:local.data.session?.id??null,hostEpoch};},connected:value=>{connected=value;void broadcast();}});
-  if(process.platform==='darwin')browserTransport=await startBrowserTransport({endpoint:join(userData,'runtime','browser.sock'),credential:()=>browserCredential,message:async m=>{if((m as {kind?:string})?.kind==='statement'){await captureTutorStatement((m as {statement:unknown}).statement);return {ok:true,status:'saved'};}return recognition.browser(m);}});
+  transport=await startTransport({...(developmentData?{endpoint:join(userData,'runtime','companion.sock')}:{}),credential:()=>credential,command:(command,epoch)=>{if(!epoch)throw new Error('Update the Forma VS Code extension before delivering saved captures.');return applyCommand(command,'vscode',epoch);},recoveryEpoch:()=>database.call<string>('recovery-epoch'),tutorCode:shareTutorCode,recognition:request=>{recoveryFence.lease();return recognition.request(request);},action:async action=>{recoveryFence.lease();if(action==='open'||action==='memory'){panelRequest={id:(panelRequest?.id??0)+1,panel:action==='memory'?'memory':'home'};show();}return (await database.call<LocalSnapshot>('snapshot')).revision;},context:async()=>{const local=await database.call<LocalSnapshot>('snapshot');return {identity:local.state.identity,sessionId:local.data.session?.id??null,hostEpoch,recoveryEpoch:await database.call<string>('recovery-epoch')};},connected:value=>{connected=value;void broadcast();}});
+  if(process.platform==='darwin')browserTransport=await startBrowserTransport({endpoint:join(userData,'runtime','browser.sock'),credential:()=>browserCredential,message:async m=>{recoveryFence.lease();if((m as {kind?:string})?.kind==='statement'){await captureTutorStatement((m as {statement:unknown}).statement);browserVerifiedAt=new Date().toISOString();return {ok:true,status:'saved'};}return recognition.browser(m);}});
   powerMonitor.on('suspend',()=>void database.call('pause','suspend').then(broadcast));
   powerMonitor.on('lock-screen',()=>void database.call('pause','screen-lock').then(broadcast));
   powerMonitor.on('resume',()=>{lastTick=Date.now();void broadcast();});
   nativeTheme.on('updated',()=>void broadcast());
   const timer=setInterval(async()=>{
+    if(recoveryFence.busy||quitting)return;
     const now=Date.now(),gap=now-lastTick;lastTick=now;
     if(gap<0||gap>45000){await database.call('pause','clock-discontinuity');await broadcast();return;}
     const local=await database.call<LocalSnapshot>('snapshot');
@@ -360,6 +437,6 @@ app.on('activate',()=>{if(window)show();});
 app.on('before-quit',event=>{
   if(quitting)return;
   quitting=true;globalShortcut.unregisterAll();transport?.close();browserTransport?.close();recognition?.reset();
-  if(database){event.preventDefault();cancelVoice();void Promise.resolve(tutorService?.dispose()).catch(()=>{}).then(()=>database.call('pause','quit')).catch(()=>{}).then(()=>database.close()).finally(()=>app.exit());}
+  if(database){event.preventDefault();cancelVoice();void flushTutorDrafts().catch(()=>{}).then(()=>tutorService?.dispose()).catch(()=>{}).then(()=>database.call('pause','quit')).catch(()=>{}).then(()=>database.close()).finally(()=>app.exit());}
 });
 if(lock)main().catch(error=>{console.error('Forma Companion startup:',error.message);dialog.showErrorBox('Forma Companion could not start',String(error.message));app.quit();});

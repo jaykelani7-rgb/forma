@@ -29,13 +29,21 @@ export interface TutorTurn {
   hintLevel:number;exposed:boolean;usage:TutorUsage|null;model:string;provider?:TutorProviderId;responseModel?:string;
 }
 export interface TutorSettings {contestMode:boolean;retentionDays:number;voiceOutput:boolean}
-export interface TutorStoredView { conversations:TutorConversation[];settings:TutorSettings;pendingCode:SharedCode|null }
+export interface TutorStoredView { conversations:TutorConversation[];settings:TutorSettings;pendingCode:SharedCode|null;lastConversationId?:string|null }
 export interface TutorContextView {conversation:TutorConversation;statement:StatementSnapshot|null;pendingCode:SharedCode|null;notes:{id:string;text:string}[];sessionId:string|null;evidence:TutorContext['evidence'];availabilityRevision?:number}
 export interface TutorProviderStatus {provider:TutorProviderId;name:string;capabilities:TutorCapabilities;configured:boolean;model:string;transcriptionModel:string;speechModel:string;message:string}
 export interface TutorView extends TutorStoredView {provider:TutorProviderStatus;activeRequestId:string|null}
 export interface TutorSendInput {
   turnId:string;requestId:string;conversationId:string;action:TutorAction;text:string;
   statementId:string|null;codeId:string|null;noteIds:string[];
+  draft?:{epoch:string;revision:number};
 }
-export type TutorEvent={kind:'delta'|'updated';conversationId:string;turnId:string;requestId:string;text?:string}|{kind:'context';identity:string;conversationId?:string;source:'statement'|'code'|'removed'}|{kind:'configuration';provider:TutorProviderId};
+export type TutorEvent={kind:'delta'|'updated';conversationId:string;turnId:string;requestId:string;text?:string}|{kind:'context';identity:string;conversationId?:string;source:'statement'|'code'|'removed'}|{kind:'configuration';provider:TutorProviderId}|{kind:'flush-drafts';requestId:string}|{kind:'recovery'};
 export interface TutorProposal {id:string;conversationId:string;turnId:string;problemId:string;identity:string;sessionId:string|null;kind:'thought'|'takeaway';text:string;createdAt:string;saved:boolean}
+
+/** References remain frozen; missing captures are reviewed, never silently replaced. */
+export interface TutorDraftContent {text:string;action:TutorAction;statementId:string|null;codeId:string|null;noteIds:string[]}
+export interface TutorDraft extends TutorDraftContent {conversationId:string;identity:string;problemId:string;workspaceId:string;epoch:string;revision:number;updatedAt:string}
+export interface TutorDraftView extends TutorDraft {statement:StatementSnapshot|null;code:SharedCode|null;missingReferences:{kind:'statement'|'code'|'note';id:string}[]}
+export interface TutorDraftSaveInput extends TutorDraftContent {conversationId:string;epoch:string;expectedRevision:number}
+export interface TutorDraftSaveResult {saved:boolean;draft:TutorDraftView}

@@ -19,9 +19,13 @@ parentPort!.on('message', (request: {id:number;method:string;args:unknown[]}) =>
         value=store.updateEvidence(String(a[1]),(data,state)=>({data,state:reconcileFollowups(state,e.handle,e.submissions,now,e.error??null,data)}),e,now); break;
       }
       case 'snapshot': value=store.snapshot(); break;
+      case 'health': value={healthy:store.db.prepare('PRAGMA quick_check').get()?.quick_check==='ok',savedAt:store.snapshot().savedAt}; break;
+      case 'recovery-epoch': value=String(store.db.prepare('SELECT epoch FROM tutor_draft_state WHERE id=1').get()!.epoch); break;
       case 'tutor-view': value=store.tutor.view(now); break;
       case 'tutor-open': value=store.tutor.open(a[0],now); break;
       case 'tutor-context': value=store.tutor.context(a[0]); break;
+      case 'tutor-draft': value=store.tutor.draft(a[0],now); break;
+      case 'tutor-draft-save': value=store.tutor.saveDraft(a[0],now); break;
       case 'tutor-turns': value=store.tutor.turns(a[0]); break;
       case 'tutor-statement': value=store.tutor.statement(a[0],now); break;
       case 'tutor-code': value=store.tutor.code(a[0]); break;
@@ -35,7 +39,10 @@ parentPort!.on('message', (request: {id:number;method:string;args:unknown[]}) =>
       case 'tutor-settings': value=store.tutor.setSettings(a[0],now); break;
       case 'tutor-propose': value=store.tutor.propose(a[0],now); break;
       case 'tutor-approve': value=store.tutor.approve(a[0],now); break;
-      case 'command': value=store.command(a[0],String(a[1]??'desktop'),now); break;
+      case 'command': {
+        if(a[2]!==undefined&&a[2]!==String(store.db.prepare('SELECT epoch FROM tutor_draft_state WHERE id=1').get()!.epoch))throw new Error('The notebook was restored. Review the saved capture before retrying.');
+        value=store.command(a[0],String(a[1]??'desktop'),now);break;
+      }
       case 'selectBinding': value=store.selectBinding(String(a[0]),String(a[1]),now); break;
       case 'preferences': value=store.preferences(); break;
       case 'setPreferences': value=store.setPreferences(a[0]); break;
@@ -44,6 +51,9 @@ parentPort!.on('message', (request: {id:number;method:string;args:unknown[]}) =>
       case 'importNotebook': value=store.importNotebook(String(a[0])); break;
       case 'exportNotebook': value=store.exportNotebook(); break;
       case 'exportCompanion': value=store.exportCompanion(); break;
+      case 'backup-export': value=store.backups.export(a[0],now); break;
+      case 'backup-preview': value=store.backups.preview(String(a[0])); break;
+      case 'backup-restore': value=store.backups.restore(String(a[0]),a[1] as {json:string;sha256:string},now); break;
       case 'evidence': {
         const evidence=a[0] as Parameters<typeof applySubmissionEvidence>[2];
         value=store.updateEvidence(String(a[1]),(data,state)=>applySubmissionEvidence(data,state,evidence),evidence);

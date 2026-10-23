@@ -2,6 +2,16 @@ import type { TransportCommand } from "./protocol";
 
 export const MAX_QUEUED_COMMANDS = 128;
 export const MAX_QUEUE_BYTES = 1024 * 1024;
+export function captureRecoveryEpoch(value: unknown): string | null {
+  return typeof value === "string" && /^[A-Za-z0-9:_.-]{1,120}$/.test(value) ? value : null;
+}
+/** A reconnect or process restart is safe; replacing local data is a new epoch. */
+export function requireCaptureRecoveryEpoch(saved: unknown, current: unknown): string {
+  const captured = captureRecoveryEpoch(saved), actual = captureRecoveryEpoch(current);
+  if (!actual) throw new Error("Update Forma Companion and its VS Code extension before retrying saved captures; this version cannot verify restored notebook context.");
+  if (!captured || captured !== actual) throw new Error("The notebook was restored, or this capture predates recovery tracking. Review the saved capture and use Forma: Retry Pending Captures to confirm delivery to the current notebook.");
+  return actual;
+}
 export type QueuedCommand = { command: TransportCommand; enqueuedAt: number; attempts: number; nextAttemptAt: number; blocked?: string };
 
 export function enqueueCommand(queue: QueuedCommand[], command: TransportCommand, now: number): QueuedCommand[] {

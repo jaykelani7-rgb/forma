@@ -1,0 +1,46 @@
+/** Isolated native SQLite/IPC/draft/recovery checks. No provider, microphone or OS login mutation. */
+import {_electron as electron} from '@playwright/test';
+import executablePath from 'electron';
+import {mkdtemp,mkdir,readFile,writeFile,unlink} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join,resolve} from 'node:path';
+import assert from 'node:assert/strict';
+const folder=await mkdtemp(join(tmpdir(),'forma-local-native-')),out=resolve('dist/local-verification'),backupPath=join(folder,'chosen-backup.json');await mkdir(out,{recursive:true});
+const env={...process.env,FORMA_COMPANION_DATA_DIR:folder,FORMA_TUTOR_PROVIDER:'gemini'};delete env.ELECTRON_RUN_AS_NODE;delete env.GEMINI_API_KEY;delete env.OPENAI_API_KEY;
+let application=await electron.launch({executablePath,args:['.companion-build'],env});
+const report={kind:'isolated-native-local-recovery',folder,verifiedAt:new Date().toISOString()};const errors=[];
+try{
+ let page=await application.firstWindow();page.on('pageerror',e=>errors.push(e.message));await page.waitForFunction(()=>!!window.forma);
+ await page.evaluate(()=>window.forma.command({id:'local-attach',type:'attach',payload:{url:'https://codeforces.com/contest/4/problem/A',title:'Watermelon'}}));
+ await page.evaluate(()=>window.forma.command({id:'local-thought',type:'thought',payload:{text:'Original learning record.'}}));
+ await page.evaluate(()=>window.forma.ui('expand',true));await page.getByRole('button',{name:'Ask Fenn',exact:true}).click();
+ const question='An unfinished question that must survive app restart.';await page.locator('#tutor-draft').fill(question);
+ const view=await page.evaluate(()=>window.forma.ui('tutor-view')),id=view.conversations[0].id;assert.equal(view.provider.configured,false);
+ await page.waitForFunction(async({id,question})=>(await window.forma.ui('tutor-draft',id)).text===question,{id,question});
+ await application.close();application=await electron.launch({executablePath,args:['.companion-build'],env});page=await application.firstWindow();page.on('pageerror',e=>errors.push(e.message));await page.waitForFunction(()=>!!window.forma);
+ await page.evaluate(()=>window.forma.ui('expand',true));await page.getByRole('button',{name:'Ask Fenn',exact:true}).click();await page.locator('#tutor-draft').waitFor();assert.equal(await page.locator('#tutor-draft').inputValue(),question);
+ report.drafts={committedThroughIPC:true,recoveredAfterRealRestart:true};
+ const status=await page.evaluate(()=>window.forma.ui('setup-status'));assert.equal(status.storage.state,'ready');assert.equal(status.pairing.state,'not configured');assert.equal(status.connection.state,'disconnected');assert.equal(status.practiceFolders.state,'unavailable');assert.equal(status.provider.state,'not configured');assert.equal(status.login.canChange,false);
+ report.setup={independentObservedStates:true,unpackagedLoginUnavailable:true,noProviderVerificationClaim:true};
+ await application.evaluate(({dialog},path)=>{dialog.showSaveDialog=async()=>({canceled:false,filePath:path});dialog.showOpenDialog=async()=>({canceled:false,filePaths:[path]});},backupPath);
+ const saved=await page.evaluate(()=>window.forma.ui('backup-export',{scope:'companion',includeTutor:true}));assert.equal(saved.saved,true);
+ const backup=JSON.parse(await readFile(backupPath,'utf8'));assert.equal(backup.format,'forma-local-backup');assert.equal(backup.version,2);assert.equal(backup.tutor.drafts[0].text,question);assert.deepEqual(backup.companion.bindings,[]);
+ await page.locator('#tutor-draft').fill('An edit made after the selected backup.');await page.evaluate(()=>window.forma.command({id:'local-later-thought',type:'thought',payload:{text:'Outside the chosen backup.'}}));
+ const preview=await page.evaluate(()=>window.forma.ui('restore-choose'));assert.equal(preview.scope,'companion');assert.equal(preview.counts.drafts,1);assert.ok(preview.replacement.some(line=>line.includes('Replace all Tutor')));
+ await writeFile(join(folder,'recovery-backups'),'Injected unwritable recovery directory fixture.');
+ const failed=await page.evaluate(async token=>{try{await window.forma.ui('restore-confirm',{token});return '';}catch(error){return String(error);}},preview.token);
+ assert.match(failed,/pre-restore recovery backup failed/);assert.equal((await page.evaluate(()=>window.forma.getSnapshot())).state.thoughts.length,2);
+ assert.equal((await page.evaluate(id=>window.forma.ui('tutor-draft',id),id)).text,'An edit made after the selected backup.');
+ await unlink(join(folder,'recovery-backups'));
+ const restored=await page.evaluate(token=>window.forma.ui('restore-confirm',{token}),preview.token);assert.ok(restored.backupPath.startsWith(join(folder,'recovery-backups')));
+ const recovery=JSON.parse(await readFile(restored.backupPath,'utf8'));assert.equal(recovery.companion.thoughts.length,2);assert.equal(recovery.tutor.drafts[0].text,'An edit made after the selected backup.');
+ await page.waitForFunction(question=>document.querySelector('#tutor-draft')?.value===question,question);
+ const after=await page.evaluate(()=>window.forma.getSnapshot());assert.equal(after.state.thoughts.length,1);assert.equal(after.data.session,null);assert.equal((await page.evaluate(id=>window.forma.ui('tutor-turns',id),id)).length,0);
+ assert.equal((await page.evaluate(()=>window.forma.ui('tutor-view'))).provider.configured,false);
+ report.backup={realFileRoundTrip:true,failedRecoveryBackupAborts:true,samePreviewRetry:true,verifiedRecoveryWrittenBeforeReplacement:true,draftFlushedBeforeBackup:true,preview:true,rendererCacheReconciled:true,noTimersOrProviderTurns:true};
+ await page.getByRole('button',{name:'Companion settings',exact:true}).click();await page.getByText('Local notebook ready',{exact:true}).waitFor();await page.evaluate(()=>window.forma.ui('theme','light'));await page.waitForFunction(()=>document.querySelector('.theme-choice button.selected')?.textContent==='Light');await page.screenshot({path:join(out,'setup-light.png')});
+ await page.evaluate(()=>window.forma.ui('theme','ink'));await page.waitForFunction(()=>document.querySelector('.theme-choice button.selected')?.textContent==='Ink');await page.screenshot({path:join(out,'setup-ink.png')});
+ assert.deepEqual(errors,[]);report.pageErrors=errors;
+ report.notExercised=['real installed app startup','actual login-item changes','live Gemini access','microphone and audio'];
+ await writeFile(join(out,'native-results.json'),JSON.stringify(report,null,2));process.stdout.write(JSON.stringify(report,null,2)+'\n');
+}finally{await application.close();}

@@ -8,13 +8,14 @@ import { parseCommand } from "../../../packages/contracts/src";
 import { CPH_EXTENSION_ID, SUPPORTED_CPH_VERSIONS, cphMetadataPath, pathWithinFolder, readCphBindingWithRetry } from "../../../packages/integrations/cph";
 import { BoundedJsonLines, defaultCompanionEndpoint, encodeTransportMessage, parseTransportResponse, type TransportCommand, type TransportRequest, type TransportResponse } from "../../../packages/integrations/protocol";
 import { RecognitionGeneration, type RecognisedBinding, type EditorContext, type BrowserDelivery } from "../../../packages/integrations/recognition";
-import { enqueueCommand, restoreQueue, retryCommand, type QueuedCommand } from "../../../packages/integrations/queue";
+import { captureRecoveryEpoch, enqueueCommand, requireCaptureRecoveryEpoch, restoreQueue, retryCommand, type QueuedCommand } from "../../../packages/integrations/queue";
 import { collectExplicitCode, sameCodeSource, type CodeSourceFence } from "../../../packages/integrations/tutor-code";
 import { companionConnectionError } from "../../../packages/integrations/connection-error";
+import { afterCompanionReady, CompanionLauncher, launchCompanion, resolveCompanionLaunch, userDevelopmentLaunchPath } from "../../../packages/integrations/local-launch";
 
 const SECRET = "forma-companion.pairing.v1", QUEUE = "forma-companion.queue.v1", FOLDERS = "forma-companion.allowed-folders.v1", BINDINGS = "forma-companion.bindings.v1";
 type Binding = RecognisedBinding & { id?: string; key: string; fileUri: string; sessionId?: string };
-type Target = { fileUri: string; key: string; sessionId?: string };
+type Target = { fileUri: string; key: string; sessionId?: string; recoveryEpoch?: string | null };
 let testEndpoint: string | undefined;
 function send(request: TransportRequest, signal?: AbortSignal): Promise<TransportResponse> {
   return new Promise((resolve, reject) => {
@@ -29,7 +30,7 @@ function send(request: TransportRequest, signal?: AbortSignal): Promise<Transpor
     signal?.addEventListener("abort", abort, { once: true });
     socket.setTimeout(request.recognition?.reason === "poll" ? 25000 : 5000, () => finish(new Error("Companion did not acknowledge this capture.")));
     socket.on("connect", () => { try { socket.write(encodeTransportMessage(request)); } catch (error) { finish(error as Error); } });
-    socket.on("data", (chunk: Buffer) => { try { const batch = lines.push(chunk); if (batch.length) finish(undefined, parseTransportResponse(batch[0], request.id)); } catch (error) { finish(error as Error); } });
+    socket.on("data", (chunk: Buffer) => { try { const batch = lines.push(chunk); if (batch.length) finish(undefined, parseTransportResponse(batch[0], request.id)); } catch (error) { finish(new Error("Fenn returned an incompatible or invalid response. Update both Forma Companion and the VS Code extension, then retry.", { cause: error })); } });
     socket.on("error", error => finish(companionConnectionError(error))); socket.on("end", () => finish(new Error("Companion closed before acknowledging.")));
   });
 }
@@ -51,6 +52,7 @@ export async function activate(context: vscode.ExtensionContext) {
   const instanceId = randomUUID(), generation = new RecognitionGeneration();
   let activeGeneration = generation.next(), watcher: vscode.FileSystemWatcher | undefined, metadataTimer: ReturnType<typeof setTimeout> | undefined;
   let registeredEpoch: unknown = null;
+  let lastRecoveryEpoch = captureRecoveryEpoch(context.workspaceState.get("forma-companion.recovery-epoch.v1"));
   let observing: EditorContext | null = null, flushing = false, queueTail = Promise.resolve();
   let publishing: Promise<unknown> = Promise.resolve();
   let testTutorChoice: { mode: "selection" | "file" | "cancel"; afterChoice?: () => Promise<void> } | undefined;
@@ -79,11 +81,56 @@ export async function activate(context: vscode.ExtensionContext) {
     await permitted(uri.toString()); return uri;
   }
   async function credential() { const token = await context.secrets.get(SECRET); if (!token) throw new Error("Pair with Forma Companion first."); return token; }
+  const launcher = new CompanionLauncher({
+    connect: async (token, signal) => {
+      const response = await send({ version: 1, id: randomUUID(), credential: token, action: "ping" }, signal);
+      if (!response.ok) throw new Error(response.error);
+    },
+    // Explicitly ignore workspaceValue/workspaceFolderValue, including in trusted workspaces.
+    resolve: () => resolveCompanionLaunch({ developmentPath: userDevelopmentLaunchPath(vscode.workspace.getConfiguration("formaCompanion").inspect("developmentLaunchPath")) }),
+    launch: launchCompanion,
+  });
+  const launchAbort = new AbortController();
+  context.subscriptions.push({ dispose: () => { launchAbort.abort(); launcher.cancel(); } });
+  function editorLaunchFence() {
+    const editor = vscode.window.activeTextEditor, fileUri = editor?.document.uri.toString();
+    const binding = fileUri ? bindings[fileUri] : undefined;
+    return JSON.stringify({ fileUri, version: editor?.document.version, binding: binding && { key: binding.key, id: binding.id, url: binding.url }, ignored: fileUri ? ignored.has(fileUri) : false, allowed: [...allowed].sort(), folders: (vscode.workspace.workspaceFolders ?? []).map(folder => folder.uri.toString()).sort() });
+  }
+  async function companionReady(token: string) {
+    return vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "Forma · Open Fenn", cancellable: true }, async (progress, cancellation) => {
+      const controller = new AbortController();
+      const cancel = () => controller.abort();
+      const subscription = cancellation.onCancellationRequested(cancel);
+      launchAbort.signal.addEventListener("abort", cancel, { once: true });
+      if (cancellation.isCancellationRequested || launchAbort.signal.aborted) controller.abort();
+      try {
+        await launcher.ready(token, controller.signal, message => { progress.report({ message }); connection = message.replace(/…$/, ""); renderStatus(); });
+        connection = "Connected"; renderStatus();
+      } catch (error) { connection = "Disconnected"; renderStatus(); throw error; }
+      finally { subscription.dispose(); launchAbort.signal.removeEventListener("abort", cancel); }
+    });
+  }
+  async function openCompanion(which: "open" | "memory" = "open") {
+    requireLocal(); const token = await credential(), fence = editorLaunchFence();
+    return afterCompanionReady({ ready: () => companionReady(token), current: async () => local() && paired && await credential() === token && editorLaunchFence() === fence,
+      run: async () => {
+        // The active file may have been observed while the host was stopped. Refresh only
+        // this revalidated file; launch itself never starts a session or changes pairing.
+        await watchActive("observe");
+        if (editorLaunchFence() !== fence || !local() || await credential() !== token) throw new Error("The editor or problem changed while reconnecting. Invoke Forma again for the intended file.");
+        if (which === "memory") { const target = await frozenTarget(); const host = await action("ping"); if (host.identity !== target.key) throw new Error("Switch to this file’s problem in Fenn first."); }
+        return action(which);
+      },
+    });
+  }
   const saveBindings = () => context.workspaceState.update(BINDINGS, bindings);
   function serializeQueue(work: () => Promise<void>) { const p = queueTail.then(work); queueTail = p.catch(() => {}); return p; }
   async function persistQueue(next: QueuedCommand[]) { await context.workspaceState.update(QUEUE, next); queue = next; renderStatus(); }
   async function remember(response: TransportResponse) {
     if (!response.ok) return;
+    const recoveryEpoch = captureRecoveryEpoch(response.recoveryEpoch);
+    if (recoveryEpoch !== lastRecoveryEpoch) { lastRecoveryEpoch = recoveryEpoch; await context.workspaceState.update("forma-companion.recovery-epoch.v1", recoveryEpoch); }
     const saved = response.savedBinding as { fileUri?: string; identity?: string; problemId?: string; id?: string; source?: Binding["source"]; adapterVersion?: string } | null | undefined;
     if (saved?.fileUri && saved.identity) {
       const identity = normalizeCodeforcesIdentity(saved.identity.replace(/^(contest|gym):/, (_m, ns) => ns === "gym" ? "Gym " : "").replace(":", ""));
@@ -109,7 +156,11 @@ export async function activate(context: vscode.ExtensionContext) {
           if (entry.command.type === "attach" && entry.command.payload.activate !== false) throw new Error("A legacy attachment may contain obsolete focus. Export it for recovery; use fresh recognition to restore the current file.");
           await permitted(uri);
           const token = await credential(); if (!paired || !local()) break;
-          const response = await send({ version: 1, id: entry.command.id, credential: token, command: entry.command });
+          const host = await send({ version: 1, id: randomUUID(), credential: token, action: "ping" });
+          if (!host.ok) throw new Error(host.error);
+          await remember(host);
+          const recoveryEpoch = requireCaptureRecoveryEpoch(target?.recoveryEpoch, host.recoveryEpoch);
+          const response = await send({ version: 1, id: entry.command.id, credential: token, command: entry.command, expectedRecoveryEpoch: recoveryEpoch });
           if (!response.ok) throw new Error(response.error);
           await remember(response);
           if (entry.command.type === "attach") {
@@ -132,13 +183,13 @@ export async function activate(context: vscode.ExtensionContext) {
     await permitted(target.fileUri); await credential();
     if (queueRecovery) throw new Error("Export existing captures for recovery before adding more.");
     const parsed = parseCommand({ ...command, occurredAt: command.occurredAt ?? new Date().toISOString() });
-    await serializeQueue(async () => { targets[parsed.id] = { ...target }; await context.workspaceState.update("forma-companion.capture-targets.v1", targets); await persistQueue(enqueueCommand(queue, parsed, Date.now())); });
+    await serializeQueue(async () => { targets[parsed.id] = { ...target, recoveryEpoch: Object.hasOwn(target, "recoveryEpoch") ? target.recoveryEpoch : lastRecoveryEpoch }; await context.workspaceState.update("forma-companion.capture-targets.v1", targets); await persistQueue(enqueueCommand(queue, parsed, Date.now())); });
     await flush();
   }
   async function frozenTarget(): Promise<Target> {
     const uri = await selected(), b = bindings[uri.toString()];
     if (!b) throw new Error("Open a CPH-imported solution, use Chrome’s Use in Forma, or choose Advanced: Attach Codeforces Problem.");
-    return { fileUri: uri.toString(), key: b.key, sessionId: b.sessionId };
+    return { fileUri: uri.toString(), key: b.key, sessionId: b.sessionId, recoveryEpoch: lastRecoveryEpoch };
   }
   async function capture(type: string, payload: Record<string, unknown> = {}, frozen?: Target) {
     const target = frozen ?? await frozenTarget(); await permitted(target.fileUri);
@@ -179,6 +230,14 @@ export async function activate(context: vscode.ExtensionContext) {
     const choice = fixtureChoice ? fixtureChoice.mode === "cancel" ? undefined : choices.find(item => item.selected === (fixtureChoice.mode === "selection")) : await vscode.window.showQuickPick(choices, { title: `Ask Fenn · ${binding.title || binding.key} · ${path.basename(uri.fsPath)}`, placeHolder: "Choose code to review locally in Fenn. Inspect it and press Send there to share with your configured AI provider.", ignoreFocusOut: true });
     if (!choice) return;
     if (!sameCodeSource(fence, current())) throw new Error("The editor, source, or problem changed. Choose the code again.");
+    const launchCredential = await credential(), launchFence = editorLaunchFence();
+    await afterCompanionReady({ ready: () => companionReady(launchCredential), current: async () => {
+      const candidate = current();
+      // Starting the native app can change window focus and renew recognition's
+      // generation. That alone does not change this explicitly chosen source.
+      return !!candidate && sameCodeSource({ ...fence, generation: candidate.generation }, candidate) && editorLaunchFence() === launchFence && await credential() === launchCredential;
+    }, run: async () => {} });
+    fence.generation = activeGeneration;
     const size = choice.selected ? editor.document.offsetAt(selection.end) - editor.document.offsetAt(selection.start) : editor.document.offsetAt(editor.document.lineAt(editor.document.lineCount - 1).range.end);
     if (size > 24000) throw new Error("This code exceeds 24,000 characters. Select a smaller relevant section.");
     const shared = await collectExplicitCode({ fence, current, permitted: () => permitted(fileUri), credential, id: randomUUID(), workspaceId, clientId,
@@ -300,7 +359,7 @@ export async function activate(context: vscode.ExtensionContext) {
     await withdraw(); allowed = choice.map(item => item.folder.uri.fsPath); await context.workspaceState.update(FOLDERS, allowed); await watchActive();
   }
   function register(name: string, run: () => unknown) { context.subscriptions.push(vscode.commands.registerCommand(`formaCompanion.${name}`, async () => { try { testCommandError = null; await run(); } catch (error) { const message = error instanceof Error ? error.message : "Forma could not complete this action."; if (context.extensionMode === vscode.ExtensionMode.Test) testCommandError = message; void vscode.window.showErrorMessage(message); } })); }
-  register("setup", async () => { const choice = await vscode.window.showQuickPick(["Open Fenn", "Ask about selected code", "Recognise problems from CPH", "Select allowed folders", "Advanced: Attach Codeforces Problem", "Forget this file’s association"], { title: `Forma · ${connection}`, ignoreFocusOut: true }); if (choice === "Open Fenn") await action("open"); else if (choice === "Ask about selected code") await askSelectedCode(); else if (choice === "Recognise problems from CPH") await consent(); else if (choice === "Select allowed folders") await selectFolders(); else if (choice === "Advanced: Attach Codeforces Problem") await vscode.commands.executeCommand("formaCompanion.attachProblem"); else if (choice) await vscode.commands.executeCommand("formaCompanion.forget"); });
+  register("setup", async () => { const choice = await vscode.window.showQuickPick(["Open Fenn", "Ask about selected code", "Recognise problems from CPH", "Select allowed folders", "Advanced: Attach Codeforces Problem", "Forget this file’s association"], { title: `Forma · ${connection}`, ignoreFocusOut: true }); if (choice === "Open Fenn") await openCompanion(); else if (choice === "Ask about selected code") await askSelectedCode(); else if (choice === "Recognise problems from CPH") await consent(); else if (choice === "Select allowed folders") await selectFolders(); else if (choice === "Advanced: Attach Codeforces Problem") await vscode.commands.executeCommand("formaCompanion.attachProblem"); else if (choice) await vscode.commands.executeCommand("formaCompanion.forget"); });
   register("recognition", consent);
   register("pair", async () => {
     requireLocal(); const token = await vscode.window.showInputBox({ title: "Pair Forma Companion", prompt: "Paste the pairing credential from Fenn settings", password: true, ignoreFocusOut: true, validateInput: value => /^[A-Za-z0-9_-]{32,256}$/.test(value.trim()) ? undefined : "Use the pairing credential shown by Fenn." });
@@ -334,9 +393,9 @@ export async function activate(context: vscode.ExtensionContext) {
     await permitted(uri.toString()); await enqueue({ id: randomUUID(), type: "attach", payload: { url: result.binding.url, title: result.binding.title, fileUri: uri.toString(), clientId, workspaceId, source: "cph", adapterVersion: result.binding.adapterVersion, replace: true, activate: false } }, { fileUri: uri.toString(), key: result.binding.problemKey });
     ignored.delete(uri.toString()); await context.workspaceState.update("forma-companion.ignored-files.v1", [...ignored]); await watchActive();
   });
-  register("open", () => action("open"));
+  register("open", () => openCompanion());
   register("askSelectedCode", askSelectedCode);
-  register("memory", async () => { const target = await frozenTarget(); const host = await action("ping"); if (host.identity !== target.key) throw new Error("Switch to this file’s problem in Fenn first."); return action("memory"); });
+  register("memory", () => openCompanion("memory"));
   register("saveThought", async () => { const target = await frozenTarget(); const text = await vscode.window.showInputBox({ title: "Save Thought", prompt: "An observation for this problem", ignoreFocusOut: true, validateInput: value => value.trim() && value.length <= 10000 ? undefined : "Write up to 10,000 characters." }); if (text) await capture("thought", { text }, target); });
   register("start", () => capture("start")); register("pause", () => capture("pause")); register("resume", () => capture("resume"));
   register("finish", async () => {
@@ -347,7 +406,21 @@ export async function activate(context: vscode.ExtensionContext) {
     if (takeaway !== undefined) await capture("reflect", { outcome: choice.outcome, takeaway }, target);
   });
   register("runCphTests", async () => { await selected(); if (!(await vscode.commands.getCommands(true)).includes("cph.runTestCases")) throw new Error("The CPH Run Testcases command is unavailable."); await vscode.commands.executeCommand("cph.runTestCases"); void vscode.window.setStatusBarMessage("CPH owns test results. Forma does not infer a pass.", 7000); });
-  register("retry", async () => { requireLocal(); await serializeQueue(() => persistQueue(queue.map(entry => { const next = { ...entry, nextAttemptAt: Date.now() }; delete next.blocked; return next; }))); await flush(); await watchActive(); });
+  register("retry", async () => {
+    requireLocal(); const host = await action("ping"), epoch = captureRecoveryEpoch(host.recoveryEpoch);
+    if (!epoch) throw new Error("Update Forma Companion and the VS Code extension before retrying saved captures.");
+    const changed = queue.filter(entry => targets[entry.command.id]?.recoveryEpoch !== epoch);
+    if (changed.length) {
+      const choice = await vscode.window.showQuickPick([{ label: "Retry reviewed captures", detail: changed.map(entry => `${entry.command.type} · ${targets[entry.command.id]?.key ?? entry.command.expectedProblemKey ?? "target needs recovery"}`).join("; ").slice(0, 1000), retry: true }, { label: "Keep captures queued", detail: "Use Export Pending Captures for Recovery to inspect the original targets first.", retry: false }], { title: `${changed.length} saved capture(s) predate the current notebook. Review before delivery.`, ignoreFocusOut: true });
+      if (!choice?.retry) return;
+    }
+    await serializeQueue(async () => {
+      for (const entry of queue) { const target = targets[entry.command.id]; if (target) target.recoveryEpoch = epoch; }
+      await context.workspaceState.update("forma-companion.capture-targets.v1", targets);
+      await persistQueue(queue.map(entry => { const next = { ...entry, nextAttemptAt: Date.now() }; delete next.blocked; return next; }));
+    });
+    await flush(); await watchActive();
+  });
   register("exportQueue", async () => { const destination = await vscode.window.showSaveDialog({ title: "Export Forma Pending Captures", filters: { JSON: ["json"] } }); if (destination) await vscode.workspace.fs.writeFile(destination, Buffer.from(JSON.stringify({ format: "forma-vscode-queue-v1", queue: context.workspaceState.get(QUEUE, []), targets }, null, 2))); });
   context.subscriptions.push(
     vscode.window.onDidChangeActiveTextEditor(() => { void watchActive(); }),

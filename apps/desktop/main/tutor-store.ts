@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { canonicalProblemIdentity } from '../../../packages/core/src/codeforces-identity';
 import { availableTutorNotes, freezeTutorContext, parseSharedCode, TUTOR_BUDGET, tutorFields, tutorHash, tutorId, tutorObject, tutorText, validateStatement } from '../../../packages/tutor/context';
 import { buildProviderMessages, hintLevelForAction, parseTutorAction } from '../../../packages/tutor/policy';
-import type { SharedCode, StatementSnapshot, TutorAction, TutorContextView, TutorConversation, TutorProposal, TutorSendInput, TutorSettings, TutorStoredView, TutorTurn, TutorUsage } from '../../../packages/tutor/types';
+import type { SharedCode, StatementSnapshot, TutorAction, TutorContextView, TutorConversation, TutorProposal, TutorSendInput, TutorSettings, TutorStoredView, TutorTurn, TutorUsage, TutorDraft, TutorDraftView, TutorDraftSaveInput, TutorDraftSaveResult } from '../../../packages/tutor/types';
 import type { LocalSnapshot } from './store';
 
 interface TutorOwner {snapshot():LocalSnapshot;approveTutorLearning(proposal:TutorProposal,now:number):void}
@@ -25,11 +25,13 @@ export class TutorStore {
         CREATE TABLE IF NOT EXISTS tutor_statement_current (identity TEXT PRIMARY KEY, capture_sequence INTEGER NOT NULL UNIQUE REFERENCES tutor_statement_captures(sequence) ON DELETE CASCADE);
         CREATE TABLE IF NOT EXISTS tutor_codes (id TEXT PRIMARY KEY, identity TEXT NOT NULL, body TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS tutor_proposals (id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL REFERENCES tutor_conversations(id) ON DELETE CASCADE, body TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS tutor_drafts (conversation_id TEXT PRIMARY KEY REFERENCES tutor_conversations(id) ON DELETE CASCADE, revision INTEGER NOT NULL, body TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS tutor_draft_state (id INTEGER PRIMARY KEY CHECK(id=1), epoch TEXT NOT NULL, last_conversation_id TEXT);
         CREATE TABLE IF NOT EXISTS tutor_settings (id INTEGER PRIMARY KEY CHECK(id=1), body TEXT NOT NULL);
         CREATE INDEX IF NOT EXISTS tutor_turn_conversation ON tutor_turns(conversation_id);
         CREATE INDEX IF NOT EXISTS tutor_turn_attempt ON tutor_turns(json_extract(body,'$.context.sessionId'),json_extract(body,'$.context.problemId'));
         CREATE INDEX IF NOT EXISTS tutor_statement_capture_identity ON tutor_statement_captures(identity,sequence);
-        PRAGMA user_version=4;`);
+        PRAGMA user_version=5;`);
       if(version<4){
         // Content-addressed rows are immutable. The old timestamp + rowid order
         // provides a deterministic initial selection, then capture sequence is
@@ -43,6 +45,7 @@ export class TutorStore {
         // immutable request contexts and their original capture metadata survive.
         for(const table of ['tutor_turns','tutor_requests'])db.exec(`UPDATE ${table} SET body=json_set(body,'$.provider','openai') WHERE json_extract(body,'$.provider') IS NULL;`);
       }
+      db.prepare('INSERT OR IGNORE INTO tutor_draft_state VALUES(1,?,NULL)').run(randomUUID());
       db.prepare('INSERT OR IGNORE INTO tutor_settings VALUES(1,?)').run(JSON.stringify(DEFAULT_SETTINGS));
       for(const row of db.prepare("SELECT body FROM tutor_turns WHERE status IN ('queued','streaming')").all()){
         const turn=decodeTurn(row.body);
@@ -64,7 +67,8 @@ export class TutorStore {
       SELECT COALESCE(SUM(length(CAST(body AS BLOB))),0) FROM tutor_statements UNION ALL
       SELECT COALESCE(SUM(length(id)+length(statement_id)+length(identity)+length(captured_at)+16),0) FROM tutor_statement_captures UNION ALL
       SELECT COALESCE(SUM(length(CAST(body AS BLOB))),0) FROM tutor_codes UNION ALL
-      SELECT COALESCE(SUM(length(CAST(body AS BLOB))),0) FROM tutor_proposals)`).get();
+      SELECT COALESCE(SUM(length(CAST(body AS BLOB))),0) FROM tutor_proposals UNION ALL
+      SELECT COALESCE(SUM(length(CAST(body AS BLOB))),0) FROM tutor_drafts)`).get();
     // Reserve worst-case UTF-8 room for the one permitted response up front;
     // streaming chunks then need no full-table size scan on every token.
     const active=Number(this.db.prepare("SELECT COUNT(*) n FROM tutor_turns WHERE status IN ('queued','streaming')").get()!.n);
@@ -94,7 +98,7 @@ export class TutorStore {
   }
   view(now=Date.now()):TutorStoredView {
     this.prune(now);
-    return {conversations:this.db.prepare('SELECT body FROM tutor_conversations ORDER BY updated_at DESC,id LIMIT 200').all().map(row=>decode<TutorConversation>(row.body)),settings:this.settings(),pendingCode:this.pendingCode()};
+    return {conversations:this.db.prepare('SELECT body FROM tutor_conversations ORDER BY updated_at DESC,id LIMIT 200').all().map(row=>decode<TutorConversation>(row.body)),settings:this.settings(),pendingCode:this.pendingCode(),lastConversationId:this.db.prepare('SELECT last_conversation_id FROM tutor_draft_state WHERE id=1').get()?.last_conversation_id as string|null};
   }
   private conversation(id:unknown):TutorConversation {
     const row=this.db.prepare('SELECT body FROM tutor_conversations WHERE id=?').get(tutorId(id));
@@ -103,21 +107,28 @@ export class TutorStore {
   }
   open(input:unknown={},now=Date.now()):TutorConversation {
     const value=tutorObject(input);tutorFields(value,['conversationId','problemId','workspaceId']);
-    if(value.conversationId!==undefined)return this.conversation(value.conversationId);
+    if(value.conversationId!==undefined){const found=this.conversation(value.conversationId);this.remember(found.id);return found;}
     const snapshot=this.owner.snapshot();
     const problem=snapshot.data.problems.find(problem=>problem.id===(value.problemId??snapshot.state.problemId));
     const identity=problem&&canonicalProblemIdentity(problem);
+    if(!problem||!identity){const remembered=this.db.prepare('SELECT last_conversation_id FROM tutor_draft_state WHERE id=1').get()?.last_conversation_id;if(remembered&&this.db.prepare('SELECT id FROM tutor_conversations WHERE id=?').get(remembered))return this.conversation(remembered);}
     if(!problem||!identity)throw new Error('Recognise or attach a Codeforces problem before opening its tutor.');
     const binding=snapshot.state.bindings.find(binding=>binding.problemId===problem.id);
-    const workspaceId=tutorId(value.workspaceId??binding?.workspaceId??'personal');
+    const rememberedId=this.db.prepare('SELECT last_conversation_id FROM tutor_draft_state WHERE id=1').get()?.last_conversation_id;
+    const rememberedRow=rememberedId?this.db.prepare('SELECT body FROM tutor_conversations WHERE id=?').get(rememberedId):null;
+    const remembered=rememberedRow?decode<TutorConversation>(rememberedRow.body):null;
+    const workspaceId=tutorId(value.workspaceId??binding?.workspaceId??(remembered?.problemId===problem.id&&remembered.identity===identity?remembered.workspaceId:'personal'));
     const existing=this.db.prepare('SELECT body FROM tutor_conversations WHERE identity=? ORDER BY updated_at DESC').all(identity).map(row=>decode<TutorConversation>(row.body)).find(conversation=>conversation.problemId===problem.id&&conversation.workspaceId===workspaceId);
-    if(existing)return existing;
+    if(existing){this.remember(existing.id);return existing;}
     if(Number(this.db.prepare('SELECT COUNT(*) n FROM tutor_conversations').get()!.n)>=200)throw new Error('There are 200 local conversations. Export and delete an older one before opening another.');
     const stamp=new Date(now).toISOString();
     const conversation:TutorConversation={id:randomUUID(),identity,problemId:problem.id,title:problem.title,workspaceId,createdAt:stamp,updatedAt:stamp};
     this.db.prepare('INSERT INTO tutor_conversations VALUES(?,?,?,?)').run(conversation.id,identity,stamp,JSON.stringify(conversation));
-    return conversation;
+    this.remember(conversation.id);return conversation;
   }
+  private remember(id:string){this.db.prepare('UPDATE tutor_draft_state SET last_conversation_id=? WHERE id=1').run(id);}
+  /** Rotate after replacement so callbacks from the prior database state cannot write. */
+  rotateRecoveryEpoch():string {const epoch=randomUUID();this.db.prepare('UPDATE tutor_draft_state SET epoch=? WHERE id=1').run(epoch);return epoch;}
   turns(conversationId:unknown):TutorTurn[] {
     const conversation=this.conversation(conversationId);
     return this.db.prepare('SELECT body FROM tutor_turns WHERE conversation_id=? ORDER BY rowid').all(conversation.id).map(row=>decodeTurn(row.body));
@@ -168,6 +179,51 @@ export class TutorStore {
     const frozen=freezeTutorContext(snapshot,conversation,{statement,code:null,noteIds:[]});
     return {conversation,statement,pendingCode:pending?.identity===conversation.identity&&pending.workspaceId===conversation.workspaceId?pending:null,notes:availableTutorNotes(snapshot,conversation.problemId),sessionId:frozen.sessionId,evidence:frozen.evidence};
   }
+  private draftEpoch():string {return String(this.db.prepare('SELECT epoch FROM tutor_draft_state WHERE id=1').get()!.epoch);}
+  private writeDraft(draft:TutorDraft) {
+    const {conversationId,identity,problemId,workspaceId,revision,updatedAt,text,action,statementId,codeId,noteIds}=draft;
+    const stored={conversationId,identity,problemId,workspaceId,revision,updatedAt,text,action,statementId,codeId,noteIds};
+    this.db.prepare('INSERT INTO tutor_drafts VALUES(?,?,?) ON CONFLICT(conversation_id) DO UPDATE SET revision=excluded.revision,body=excluded.body').run(conversationId,revision,JSON.stringify(stored));
+  }
+  draft(conversationId:unknown,now=Date.now()):TutorDraftView {
+    this.prune(now);
+    const conversation=this.conversation(conversationId),row=this.db.prepare('SELECT body FROM tutor_drafts WHERE conversation_id=?').get(conversation.id);
+    let draft:TutorDraft;
+    if(row)draft={...decode<TutorDraft>(row.body),epoch:this.draftEpoch()};
+    else {
+      const ctx=this.context(conversation.id);
+      draft={conversationId:conversation.id,identity:conversation.identity,problemId:conversation.problemId,workspaceId:conversation.workspaceId,epoch:this.draftEpoch(),revision:0,updatedAt:new Date(now).toISOString(),text:'',action:'discuss',statementId:ctx.statement?.id??null,codeId:ctx.pendingCode?.id??null,noteIds:[]};
+      this.transaction(()=>{this.writeDraft(draft);this.quota();});
+    }
+    const statement=draft.statementId?this.capturedStatement(draft.statementId):null;
+    const codeRow=draft.codeId?this.db.prepare('SELECT body FROM tutor_codes WHERE id=?').get(draft.codeId):null;
+    const code=codeRow?decode<SharedCode>(codeRow.body):null;
+    const notes=availableTutorNotes(this.owner.snapshot(),conversation.problemId);
+    const missingReferences:TutorDraftView['missingReferences']=[];
+    if(draft.statementId&&!statement)missingReferences.push({kind:'statement',id:draft.statementId});
+    if(draft.codeId&&!code)missingReferences.push({kind:'code',id:draft.codeId});
+    for(const id of draft.noteIds)if(!notes.some(note=>note.id===id))missingReferences.push({kind:'note',id});
+    return {...draft,statement,code,missingReferences};
+  }
+  saveDraft(input:unknown,now=Date.now()):TutorDraftSaveResult {
+    const value=tutorObject(input);tutorFields(value,['conversationId','epoch','expectedRevision','text','action','statementId','codeId','noteIds']);
+    if(!Number.isSafeInteger(value.expectedRevision)||Number(value.expectedRevision)<0||!Array.isArray(value.noteIds)||value.noteIds.length>20)throw new Error('Invalid draft revision or note selection.');
+    const parsed:TutorDraftSaveInput={conversationId:tutorId(value.conversationId),epoch:tutorId(value.epoch),expectedRevision:Number(value.expectedRevision),text:tutorText(value.text,TUTOR_BUDGET.user),action:parseTutorAction(value.action),statementId:value.statementId===null?null:tutorId(value.statementId),codeId:value.codeId===null?null:tutorId(value.codeId),noteIds:value.noteIds.map(tutorId)};
+    if(new Set(parsed.noteIds).size!==parsed.noteIds.length)throw new Error('Choose distinct note references.');
+    return this.transaction(()=>{
+      if(parsed.epoch!==this.draftEpoch())throw new Error('The notebook was restored. Reopen this draft before saving.');
+      const current=this.draft(parsed.conversationId,now);
+      if(current.revision!==parsed.expectedRevision)return {saved:false,draft:current};
+      // Unavailable references are allowed only when retained from this draft;
+      // this preserves the question while requiring an explicit review before Send.
+      const conversation=this.conversation(parsed.conversationId),notes=availableTutorNotes(this.owner.snapshot(),conversation.problemId);
+      if(parsed.statementId&&parsed.statementId!==current.statementId){const statement=this.capturedStatement(parsed.statementId);if(!statement||statement.identity!==conversation.identity)throw new Error('Review the selected statement.');}
+      if(parsed.codeId&&parsed.codeId!==current.codeId){const row=this.db.prepare('SELECT body FROM tutor_codes WHERE id=?').get(parsed.codeId);const code=row?decode<SharedCode>(row.body):null;if(!code||code.identity!==conversation.identity||code.workspaceId!==conversation.workspaceId)throw new Error('Review the selected code snapshot.');}
+      if(parsed.noteIds.some(id=>!current.noteIds.includes(id)&&!notes.some(note=>note.id===id)))throw new Error('Review the selected notes.');
+      this.writeDraft({...current,...parsed,revision:current.revision+1,updatedAt:new Date(now).toISOString()});
+      this.quota();return {saved:true,draft:this.draft(parsed.conversationId,now)};
+    });
+  }
   private readTurn(id:unknown):TutorTurn {const row=this.db.prepare('SELECT body FROM tutor_turns WHERE id=?').get(tutorId(id));if(!row)throw new Error('This tutor turn is no longer available.');return decodeTurn(row.body);}
   private writeTurn(turn:TutorTurn) {
     this.db.prepare('UPDATE tutor_turns SET request_id=?,status=?,body=? WHERE id=?').run(turn.requestId,turn.status,JSON.stringify(turn),turn.id);
@@ -177,11 +233,14 @@ export class TutorStore {
     const now=typeof providerOrNow==='number'?providerOrNow:timestamp;
     const provider=typeof providerOrNow==='number'?'openai':providerOrNow;
     if(provider!=='gemini'&&provider!=='openai')throw new Error('Choose a supported tutor provider.');
-    const value=tutorObject(input);tutorFields(value,['turnId','requestId','conversationId','action','text','statementId','codeId','noteIds']);
+    const value=tutorObject(input);tutorFields(value,['turnId','requestId','conversationId','action','text','statementId','codeId','noteIds','draft']);
     const request:TutorSendInput={turnId:tutorId(value.turnId),requestId:tutorId(value.requestId),conversationId:tutorId(value.conversationId),action:parseTutorAction(value.action),text:tutorText(value.text,TUTOR_BUDGET.user,1),statementId:value.statementId===null?null:tutorId(value.statementId),codeId:value.codeId===null?null:tutorId(value.codeId),noteIds:Array.isArray(value.noteIds)?value.noteIds.map(tutorId):[]};
     if(!request.text.trim()||!Array.isArray(value.noteIds))throw new Error('Write a question and explicitly select its context.');
+    let submittedDraft:{epoch:string;revision:number}|undefined;
+    if(value.draft!==undefined){const d=tutorObject(value.draft);tutorFields(d,['epoch','revision']);if(!Number.isSafeInteger(d.revision)||Number(d.revision)<0)throw new Error('Invalid draft revision.');submittedDraft={epoch:tutorId(d.epoch),revision:Number(d.revision)};}
     const selectedModel=tutorText(model,120,1);
     return this.transaction(()=>{
+      if(submittedDraft&&submittedDraft.epoch!==this.draftEpoch())throw new Error('This draft belongs to an earlier restore. Reopen the conversation before sending.');
       if(this.settings().contestMode)throw new Error('Contest mode disables problem-specific tutor assistance. Tracking and notes remain available.');
       const conversation=this.conversation(request.conversationId);
       const previousRow=this.db.prepare('SELECT body FROM tutor_turns WHERE id=?').get(request.turnId);
@@ -210,6 +269,14 @@ export class TutorStore {
       const context=freezeTutorContext(this.owner.snapshot(),conversation,{statement,code,noteIds:request.noteIds},now);
       const turn:TutorTurn={id:request.turnId,requestId:request.requestId,conversationId:conversation.id,action:request.action,userText:request.text,assistantText:'',context,status:'queued',createdAt:new Date(now).toISOString(),completedAt:null,error:null,hintLevel:hintLevelForAction(request.action,this.turns(conversation.id)),exposed:false,usage:null,model:selectedModel,provider};
       buildProviderMessages(turn,this.turns(conversation.id));
+      if(submittedDraft){
+        const saved=this.draft(request.conversationId,now);
+        if(saved.revision===submittedDraft.revision){
+          const same=JSON.stringify([saved.text,saved.action,saved.statementId,saved.codeId,[...saved.noteIds].sort()])===JSON.stringify([request.text,request.action,request.statementId,request.codeId,[...request.noteIds].sort()]);
+          if(!same)throw new Error('The submitted draft changed. Review it before sending.');
+          this.writeDraft({...saved,text:'',revision:saved.revision+1,updatedAt:new Date(now).toISOString()});
+        }else if(saved.revision<submittedDraft.revision)throw new Error('Save this draft before sending it.');
+      }
       this.db.prepare('INSERT INTO tutor_turns VALUES(?,?,?,?,?)').run(turn.id,turn.conversationId,turn.requestId,turn.status,JSON.stringify(turn));
       const updated={...conversation,updatedAt:new Date(now).toISOString()};
       this.db.prepare('UPDATE tutor_conversations SET updated_at=?,body=? WHERE id=?').run(updated.updatedAt,JSON.stringify(updated),updated.id);this.quota();return turn;
@@ -258,6 +325,7 @@ export class TutorStore {
     const conversation=this.conversation(conversationId);
     this.transaction(()=>{
       this.db.prepare('DELETE FROM tutor_conversations WHERE id=?').run(conversation.id);
+      this.db.prepare('UPDATE tutor_draft_state SET last_conversation_id=NULL WHERE last_conversation_id=?').run(conversation.id);
       if(!this.db.prepare('SELECT id FROM tutor_conversations WHERE identity=?').get(conversation.identity)){
         // Content deletion cascades capture history and its current pointer.
         this.db.prepare('DELETE FROM tutor_statements WHERE identity=?').run(conversation.identity);

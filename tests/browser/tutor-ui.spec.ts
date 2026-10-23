@@ -4,11 +4,12 @@ import { resolve, sep } from 'node:path';
 import { emptyData } from '../../src/lib/model';
 import { initialCompanionState } from '../../packages/core/src/companion';
 import type { CompanionSnapshot } from '../../apps/desktop/renderer/api';
-import type { TutorSendInput, TutorTurn, SharedCode, StatementSnapshot, TutorEvent, TutorProviderId } from '../../packages/tutor/types';
+import type { TutorSendInput, TutorTurn, SharedCode, StatementSnapshot, TutorEvent, TutorProviderId, TutorDraftView, TutorDraftSaveInput } from '../../packages/tutor/types';
 
 /** Real compiled renderer; only the Electron bridge, provider and audio devices are mocked. */
 interface MockControls {
   calls:{action:string;payload?:unknown}[];turns:TutorTurn[];sendCount:number;approvals:number;approvalIds:string[];loseNextApprovalAck:boolean;loseNextSendAck:boolean;captureDuringManualSave:boolean;microphoneRequests:number;tracksStopped:number;audioCreated:number;audioPlayed:number;audioPaused:number;urlsCreated:number;urlsRevoked:number;recordBytes:number;unsupportedRecording:boolean;
+  holdStatementAck:boolean;holdProposalAck:boolean;releaseHeldStatement():void;releaseHeldProposal():void;recover():void;
   denyMicrophone:boolean;holdMicrophone:boolean;switchFile():void;replaceCode():void;captureStatement(description?:string):void;unrelatedContext():void;delta(text:string):void;finish(text?:string):void;
   releaseMicrophone():void;releaseTranscription(text:string):void;releaseSpeech(mime?:string):void;
 }
@@ -35,13 +36,26 @@ async function openTutor(page:Page,configured=true){
     const otherConversation={...conversation,id:'other-conversation',identity:'contest:5:A',problemId:'mock-other',title:'Another problem conversation'};
     const conversations=[conversation,otherConversation];const settings={contestMode:false,retentionDays:90,voiceOutput:false};let pendingCode=code,currentStatement=statement,provider:TutorProviderId='gemini';let providerConfigured=configured;
     const statements=new Map([[statement.id,statement]]),codes=new Map([[code.id,code]]);
+    const durable=JSON.parse(sessionStorage.getItem('mock-durable-drafts')??'{}') as Record<string,TutorDraftView>;
+    const persistDrafts=()=>sessionStorage.setItem('mock-durable-drafts',JSON.stringify(durable));
+    const draft=(id:string):TutorDraftView=>{
+      const target=conversations.find(item=>item.id===id)??conversation;
+      const saved=durable[id]??{conversationId:id,identity:target.identity,problemId:target.problemId,workspaceId:target.workspaceId,epoch:'mock-epoch',revision:0,updatedAt:stamp,text:'',action:'discuss',statementId:target.id===conversationId?currentStatement.id:null,codeId:target.id===conversationId?pendingCode.id:null,noteIds:[],statement:null,code:null,missingReferences:[]};
+      const selectedStatement=saved.statementId?statements.get(saved.statementId)??null:null,selectedCode=saved.codeId?codes.get(saved.codeId)??null:null;
+      const missingReferences:TutorDraftView['missingReferences']=[];
+      if(saved.statementId&&!selectedStatement)missingReferences.push({kind:'statement',id:saved.statementId});if(saved.codeId&&!selectedCode)missingReferences.push({kind:'code',id:saved.codeId});
+      durable[id]={...saved,statement:selectedStatement,code:selectedCode,missingReferences};persistDrafts();return clone(durable[id]);
+    };
     const providerStatus=()=>({provider,name:provider==='gemini'?'Gemini':'OpenAI',capabilities:{text:true,transcription:true,speech:true},configured:providerConfigured,model:provider+'-mock-text',transcriptionModel:'mock-transcribe',speechModel:'mock-speech',message:providerConfigured?'Mock provider configured.':`Set up a ${provider==='gemini'?'Gemini':'OpenAI'} API key in Tutor settings to send a message.`});
     const emitContext=(source:'statement'|'code',identity=statement.identity)=>{for(const listener of tutorListeners)listener({kind:'context',identity,source});};
     let resolveMicrophone:((value:{getTracks:()=>{stop:()=>void}[]})=>void)|null=null,resolveTranscription:((value:{text:string})=>void)|null=null,resolveSpeech:((value:{bytes:Uint8Array;mime:string})=>void)|null=null;
+    let heldStatement:(()=>void)|null=null,heldProposal:(()=>void)|null=null;
     const currentTurn=()=>control.turns.at(-1)!;
     const emit=(kind:'delta'|'updated',text?:string)=>{const turn=currentTurn();for(const listener of tutorListeners)listener({kind,conversationId:turn.conversationId,turnId:turn.id,requestId:turn.requestId,text});};
     const stream=()=>({getTracks:()=>[{stop:()=>{control.tracksStopped++;}}]});
-    const control:MockControls={calls:[],turns:[],sendCount:0,approvals:0,approvalIds:[],loseNextApprovalAck:false,loseNextSendAck:false,captureDuringManualSave:false,microphoneRequests:0,tracksStopped:0,audioCreated:0,audioPlayed:0,audioPaused:0,urlsCreated:0,urlsRevoked:0,recordBytes:3,unsupportedRecording:false,denyMicrophone:false,holdMicrophone:false,
+    const control:MockControls={calls:[],turns:[],sendCount:0,approvals:0,approvalIds:[],loseNextApprovalAck:false,loseNextSendAck:false,captureDuringManualSave:false,microphoneRequests:0,tracksStopped:0,audioCreated:0,audioPlayed:0,audioPaused:0,urlsCreated:0,urlsRevoked:0,recordBytes:3,unsupportedRecording:false,denyMicrophone:false,holdMicrophone:false,holdStatementAck:false,holdProposalAck:false,
+      releaseHeldStatement(){heldStatement?.();heldStatement=null;},releaseHeldProposal(){heldProposal?.();heldProposal=null;},
+      recover(){currentStatement=statement;statements.clear();statements.set(statement.id,statement);durable[conversationId]={...draft(conversationId),text:'Restored unfinished question',epoch:'restored-epoch',revision:0,statementId:statement.id,codeId:code.id};persistDrafts();for(const listener of tutorListeners)listener({kind:'recovery'});},
       switchFile(){snapshot.state.identity='contest:5:A';snapshot.state.problemId='mock-other';snapshot.data.problems.push({...snapshot.data.problems[0],id:'mock-other',title:'Another editor problem',url:'https://codeforces.com/problemset/problem/5/A',problemCode:'5A'});snapshot.presentation!.activeFileUri='file:///fixture/5A.cpp';for(const listener of listeners)listener(clone(snapshot));},
       replaceCode(){pendingCode={...code,id:'mock-code-v2',revision:'code-revision-two',text:'int newer; cin >> newer;'};codes.set(pendingCode.id,pendingCode);emitContext('code');},
       captureStatement(description='A newly captured statement.'){currentStatement={...statement,id:'capture-'+(statements.size+1),description};statements.set(currentStatement.id,currentStatement);emitContext('statement');},
@@ -59,19 +73,23 @@ async function openTutor(page:Page,configured=true){
         case 'tutor-statement':{
           const saved={...currentStatement,...(payload as object),id:'manual-statement-'+(statements.size+1),revision:'manual-statement-revision'};statements.set(saved.id,saved);currentStatement=saved;
           if(control.captureDuringManualSave)control.captureStatement('Browser capture B arrived after the manual save.');
+          if(control.holdStatementAck){control.holdStatementAck=false;await new Promise<void>(resolve=>{heldStatement=resolve;});}
           return clone(saved);
         }
+        case 'tutor-draft':return draft(String(payload));
+        case 'tutor-draft-save':{const input=payload as TutorDraftSaveInput;const current=draft(input.conversationId);if(current.revision!==input.expectedRevision)return {saved:false,draft:current};durable[input.conversationId]={...current,...input,revision:current.revision+1};persistDrafts();return {saved:true,draft:draft(input.conversationId)};}
+        case 'tutor-delete':{delete durable[String(payload)];persistDrafts();return {deleted:true};}
         case 'tutor-turns':return clone(control.turns.filter(turn=>turn.conversationId===payload));
         case 'tutor-configure':{const change=payload as {provider?:TutorProviderId;apiKey?:string;forgetKey?:boolean};if(change.provider&&change.provider!==provider){const running=control.turns.find(turn=>['queued','streaming'].includes(turn.status));if(running){running.status='interrupted';running.error='Provider changed. Partial reply kept.';emit('updated');}provider=change.provider;providerConfigured=false;}if(change.apiKey)providerConfigured=true;if(change.forgetKey)providerConfigured=false;for(const listener of tutorListeners)listener({kind:'configuration',provider});return providerStatus();}
         case 'tutor-send':{
           const input=payload as TutorSendInput;const target=conversations.find(item=>item.id===input.conversationId)??conversation;const existing=control.turns.find(turn=>turn.id===input.turnId);if(existing?.requestId===input.requestId)return {turnId:existing.id,requestId:existing.requestId};
-          control.sendCount++;
+          control.sendCount++;if(input.draft){const saved=draft(input.conversationId);if(saved.revision===input.draft.revision){durable[input.conversationId]={...saved,text:'',revision:saved.revision+1};persistDrafts();}}
           const turn:TutorTurn={id:input.turnId,requestId:input.requestId,conversationId:input.conversationId,action:input.action,userText:input.text,assistantText:'Early mock observation. ',context:{version:1,identity:target.identity,problemId:target.problemId,title:target.title,url:statement.url,workspaceId:target.workspaceId,conversationId:target.id,sessionId:null,statement:input.statementId?clone(statements.get(input.statementId)!):null,code:input.codeId?clone(codes.get(input.codeId)!):null,notes:input.noteIds.includes('mock-note')?[{id:'mock-note',text:'A private prior learning note, excluded by default.'}]:[],evidence:{platform:'unknown',checkedAt:null,localTests:'unknown',submissions:[]},frozenAt:stamp},status:'streaming',createdAt:stamp,completedAt:null,error:null,hintLevel:input.action==='small-hint'?1:0,exposed:false,usage:null,model:provider+'-mock-text',provider};
           if(existing)control.turns.splice(control.turns.indexOf(existing),1,turn);else control.turns.push(turn);emit('delta','Early mock observation. ');if(control.loseNextSendAck){control.loseNextSendAck=false;throw new Error('Mock provider request acknowledgement was lost.');}return {turnId:turn.id,requestId:turn.requestId};
         }
         case 'tutor-stop':{const turn=currentTurn();turn.status='interrupted';turn.completedAt=stamp;emit('updated');return null;}
         case 'tutor-exposed':{const input=payload as {turnId:string;requestId:string};const turn=control.turns.find(turn=>turn.id===input.turnId&&turn.requestId===input.requestId);if(turn)turn.exposed=true;return turn?clone(turn):null;}
-        case 'tutor-propose':{const input=payload as {id:string;turnId:string;kind:'thought'|'takeaway';text:string};return {...input,conversationId,problemId:conversation.problemId,identity:conversation.identity,sessionId:null,createdAt:stamp,saved:false};}
+        case 'tutor-propose':{const input=payload as {id:string;turnId:string;kind:'thought'|'takeaway';text:string};if(control.holdProposalAck){control.holdProposalAck=false;await new Promise<void>(resolve=>{heldProposal=resolve;});}return {...input,conversationId,problemId:conversation.problemId,identity:conversation.identity,sessionId:null,createdAt:stamp,saved:false};}
         case 'tutor-approve':{const id=String(payload);if(!control.approvalIds.includes(id)){control.approvalIds.push(id);control.approvals++;}if(control.loseNextApprovalAck){control.loseNextApprovalAck=false;throw new Error('Mock saved approval acknowledgement was lost.');}return {saved:true};}
         case 'tutor-settings':Object.assign(settings,payload);return clone(settings);
         case 'tutor-microphone':control.microphoneRequests++;if(control.denyMicrophone)throw new Error('Mock microphone access was denied.');return {allowed:true};
@@ -207,11 +225,10 @@ test('formatted answers render math and code safely; reading history does not fo
 test('a lost send acknowledgement stays idempotent after conversation navigation',async({page})=>{
  await openTutor(page);const draft=page.getByLabel('Your question or editable voice transcript');
  await draft.fill('This message was dispatched once.');await page.evaluate(()=>{window.__tutorMock.loseNextSendAck=true;});await page.getByRole('button',{name:'Send',exact:true}).click();
- await expect(page.getByRole('alert')).toContainText('acknowledgement was lost');await expect(draft).toHaveValue('This message was dispatched once.');
+ await expect(page.getByRole('alert')).toContainText('acknowledgement was lost');await expect(draft).toHaveValue('');await expect(page.locator('.tutor-user')).toContainText('This message was dispatched once.');
  await page.getByLabel('Saved problem conversations').selectOption('other-conversation');await page.evaluate(()=>window.__tutorMock.finish('A completed answer after the acknowledgement was lost.'));
- await page.getByLabel('Saved problem conversations').selectOption('mock-conversation');await expect(draft).toHaveValue('This message was dispatched once.');
- await page.getByRole('button',{name:'Send',exact:true}).click();await expect(draft).toHaveValue('');
- const requests=await page.evaluate(()=>window.__tutorMock.calls.filter(c=>c.action==='tutor-send'));expect(requests).toHaveLength(2);expect(requests[0].payload).toEqual(requests[1].payload);expect(await page.evaluate(()=>window.__tutorMock.sendCount)).toBe(1);
+ await page.getByLabel('Saved problem conversations').selectOption('mock-conversation');await expect(draft).toHaveValue('');await expect(page.getByRole('button',{name:'Send',exact:true})).toBeDisabled();
+ const requests=await page.evaluate(()=>window.__tutorMock.calls.filter(c=>c.action==='tutor-send'));expect(requests).toHaveLength(1);expect(await page.evaluate(()=>window.__tutorMock.sendCount)).toBe(1);
 });
 
 
@@ -223,4 +240,40 @@ test('manual save A followed by browser capture B never displays B as the select
  await expect(page.getByRole('region',{name:'New context available'})).toContainText('New statement available');
  await page.getByLabel('Your question or editable voice transcript').fill('Discuss the statement I inspected.');await page.getByRole('button',{name:'Send',exact:true}).click();
  expect((await page.evaluate(()=>window.__tutorMock.turns[0])).context.statement?.description).toBe('Manual statement A selected for this draft.');
+});
+
+
+test('durable drafts: committed question and selected mode recover after renderer restart without Send or voice',async({page})=>{
+  await openTutor(page);const draft=page.getByLabel('Your question or editable voice transcript');
+  await draft.fill('Continue my unfinished boundary-case question.');await page.getByLabel('How can Fenn help?').selectOption('stronger-hint');
+  await expect(page.getByText('Draft saved locally',{exact:true})).toBeVisible();
+  await page.reload();await expect(draft).toHaveValue('Continue my unfinished boundary-case question.');await expect(page.getByLabel('How can Fenn help?')).toHaveValue('stronger-hint');
+  expect(await page.evaluate(()=>({send:window.__tutorMock.sendCount,mic:window.__tutorMock.microphoneRequests,audio:window.__tutorMock.audioCreated}))).toEqual({send:0,mic:0,audio:0});
+});
+test('durable drafts: expired selected context retains question and asks for explicit review',async({page})=>{
+  await openTutor(page);const draft=page.getByLabel('Your question or editable voice transcript');await draft.fill('Keep this question after the old code expires.');await expect(page.getByText('Draft saved locally',{exact:true})).toBeVisible();
+  await page.evaluate(()=>{const stored=JSON.parse(sessionStorage.getItem('mock-durable-drafts')!);stored['mock-conversation'].codeId='expired-code';sessionStorage.setItem('mock-durable-drafts',JSON.stringify(stored));});
+  await page.reload();await expect(draft).toHaveValue('Keep this question after the old code expires.');await expect(page.getByText(/Some selected context is no longer available/)).toBeVisible();
+  await page.getByRole('button',{name:'Remove unavailable references',exact:true}).click();await expect(page.getByText(/Some selected context is no longer available/)).not.toBeVisible();expect(await page.evaluate(()=>window.__tutorMock.sendCount)).toBe(0);
+});
+
+
+test('recovery fences a late manual statement acknowledgement when conversation IDs are reused',async({page})=>{
+ await openTutor(page);await page.getByText(/^Context included/).click();await page.getByRole('button',{name:'Paste or update statement',exact:true}).click();
+ await page.locator('.tutor-statement-form').getByLabel('Description',{exact:true}).fill('Old manual capture before restore.');
+ await page.evaluate(()=>{window.__tutorMock.holdStatementAck=true;});await page.getByRole('button',{name:'Save local statement snapshot',exact:true}).click();
+ await expect.poll(()=>page.evaluate(()=>window.__tutorMock.calls.filter(call=>call.action==='tutor-statement').length)).toBe(1);
+ await page.evaluate(()=>window.__tutorMock.recover());await expect(page.getByLabel('Your question or editable voice transcript')).toHaveValue('Restored unfinished question');
+ await page.evaluate(()=>window.__tutorMock.releaseHeldStatement());await expect(page.getByLabel('Your question or editable voice transcript')).toHaveValue('Restored unfinished question');
+ await expect(page.getByText('Statement snapshot saved locally. Inspect it before sending.',{exact:true})).not.toBeVisible();
+ expect(await page.evaluate(()=>{const drafts=JSON.parse(sessionStorage.getItem('mock-durable-drafts')!);return drafts['mock-conversation'].statementId;})).toBe('mock-statement-v1');
+});
+test('recovery fences proposal approval after a late proposal acknowledgement with reused conversation IDs',async({page})=>{
+ await openTutor(page);await page.getByLabel('Your question or editable voice transcript').fill('One local fixture reply.');await page.getByRole('button',{name:'Send',exact:true}).click();await page.evaluate(()=>window.__tutorMock.finish('A completed fixture explanation.'));
+ await page.getByRole('button',{name:'Save a useful explanation',exact:true}).click();await expect(page.getByText('REVIEW BEFORE SAVING',{exact:true})).toBeVisible();await page.locator('.tutor-proposal textarea').fill('Edited note from the previous notebook.');
+ await page.evaluate(()=>{window.__tutorMock.holdProposalAck=true;});await page.getByRole('button',{name:'Approve and save',exact:true}).click();
+ await expect.poll(()=>page.evaluate(()=>window.__tutorMock.calls.filter(call=>call.action==='tutor-propose').length)).toBe(2);
+ await page.evaluate(()=>window.__tutorMock.recover());await expect(page.getByLabel('Your question or editable voice transcript')).toHaveValue('Restored unfinished question');await page.evaluate(()=>window.__tutorMock.releaseHeldProposal());
+ await expect(page.getByText('REVIEW BEFORE SAVING',{exact:true})).not.toBeVisible();expect(await page.evaluate(()=>window.__tutorMock.calls.filter(call=>call.action==='tutor-approve').length)).toBe(0);
+ expect(await page.evaluate(()=>window.__tutorMock.approvals)).toBe(0);
 });

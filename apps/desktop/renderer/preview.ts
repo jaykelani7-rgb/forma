@@ -3,6 +3,7 @@ import { companionToday } from "../../../packages/core/src/companion-today";
 import { reconcilePracticePlan } from "../../../src/lib/practice-plan";
 import { emptyData } from "../../../src/lib/model";
 import type { CompanionSnapshot, FormaBridge } from "./api";
+import { deriveSetupStatus } from "../../../packages/setup/status";
 
 /** Opt-in browser-only visual fixture. Nothing here is persisted or connected. */
 export function createPreviewBridge(): FormaBridge {
@@ -24,6 +25,10 @@ export function createPreviewBridge(): FormaBridge {
     command: async (command) => { const next = applyCompanionCommand(snapshot.data, snapshot.state, command, Date.now()); snapshot = { ...snapshot, ...next, data:reconcilePracticePlan(next.data), revision: snapshot.revision + 1, savedAt: new Date().toISOString() }; emit(); return copy(); },
     subscribe: (listener) => { listeners.add(listener); return () => listeners.delete(listener); },
     ui: async (action, payload) => {
+      if (action === "setup-status") {
+        const status = deriveSetupStatus({ storage: { available: false, error: "This browser preview keeps its fixture in memory. Durable notebook storage is unavailable." }, vscode: { paired: false, connected: false }, practiceFolders: { observable: false }, browser: { supported: false, enabled: false, hostInstalled: null }, provider: { provider: "gemini", configured: false }, login: { supported: false, packaged: false, enabled: false } });
+        return { ...status, summary: "Browser preview · no durable storage" };
+      }
       if (action === "theme" && (payload === "light" || payload === "ink" || payload === "system")) snapshot.preferences.theme = payload;
       else if (action === "reduced-motion" && typeof payload === "boolean") snapshot.preferences.reducedMotion = payload;
       else if (action === "snooze") snapshot.preferences.snoozedUntil = payload === false ? null : new Date(Date.now() + 3600000).toISOString();

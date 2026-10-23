@@ -12,6 +12,7 @@ import { reconcilePracticePlan } from "../../../src/lib/practice-plan";
 import { expireFollowups } from "../../../packages/core/src/verdict-followup";
 import { defaultPreferences, validatePreferences } from "./preferences";
 import { TutorStore } from './tutor-store';
+import { BackupStore } from './backup-store';
 
 export interface LocalSnapshot { data: Data; state: CompanionState; revision: number; savedAt: string }
 const MAX_DEVICE_BYTES = 8 * 1024 * 1024;
@@ -21,11 +22,12 @@ const hash = (value: string) => createHash('sha256').update(value).digest('hex')
 export class CompanionStore {
   readonly db: DatabaseSync;
   readonly tutor: TutorStore;
+  readonly backups: BackupStore;
   constructor(path: string) {
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
     this.db = new DatabaseSync(path);
     const version=Number(this.db.prepare('PRAGMA user_version').get()?.user_version??0);
-    if(version>4){this.db.close();throw new Error('This notebook was written by a newer Forma Companion. Upgrade the app before opening it; the original file is preserved.');}
+    if(version>5){this.db.close();throw new Error('This notebook was written by a newer Forma Companion. Upgrade the app before opening it; the original file is preserved.');}
     if (path !== ':memory:') chmodSync(path, 0o600);
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;
       CREATE TABLE IF NOT EXISTS workspace (id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL, notebook TEXT NOT NULL, device TEXT NOT NULL, saved_at TEXT NOT NULL);
@@ -37,6 +39,7 @@ export class CompanionStore {
       CREATE TABLE IF NOT EXISTS sync_checkpoints (id TEXT PRIMARY KEY, value TEXT NOT NULL);`);
     this.db.prepare('INSERT OR IGNORE INTO workspace VALUES(1,0,?,?,?)').run(encodeBackup(emptyData()), JSON.stringify(initialCompanionState()), new Date().toISOString());
     this.tutor=new TutorStore(this.db,this);
+    this.backups=new BackupStore(this.db,{snapshot:()=>this.snapshot(),replace:(data,state,now)=>this.persist({data,state},this.snapshot().revision+1,now),rotateDraftEpoch:()=>{this.tutor.rotateRecoveryEpoch();}});
   }
   close() { this.db.close(); }
   snapshot(): LocalSnapshot {

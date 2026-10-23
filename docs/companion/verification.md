@@ -1,3 +1,25 @@
+# Everyday local reliability — 2026-10-23
+
+Implemented launch-on-demand from VS Code, packaged macOS login-item controls, schema-5 durable Tutor composers, independent setup observations, and version-2 backup/transactional replacement. No personal app installation, login-item setting, real provider key, provider request or microphone permission was changed during this milestone.
+
+- **592/592 unit tests passed**, including deterministic launch errors/coalescing/deadlines/cancellation, editor changes, draft restart/CAS/deletion/Send/acknowledgement loss, expired references, strict restore validation, file failure, rollback, epoch fencing and setup distinctions.
+- **312 browser tests passed; 2 existing configured-account tests intentionally skipped**. Desktop/mobile Tutor tests include late manual-statement/proposal acknowledgements after restoring the same conversation IDs. Setup/restore tests include keyboard-visible choices and explicit replacement confirmation. **24/24 sharing regressions passed**.
+- Lint, root types, VS Code extension types, production web build, companion renderer/host/worker build, VS Code/browser/native-host builds and all five Tutor quality fixtures passed. No check was weakened. The existing renderer-size warning remains visible.
+- **`npm run local:verify` passed in a disposable real Electron profile**: SQLite/IPC composer commit, app quit/restart recovery, independent observed setup states, real backup-file round trip, injected blocked recovery directory abort, retry using the same preview, verified recovery file containing the latest flushed draft, renderer-cache reconciliation, no timers/provider turns, and no page errors. Native chosen-file dialogs were injected; actual file writes/validation/restore were exercised. See `dist/local-verification/native-results.json` and Light/Ink screenshots.
+- **`npm run companion:verify` passed** existing native practice/Today/pairing/recognition protections with no renderer errors. **`npm run extension:verify` passed** the real installed VS Code binary using disposable user data/extensions/practice files, a test companion and the existing read-only CPH adapter. Recognition acknowledgements, approved-source sharing and no provider turn were checked. This does not claim the user's installed Forma extension was updated.
+
+The process sandbox blocks local sockets and stalled the restricted production build. Those checks were rerun successfully with permission for temporary sockets/build processes. Tests use temporary app/profile directories and injected OS launch/login interfaces. They do **not** verify real installed-bundle launch, real sign-in startup, provider access, microphone permissions, STT/TTS or account sync.
+
+Build and inspect from the repository root:
+
+```sh
+npm run companion:build
+npm run extension:build
+FORMA_COMPANION_DATA_DIR="$(mktemp -d /tmp/forma-inspect.XXXXXX)" npm run companion:start
+```
+
+Reproduce checks with `npm test`, `npm run lint`, `npm run typecheck`, `npx tsc --project apps/vscode-extension/tsconfig.json --noEmit`, `npm run build`, `npm run test:browser`, `npm run test:share-links`, `npm run local:verify`, `npm run companion:verify` and `npm run extension:verify`. Native verification requires macOS/Electron and the isolated VS Code check requires the documented installed CPH version. [Launch/manual startup checklist](local-launch.md), [draft guarantees/crash window](durable-drafts.md), [setup meanings](setup.md), [backup formats/recovery/manual checklist](local-backup.md).
+
 # Gemini Tutor completion — 21 October 2026
 
 | Check | Result |

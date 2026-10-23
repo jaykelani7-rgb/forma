@@ -19,7 +19,7 @@ export class TutorService {
   send(input:TutorSendInput):Promise<{turnId:string;requestId:string}>{
     if(this.closed)return Promise.reject(new Error('Tutor has closed. Reopen the companion to continue.'));
     if(this.configuring)return Promise.reject(new TutorProviderError('busy'));
-    const fingerprint=JSON.stringify([input.turnId,input.requestId,input.conversationId,input.action,input.text,input.statementId,input.codeId,input.noteIds]);
+    const fingerprint=JSON.stringify([input.turnId,input.requestId,input.conversationId,input.action,input.text,input.statementId,input.codeId,input.noteIds,input.draft??null]);
     if(this.preparing?.requestId===input.requestId)return this.preparing.fingerprint===fingerprint?this.preparing.promise:Promise.reject(new Error('This request identifier already belongs to a different message.'));
     if(this.active?.turn.requestId===input.requestId)return this.active.fingerprint===fingerprint?Promise.resolve({turnId:this.active.turn.id,requestId:input.requestId}):Promise.reject(new Error('This request identifier already belongs to a different message.'));
     if(this.active||this.preparing)return Promise.reject(new TutorProviderError('busy'));

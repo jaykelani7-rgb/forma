@@ -27,13 +27,16 @@ export class RecognitionHub {
   private proposals = new Map<string, Proposal>();
   private listeners = new Map<string, () => void>();
   private tail: Promise<unknown> = Promise.resolve();
+  private epoch=0;
   constructor(private host: { snapshot: () => Promise<LocalSnapshot>; command: (c: CompanionCommand) => Promise<unknown>; select: (fileUri: string, clientId: string) => Promise<unknown>; changed: () => void; now?: () => number }) {}
   private now() { return this.host.now?.() ?? Date.now(); }
-  private serial<T>(work: () => Promise<T>): Promise<T> { const next = this.tail.then(work); this.tail = next.catch(() => {}); return next; }
+  private serial<T>(work: () => Promise<T>): Promise<T> { const epoch=this.epoch; const next = this.tail.then(()=>{if(epoch!==this.epoch)throw new Error('The editor connection was reset. Send the current context again.');return work();}); this.tail = next.catch(() => {}); return next; }
+  async idle(){await this.tail;}
+  folderObservation(){const workspaces=new Set([...this.clients.values()].filter(c=>this.eligible(c)).map(c=>c.workspaceId));return workspaces.size?{observable:true,eligibleWorkspaceCount:workspaces.size}:{observable:false};}
   presentation() { const c = this.clients.get(this.lastOwner ?? ""); return c && this.eligible(c) ? this.view : null; }
   activeFileUri() { const c = this.clients.get(this.activeTarget?.instanceId ?? ""); return c && this.eligible(c) && !c.suppressed && c.fileUri === this.activeTarget?.fileUri && c.generation === this.activeTarget?.generation ? c.fileUri : null; }
   cancelBrowser() { for (const p of this.proposals.values()) if (["waiting", "choose-file"].includes(p.status)) p.status = "cancelled"; for (const wake of this.listeners.values()) wake(); }
-  reset() { this.clients.clear(); this.withdrawn.clear(); this.owner = this.lastOwner = null; this.activeTarget = this.conflictTarget = null; this.focusTime = 0; this.suppressed = null; this.view = null; this.switchTarget = null; for (const p of this.proposals.values()) if (p.status === "waiting" || p.status === "choose-file") p.status = "cancelled"; for (const wake of this.listeners.values()) wake(); this.host.changed(); }
+  reset() { this.epoch++; this.clients.clear(); this.withdrawn.clear(); this.owner = this.lastOwner = null; this.activeTarget = this.conflictTarget = null; this.focusTime = 0; this.suppressed = null; this.view = null; this.switchTarget = null; for (const p of this.proposals.values()) if (p.status === "waiting" || p.status === "choose-file") p.status = "cancelled"; for (const wake of this.listeners.values()) wake(); this.host.changed(); }
   private eligible(c: Client) { return !!c.fileUri && this.now() - c.seenAt <= CLIENT_MAX_AGE; }
   private binding(snapshot: LocalSnapshot, c: Client) { return snapshot.state.bindings.find(b => b.fileUri === c.fileUri && (!b.clientId || b.clientId === c.clientId)); }
   private delivery(instanceId: string): BrowserDelivery | undefined {

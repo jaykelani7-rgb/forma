@@ -37,7 +37,7 @@ test('schema two migrates non-destructively to tutor tables on the original SQLi
     const before=store.snapshot(),receipts=store.db.prepare('SELECT * FROM applied_commands').all(),outbox=store.db.prepare('SELECT * FROM outbox').all();
     store.db.exec('DROP TABLE tutor_proposals; DROP TABLE tutor_requests; DROP TABLE tutor_turns; DROP TABLE tutor_conversations; DROP TABLE tutor_codes; DROP TABLE tutor_statement_current; DROP TABLE tutor_statement_captures; DROP TABLE tutor_statements; DROP TABLE tutor_settings; PRAGMA user_version=2;');
     store.close();store=new CompanionStore(path);
-    assert.equal(store.tutor.db,store.db);assert.equal(store.db.prepare('PRAGMA user_version').get()!.user_version,4);
+    assert.equal(store.tutor.db,store.db);assert.equal(store.db.prepare('PRAGMA user_version').get()!.user_version,5);
     assert.deepEqual(store.snapshot(),before);assert.deepEqual(store.db.prepare('SELECT * FROM applied_commands').all(),receipts);assert.deepEqual(store.db.prepare('SELECT * FROM outbox').all(),outbox);
     assert.deepEqual(store.tutor.view().conversations,[]);
   }finally{store.close();rmSync(folder,{recursive:true,force:true});}
@@ -112,7 +112,7 @@ test('schema three deterministically selects its latest legacy content and adds 
     const notebook=store.snapshot(),receipts=store.db.prepare('SELECT * FROM applied_commands').all(),outbox=store.db.prepare('SELECT * FROM outbox').all();
     store.db.exec('DROP TABLE tutor_statement_current; DROP TABLE tutor_statement_captures; PRAGMA user_version=3;');
     store.close();store=new CompanionStore(path);
-    assert.equal(store.db.prepare('PRAGMA user_version').get()!.user_version,4);
+    assert.equal(store.db.prepare('PRAGMA user_version').get()!.user_version,5);
     assert.deepEqual(store.tutor.context(f.conversation.id).statement,legacyB);
     assert.deepEqual(store.tutor.turns(f.conversation.id)[0].context,originalContext);
     assert.equal(store.tutor.turns(f.conversation.id)[0].provider,'openai');
