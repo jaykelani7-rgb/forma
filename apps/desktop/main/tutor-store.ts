@@ -10,24 +10,42 @@ interface TutorOwner {snapshot():LocalSnapshot;approveTutorLearning(proposal:Tut
 const DEFAULT_SETTINGS:TutorSettings={contestMode:false,retentionDays:90,voiceOutput:false};
 const MAX_LOCAL_BYTES=32*1024*1024;
 const decode=<T>(value:unknown):T=>JSON.parse(String(value)) as T;
+const decodeTurn=(value:unknown):TutorTurn=>{const turn=decode<TutorTurn>(value);return {...turn,provider:turn.provider??'openai'};};
 
 /** Uses only the existing worker's DatabaseSync. No network, credentials or raw audio enter this store. */
 export class TutorStore {
   constructor(readonly db:DatabaseSync,private readonly owner:TutorOwner,now=Date.now()) {
     this.transaction(()=>{
+      const version=Number(db.prepare('PRAGMA user_version').get()?.user_version??0);
       db.exec(`CREATE TABLE IF NOT EXISTS tutor_conversations (id TEXT PRIMARY KEY, identity TEXT NOT NULL, updated_at TEXT NOT NULL, body TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS tutor_turns (id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL REFERENCES tutor_conversations(id) ON DELETE CASCADE, request_id TEXT NOT NULL UNIQUE, status TEXT NOT NULL, body TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS tutor_requests (id TEXT PRIMARY KEY, turn_id TEXT NOT NULL REFERENCES tutor_turns(id) ON DELETE CASCADE, body TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS tutor_statements (id TEXT PRIMARY KEY, identity TEXT NOT NULL, captured_at TEXT NOT NULL, body TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS tutor_statement_captures (sequence INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, statement_id TEXT NOT NULL REFERENCES tutor_statements(id) ON DELETE CASCADE, identity TEXT NOT NULL, captured_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS tutor_statement_current (identity TEXT PRIMARY KEY, capture_sequence INTEGER NOT NULL UNIQUE REFERENCES tutor_statement_captures(sequence) ON DELETE CASCADE);
         CREATE TABLE IF NOT EXISTS tutor_codes (id TEXT PRIMARY KEY, identity TEXT NOT NULL, body TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS tutor_proposals (id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL REFERENCES tutor_conversations(id) ON DELETE CASCADE, body TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS tutor_settings (id INTEGER PRIMARY KEY CHECK(id=1), body TEXT NOT NULL);
         CREATE INDEX IF NOT EXISTS tutor_turn_conversation ON tutor_turns(conversation_id);
         CREATE INDEX IF NOT EXISTS tutor_turn_attempt ON tutor_turns(json_extract(body,'$.context.sessionId'),json_extract(body,'$.context.problemId'));
-        PRAGMA user_version=3;`);
+        CREATE INDEX IF NOT EXISTS tutor_statement_capture_identity ON tutor_statement_captures(identity,sequence);
+        PRAGMA user_version=4;`);
+      if(version<4){
+        // Content-addressed rows are immutable. The old timestamp + rowid order
+        // provides a deterministic initial selection, then capture sequence is
+        // the sole ordering authority (including equal/backwards wall clocks).
+        for(const row of db.prepare('SELECT id,identity,captured_at FROM tutor_statements ORDER BY captured_at,rowid').all()){
+          db.prepare('INSERT OR IGNORE INTO tutor_statement_captures(id,statement_id,identity,captured_at) VALUES(?,?,?,?)').run(row.id,row.id,row.identity,row.captured_at);
+        }
+        db.exec(`INSERT OR IGNORE INTO tutor_statement_current(identity,capture_sequence)
+          SELECT identity,MAX(sequence) FROM tutor_statement_captures GROUP BY identity;`);
+        // Pre-provider records belong to OpenAI. Normalize only provenance;
+        // immutable request contexts and their original capture metadata survive.
+        for(const table of ['tutor_turns','tutor_requests'])db.exec(`UPDATE ${table} SET body=json_set(body,'$.provider','openai') WHERE json_extract(body,'$.provider') IS NULL;`);
+      }
       db.prepare('INSERT OR IGNORE INTO tutor_settings VALUES(1,?)').run(JSON.stringify(DEFAULT_SETTINGS));
       for(const row of db.prepare("SELECT body FROM tutor_turns WHERE status IN ('queued','streaming')").all()){
-        const turn=decode<TutorTurn>(row.body);
+        const turn=decodeTurn(row.body);
         this.writeTurn({...turn,status:'interrupted',completedAt:new Date(now).toISOString(),error:'The app closed before this response finished. Retry explicitly to send another request.'});
       }
       this.prune(now);
@@ -44,6 +62,7 @@ export class TutorStore {
       SELECT COALESCE(SUM(length(CAST(body AS BLOB))),0) FROM tutor_turns UNION ALL
       SELECT COALESCE(SUM(length(CAST(body AS BLOB))),0) FROM tutor_requests UNION ALL
       SELECT COALESCE(SUM(length(CAST(body AS BLOB))),0) FROM tutor_statements UNION ALL
+      SELECT COALESCE(SUM(length(id)+length(statement_id)+length(identity)+length(captured_at)+16),0) FROM tutor_statement_captures UNION ALL
       SELECT COALESCE(SUM(length(CAST(body AS BLOB))),0) FROM tutor_codes UNION ALL
       SELECT COALESCE(SUM(length(CAST(body AS BLOB))),0) FROM tutor_proposals)`).get();
     // Reserve worst-case UTF-8 room for the one permitted response up front;
@@ -52,11 +71,15 @@ export class TutorStore {
     if(Number(total?.bytes)+active*TUTOR_BUDGET.response*4>MAX_LOCAL_BYTES)throw new Error('Local tutor storage reached 32 MiB. Export and delete an older conversation before continuing.');
   }
   private prune(now:number) {
-    const cutoff=new Date(now-this.settings().retentionDays*86400000).toISOString();
-    this.db.prepare("DELETE FROM tutor_conversations WHERE updated_at < ? AND id NOT IN (SELECT conversation_id FROM tutor_turns WHERE status IN ('queued','streaming'))").run(cutoff);
-    this.db.prepare('DELETE FROM tutor_statements WHERE captured_at < ? AND identity NOT IN (SELECT identity FROM tutor_conversations)').run(cutoff);
-    // A staged code share is a short-lived local draft, never an implicit future send.
-    for(const row of this.db.prepare('SELECT id,body FROM tutor_codes').all())if(Date.parse(decode<SharedCode>(row.body).capturedAt)<now-86400000)this.db.prepare('DELETE FROM tutor_codes WHERE id=?').run(String(row.id));
+    this.transaction(()=>{
+      const cutoff=new Date(now-this.settings().retentionDays*86400000).toISOString();
+      this.db.prepare("DELETE FROM tutor_conversations WHERE updated_at < ? AND id NOT IN (SELECT conversation_id FROM tutor_turns WHERE status IN ('queued','streaming'))").run(cutoff);
+      this.db.prepare('DELETE FROM tutor_statement_captures WHERE captured_at < ? AND identity NOT IN (SELECT identity FROM tutor_conversations)').run(cutoff);
+      this.db.prepare('DELETE FROM tutor_statements WHERE id NOT IN (SELECT statement_id FROM tutor_statement_captures)').run();
+      // Staged shares remain selectable for a day, including a draft's older
+      // explicit selection after a newer snapshot becomes available.
+      for(const row of this.db.prepare('SELECT id,body FROM tutor_codes').all())if(Date.parse(decode<SharedCode>(row.body).capturedAt)<now-86400000)this.db.prepare('DELETE FROM tutor_codes WHERE id=?').run(String(row.id));
+    });
   }
   settings():TutorSettings {return decode<TutorSettings>(this.db.prepare('SELECT body FROM tutor_settings WHERE id=1').get()!.body);}
   setSettings(input:unknown,now=Date.now()):TutorSettings {
@@ -65,7 +88,7 @@ export class TutorStore {
     return this.transaction(()=>{
       const settings={...this.settings(),...value} as TutorSettings;
       this.db.prepare('UPDATE tutor_settings SET body=? WHERE id=1').run(JSON.stringify(settings));
-      if(settings.contestMode)for(const row of this.db.prepare("SELECT body FROM tutor_turns WHERE status IN ('queued','streaming')").all())this.writeTurn({...decode<TutorTurn>(row.body),status:'interrupted',completedAt:new Date(now).toISOString(),error:'Contest mode stopped assistance.'});
+      if(settings.contestMode)for(const row of this.db.prepare("SELECT body FROM tutor_turns WHERE status IN ('queued','streaming')").all())this.writeTurn({...decodeTurn(row.body),status:'interrupted',completedAt:new Date(now).toISOString(),error:'Contest mode stopped assistance.'});
       this.prune(now);return settings;
     });
   }
@@ -97,20 +120,29 @@ export class TutorStore {
   }
   turns(conversationId:unknown):TutorTurn[] {
     const conversation=this.conversation(conversationId);
-    return this.db.prepare('SELECT body FROM tutor_turns WHERE conversation_id=? ORDER BY rowid').all(conversation.id).map(row=>decode<TutorTurn>(row.body));
+    return this.db.prepare('SELECT body FROM tutor_turns WHERE conversation_id=? ORDER BY rowid').all(conversation.id).map(row=>decodeTurn(row.body));
+  }
+  private capturedStatement(id:string):StatementSnapshot|null {
+    const row=this.db.prepare(`SELECT content.body,capture.id,capture.captured_at FROM tutor_statement_captures capture
+      JOIN tutor_statements content ON content.id=capture.statement_id WHERE capture.id=?`).get(id);
+    return row?{...decode<StatementSnapshot>(row.body),id:String(row.id),capturedAt:String(row.captured_at)}:null;
   }
   statement(input:unknown,now=Date.now()):StatementSnapshot|null {
     const value=tutorObject(input);
     if(Object.keys(value).length===1&&typeof value.identity==='string'){
       if(!/^(contest|gym):[1-9]\d{0,8}:[A-Z]\d{0,8}$/.test(value.identity))throw new Error('Invalid statement identity.');
-      const row=this.db.prepare('SELECT body FROM tutor_statements WHERE identity=? ORDER BY captured_at DESC,rowid DESC LIMIT 1').get(value.identity);
-      return row?decode<StatementSnapshot>(row.body):null;
+      const row=this.db.prepare(`SELECT capture.id FROM tutor_statement_current current
+        JOIN tutor_statement_captures capture ON capture.sequence=current.capture_sequence WHERE current.identity=?`).get(value.identity);
+      return row?this.capturedStatement(String(row.id)):null;
     }
     const statement=validateStatement(value,now);
     if(!this.owner.snapshot().data.problems.some(problem=>canonicalProblemIdentity(problem)===statement.identity))throw new Error('Attach this problem before keeping its statement.');
     return this.transaction(()=>{
-      this.db.prepare('INSERT OR IGNORE INTO tutor_statements VALUES(?,?,?,?)').run(statement.id,statement.identity,statement.capturedAt,JSON.stringify(statement));this.quota();
-      return decode<StatementSnapshot>(this.db.prepare('SELECT body FROM tutor_statements WHERE id=?').get(statement.id)!.body);
+      this.db.prepare('INSERT OR IGNORE INTO tutor_statements VALUES(?,?,?,?)').run(statement.id,statement.identity,statement.capturedAt,JSON.stringify(statement));
+      const id=`statement-capture:${randomUUID()}`;
+      const capture=this.db.prepare('INSERT INTO tutor_statement_captures(id,statement_id,identity,captured_at) VALUES(?,?,?,?)').run(id,statement.id,statement.identity,statement.capturedAt);
+      this.db.prepare('INSERT INTO tutor_statement_current VALUES(?,?) ON CONFLICT(identity) DO UPDATE SET capture_sequence=excluded.capture_sequence').run(statement.identity,capture.lastInsertRowid);
+      this.quota();return this.capturedStatement(id)!;
     });
   }
   code(input:unknown):SharedCode {
@@ -121,23 +153,30 @@ export class TutorStore {
       if(existing&&String(existing.body)!==JSON.stringify(code))throw new Error('The shared-code identifier already refers to a different source snapshot.');
       const frozen=this.db.prepare("SELECT body FROM tutor_turns WHERE json_extract(body,'$.context.code.id')=? LIMIT 1").get(code.id);
       if(frozen&&JSON.stringify(decode<TutorTurn>(frozen.body).context.code)!==JSON.stringify(code))throw new Error('This shared-code identifier already belongs to an immutable request snapshot.');
-      // Only one unsent selection is retained. Frozen turns hold their own immutable copy.
-      this.db.prepare('DELETE FROM tutor_codes WHERE id<>?').run(code.id);
+      // A new share is available context, not permission to replace a draft's
+      // existing explicit selection. Retention bounds unsent snapshots.
       this.db.prepare('INSERT OR IGNORE INTO tutor_codes VALUES(?,?,?)').run(code.id,code.identity,JSON.stringify(code));this.quota();return code;
     });
   }
-  private pendingCode():SharedCode|null {const row=this.db.prepare('SELECT body FROM tutor_codes ORDER BY rowid DESC LIMIT 1').get();return row?decode<SharedCode>(row.body):null;}
+  private pendingCode(identity?:string,workspaceId?:string):SharedCode|null {
+    const row=identity===undefined?this.db.prepare('SELECT body FROM tutor_codes ORDER BY rowid DESC LIMIT 1').get():this.db.prepare("SELECT body FROM tutor_codes WHERE identity=? AND json_extract(body,'$.workspaceId')=? ORDER BY rowid DESC LIMIT 1").get(identity,workspaceId!);
+    return row?decode<SharedCode>(row.body):null;
+  }
   context(conversationId:unknown):TutorContextView {
-    const conversation=this.conversation(conversationId),snapshot=this.owner.snapshot(),pending=this.pendingCode();
+    const conversation=this.conversation(conversationId),snapshot=this.owner.snapshot(),pending=this.pendingCode(conversation.identity,conversation.workspaceId);
     const statement=this.statement({identity:conversation.identity});
     const frozen=freezeTutorContext(snapshot,conversation,{statement,code:null,noteIds:[]});
     return {conversation,statement,pendingCode:pending?.identity===conversation.identity&&pending.workspaceId===conversation.workspaceId?pending:null,notes:availableTutorNotes(snapshot,conversation.problemId),sessionId:frozen.sessionId,evidence:frozen.evidence};
   }
-  private readTurn(id:unknown):TutorTurn {const row=this.db.prepare('SELECT body FROM tutor_turns WHERE id=?').get(tutorId(id));if(!row)throw new Error('This tutor turn is no longer available.');return decode<TutorTurn>(row.body);}
+  private readTurn(id:unknown):TutorTurn {const row=this.db.prepare('SELECT body FROM tutor_turns WHERE id=?').get(tutorId(id));if(!row)throw new Error('This tutor turn is no longer available.');return decodeTurn(row.body);}
   private writeTurn(turn:TutorTurn) {
     this.db.prepare('UPDATE tutor_turns SET request_id=?,status=?,body=? WHERE id=?').run(turn.requestId,turn.status,JSON.stringify(turn),turn.id);
   }
-  prepare(input:unknown,model:unknown,now=Date.now()):TutorTurn {
+  prepare(input:unknown,model:unknown,providerOrNow:unknown='openai',timestamp=Date.now()):TutorTurn {
+    // Keep direct pre-provider callers' third timestamp argument compatible.
+    const now=typeof providerOrNow==='number'?providerOrNow:timestamp;
+    const provider=typeof providerOrNow==='number'?'openai':providerOrNow;
+    if(provider!=='gemini'&&provider!=='openai')throw new Error('Choose a supported tutor provider.');
     const value=tutorObject(input);tutorFields(value,['turnId','requestId','conversationId','action','text','statementId','codeId','noteIds']);
     const request:TutorSendInput={turnId:tutorId(value.turnId),requestId:tutorId(value.requestId),conversationId:tutorId(value.conversationId),action:parseTutorAction(value.action),text:tutorText(value.text,TUTOR_BUDGET.user,1),statementId:value.statementId===null?null:tutorId(value.statementId),codeId:value.codeId===null?null:tutorId(value.codeId),noteIds:Array.isArray(value.noteIds)?value.noteIds.map(tutorId):[]};
     if(!request.text.trim()||!Array.isArray(value.noteIds))throw new Error('Write a question and explicitly select its context.');
@@ -147,7 +186,7 @@ export class TutorStore {
       const conversation=this.conversation(request.conversationId);
       const previousRow=this.db.prepare('SELECT body FROM tutor_turns WHERE id=?').get(request.turnId);
       if(previousRow){
-        const previous=decode<TutorTurn>(previousRow.body);
+        const previous=decodeTurn(previousRow.body);
         const old={conversationId:previous.conversationId,action:previous.action,text:previous.userText,statementId:previous.context.statement?.id??null,codeId:previous.context.code?.id??null,noteIds:previous.context.notes.map(note=>note.id).sort()};
         const incoming={conversationId:request.conversationId,action:request.action,text:request.text,statementId:request.statementId,codeId:request.codeId,noteIds:[...request.noteIds].sort()};
         if(JSON.stringify(old)!==JSON.stringify(incoming))throw new Error('This user turn already has a different frozen question or context. Create a new turn.');
@@ -156,19 +195,20 @@ export class TutorStore {
         if(this.db.prepare("SELECT id FROM tutor_turns WHERE status IN ('queued','streaming') AND id<>? LIMIT 1").get(previous.id))throw new Error('Stop the current tutor response before retrying another request.');
         if(this.db.prepare('SELECT id FROM tutor_requests WHERE id=?').get(request.requestId)||this.db.prepare('SELECT id FROM tutor_turns WHERE request_id=?').get(request.requestId))throw new Error('This provider request ID has already been used.');
         this.db.prepare('INSERT OR IGNORE INTO tutor_requests VALUES(?,?,?)').run(previous.requestId,previous.id,JSON.stringify(previous));
-        const retry={...previous,requestId:request.requestId,assistantText:'',status:'queued' as const,completedAt:null,error:null,usage:null,model:selectedModel};
+        const retry:TutorTurn={...previous,requestId:request.requestId,assistantText:'',status:'queued',completedAt:null,error:null,usage:null,model:selectedModel,provider};
+        delete retry.responseModel;
         this.writeTurn(retry);this.quota();return retry;
       }
       if(this.db.prepare("SELECT id FROM tutor_turns WHERE status IN ('queued','streaming') LIMIT 1").get())throw new Error('Stop the current tutor response before sending another request.');
       if(this.db.prepare('SELECT id FROM tutor_requests WHERE id=?').get(request.requestId)||this.db.prepare('SELECT id FROM tutor_turns WHERE request_id=?').get(request.requestId))throw new Error('This provider request ID has already been used.');
       if(this.turns(conversation.id).length>=200)throw new Error('This conversation reached its 200-turn limit. Export and delete it before starting again.');
       let statement:StatementSnapshot|null=null,code:SharedCode|null=null;
-      if(request.statementId){const row=this.db.prepare('SELECT body FROM tutor_statements WHERE id=?').get(request.statementId);if(!row)throw new Error('The selected statement snapshot is unavailable.');statement=decode<StatementSnapshot>(row.body);}
+      if(request.statementId){statement=this.capturedStatement(request.statementId);if(!statement)throw new Error('The selected statement snapshot is unavailable.');}
       if(request.codeId){const row=this.db.prepare('SELECT body FROM tutor_codes WHERE id=?').get(request.codeId);if(!row)throw new Error('The selected source snapshot changed. Review the new code before sending.');code=decode<SharedCode>(row.body);}
       if(request.action!=='discuss'&&!statement?.complete)throw new Error('Include a complete statement before requesting problem-specific hints, code review, or an explanation. A URL or title is not the statement.');
       if(request.action==='check-code'&&!code)throw new Error('Explicitly share and include selected code before asking for a code check.');
       const context=freezeTutorContext(this.owner.snapshot(),conversation,{statement,code,noteIds:request.noteIds},now);
-      const turn:TutorTurn={id:request.turnId,requestId:request.requestId,conversationId:conversation.id,action:request.action,userText:request.text,assistantText:'',context,status:'queued',createdAt:new Date(now).toISOString(),completedAt:null,error:null,hintLevel:hintLevelForAction(request.action,this.turns(conversation.id)),exposed:false,usage:null,model:selectedModel};
+      const turn:TutorTurn={id:request.turnId,requestId:request.requestId,conversationId:conversation.id,action:request.action,userText:request.text,assistantText:'',context,status:'queued',createdAt:new Date(now).toISOString(),completedAt:null,error:null,hintLevel:hintLevelForAction(request.action,this.turns(conversation.id)),exposed:false,usage:null,model:selectedModel,provider};
       buildProviderMessages(turn,this.turns(conversation.id));
       this.db.prepare('INSERT INTO tutor_turns VALUES(?,?,?,?,?)').run(turn.id,turn.conversationId,turn.requestId,turn.status,JSON.stringify(turn));
       const updated={...conversation,updatedAt:new Date(now).toISOString()};
@@ -194,7 +234,7 @@ export class TutorStore {
     // that factual exposure against its archived request and original turn.
     const row=this.db.prepare('SELECT body FROM tutor_requests WHERE id=? AND turn_id=?').get(requestId,turn.id);
     if(!row)return null;
-    const previous=decode<TutorTurn>(row.body);if(!previous.assistantText.trim())return null;
+    const previous=decodeTurn(row.body);if(!previous.assistantText.trim())return null;
     this.db.prepare('UPDATE tutor_requests SET body=? WHERE id=?').run(JSON.stringify({...previous,exposed:true}),requestId);
     const exposed={...turn,exposed:true};this.writeTurn(exposed);return exposed;
   }
@@ -205,26 +245,29 @@ export class TutorStore {
     return {shown:rows.length,hintLevels:[...new Set(rows.map(row=>Number(row.hintLevel)).filter(level=>level>0))].sort((a,b)=>a-b),actions:[...new Set(rows.map(row=>parseTutorAction(row.action)))]};
   }
   finalize(input:unknown,now=Date.now()):TutorTurn|null {
-    const value=tutorObject(input);tutorFields(value,['turnId','requestId','status','error','usage']);const turn=this.readTurn(value.turnId),requestId=tutorId(value.requestId);
+    const value=tutorObject(input);tutorFields(value,['turnId','requestId','status','error','usage','responseModel']);const turn=this.readTurn(value.turnId),requestId=tutorId(value.requestId);
     if(turn.requestId!==requestId||!['queued','streaming'].includes(turn.status))return null;
     if(!['completed','interrupted','failed'].includes(String(value.status)))throw new Error('Invalid tutor completion status.');
     let usage:TutorUsage|null=null;
     if(value.usage!==null&&value.usage!==undefined){const u=tutorObject(value.usage);tutorFields(u,['inputTokens','outputTokens','totalTokens']);if(![u.inputTokens,u.outputTokens,u.totalTokens].every(n=>Number.isSafeInteger(n)&&Number(n)>=0&&Number(n)<=100_000_000)||Number(u.totalTokens)<Number(u.inputTokens)+Number(u.outputTokens))throw new Error('Invalid provider usage.');usage={inputTokens:Number(u.inputTokens),outputTokens:Number(u.outputTokens),totalTokens:Number(u.totalTokens)};}
     const status=this.settings().contestMode?'interrupted':value.status as 'completed'|'interrupted'|'failed';
     if(status==='completed'&&!turn.assistantText.trim())throw new Error('An empty provider response cannot be marked complete.');
-    const next={...turn,status,completedAt:new Date(now).toISOString(),error:value.error===null||value.error===undefined?null:tutorText(value.error,500),usage};this.writeTurn(next);return next;
+    const next:TutorTurn={...turn,status,completedAt:new Date(now).toISOString(),error:value.error===null||value.error===undefined?null:tutorText(value.error,500),usage,...(value.responseModel===undefined?{}:{responseModel:tutorText(value.responseModel,120,1)})};this.writeTurn(next);return next;
   }
   delete(conversationId:unknown) {
     const conversation=this.conversation(conversationId);
     this.transaction(()=>{
       this.db.prepare('DELETE FROM tutor_conversations WHERE id=?').run(conversation.id);
-      if(!this.db.prepare('SELECT id FROM tutor_conversations WHERE identity=?').get(conversation.identity))this.db.prepare('DELETE FROM tutor_statements WHERE identity=?').run(conversation.identity);
-      this.db.prepare('DELETE FROM tutor_codes WHERE identity=?').run(conversation.identity);
+      if(!this.db.prepare('SELECT id FROM tutor_conversations WHERE identity=?').get(conversation.identity)){
+        // Content deletion cascades capture history and its current pointer.
+        this.db.prepare('DELETE FROM tutor_statements WHERE identity=?').run(conversation.identity);
+        this.db.prepare('DELETE FROM tutor_codes WHERE identity=?').run(conversation.identity);
+      }
     });return {deleted:true};
   }
   export(conversationId?:unknown):string {
     const conversations=conversationId===undefined?this.view().conversations:[this.conversation(conversationId)];
-    return JSON.stringify({format:'forma-tutor',version:1,exportedAt:new Date().toISOString(),conversations:conversations.map(conversation=>({conversation,turns:this.turns(conversation.id),previousRequests:this.db.prepare('SELECT body FROM tutor_requests WHERE turn_id IN (SELECT id FROM tutor_turns WHERE conversation_id=?) ORDER BY rowid').all(conversation.id).map(row=>decode<TutorTurn>(row.body)),proposals:this.db.prepare('SELECT body FROM tutor_proposals WHERE conversation_id=?').all(conversation.id).map(row=>decode<TutorProposal>(row.body))}))},null,2);
+    return JSON.stringify({format:'forma-tutor',version:1,exportedAt:new Date().toISOString(),conversations:conversations.map(conversation=>({conversation,turns:this.turns(conversation.id),previousRequests:this.db.prepare('SELECT body FROM tutor_requests WHERE turn_id IN (SELECT id FROM tutor_turns WHERE conversation_id=?) ORDER BY rowid').all(conversation.id).map(row=>decodeTurn(row.body)),proposals:this.db.prepare('SELECT body FROM tutor_proposals WHERE conversation_id=?').all(conversation.id).map(row=>decode<TutorProposal>(row.body))}))},null,2);
   }
   propose(input:unknown,now=Date.now()):TutorProposal {
     const value=tutorObject(input);tutorFields(value,['id','turnId','kind','text']);const id=tutorId(value.id),turn=this.readTurn(value.turnId);

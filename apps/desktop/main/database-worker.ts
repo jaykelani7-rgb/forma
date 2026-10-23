@@ -25,7 +25,7 @@ parentPort!.on('message', (request: {id:number;method:string;args:unknown[]}) =>
       case 'tutor-turns': value=store.tutor.turns(a[0]); break;
       case 'tutor-statement': value=store.tutor.statement(a[0],now); break;
       case 'tutor-code': value=store.tutor.code(a[0]); break;
-      case 'tutor-prepare': value=store.tutor.prepare(a[0],a[1],now); break;
+      case 'tutor-prepare': value=store.tutor.prepare(a[0],a[1],a[2]===undefined?'openai':a[2],now); break;
       case 'tutor-append': value=store.tutor.append(a[0]); break;
       case 'tutor-exposed': value=store.tutor.exposed(a[0]); break;
       case 'tutor-assistance': value=store.tutor.assistance(a[0]); break;

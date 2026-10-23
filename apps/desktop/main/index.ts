@@ -3,9 +3,11 @@ import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { randomBytes, randomUUID } from "node:crypto";
 import { TutorConfiguration } from "./tutor-config";
-import { OpenAITutorProvider, speechReadyText } from "./tutor-provider";
+import { ConfiguredTutorProvider, speechReadyText, TutorProviderError } from "./tutor-provider";
 import { TutorService } from "./tutor-service";
-import type { SharedCode, TutorConversation, TutorSendInput, TutorStoredView, TutorTurn } from "../../../packages/tutor/types";
+import { TutorHostVoice } from "./tutor-host-voice";
+import { tutorExternalUrl } from "../../../packages/tutor/links";
+import type { SharedCode, StatementSnapshot, TutorConversation, TutorEvent, TutorSendInput, TutorStoredView, TutorTurn } from "../../../packages/tutor/types";
 import { AttentionPolicy } from "./attention";
 import { companionToday } from "../../../packages/core/src/companion-today";
 import { localDate } from "../../../src/lib/model";
@@ -48,12 +50,36 @@ let codeforcesHandle:string|null=null;
 let lastCheck=0;
 let lastTick=Date.now();
 let tutorConfiguration:TutorConfiguration;
-let tutorProvider:OpenAITutorProvider;
+let tutorProvider:ConfiguredTutorProvider;
 let tutorService:TutorService;
 let microphoneLeaseUntil=0;
-let voiceController:AbortController|null=null;
-function cancelVoice(){microphoneLeaseUntil=0;voiceController?.abort();voiceController=null;}
+const hostVoice=new TutorHostVoice();
+function cancelVoice(){microphoneLeaseUntil=0;hostVoice.cancel();}
+function emitTutor(event:TutorEvent){if(window&&!window.isDestroyed())window.webContents.send('forma:tutor-event',event);}
+async function captureTutorStatement(input:unknown){
+  const saved=await database.call<StatementSnapshot|null>('tutor-statement',input);
+  if(saved&&input&&typeof input==='object'&&Object.keys(input).length>1)emitTutor({kind:'context',identity:saved.identity,source:'statement'});
+  return saved;
+}
+async function shareTutorCode(code:SharedCode){
+  await database.call('tutor-code',code);
+  const local=await database.call<LocalSnapshot>('snapshot');
+  const binding=local.state.bindings.find(b=>b.fileUri===code.fileUri&&b.identity===code.identity&&b.clientId===code.clientId&&b.workspaceId===code.workspaceId);
+  if(!binding)throw new Error('Confirm the shared code association first.');
+  const conversation=await database.call<TutorConversation>('tutor-open',{problemId:binding.problemId,workspaceId:code.workspaceId});
+  emitTutor({kind:'context',identity:code.identity,conversationId:conversation.id,source:'code'});
+  // An explicit share opens Fenn when needed; an existing draft stays on screen.
+  if(panelRequest?.panel!=='tutor')await openTutor({conversationId:conversation.id});
+  return {revision:local.revision};
+}
+function voiceReady(capability:'transcription'|'speech'){
+  if(tutorService.isConfiguring)throw new TutorProviderError('busy');
+  const status=tutorProvider.status();
+  if(!status.configured)throw new TutorProviderError('setup',status.provider);
+  if(!status.capabilities[capability])throw new TutorProviderError('model-capability',status.provider);
+}
 async function openTutor(input:unknown={}){
+  cancelVoice();
   let choice=input;
   if(input&&typeof input==='object'&&!Object.keys(input).length){const current=await database.call<LocalSnapshot>('snapshot');if(!current.state.problemId){const prior=(await database.call<TutorStoredView>('tutor-view')).conversations[0];if(prior)choice={conversationId:prior.id};}}
   const conversation=await database.call<TutorConversation>('tutor-open',choice);
@@ -66,39 +92,55 @@ async function tutorUi(action:string,payload:unknown){
   switch(action){
     case 'tutor-show':return openTutor(payload??{});
     case 'tutor-view':{const stored=await database.call<TutorStoredView>('tutor-view');return {...stored,provider:tutorProvider.status(),activeRequestId:tutorService.activeRequestId};}
+    case 'tutor-provider-options':return [tutorProvider.statusFor('gemini'),tutorProvider.statusFor('openai')];
     case 'tutor-open':return database.call('tutor-open',payload??{});
-    case 'tutor-turns':case 'tutor-context':case 'tutor-statement':case 'tutor-exposed':case 'tutor-propose':return database.call(action,payload);
+    case 'tutor-statement':return captureTutorStatement(payload);
+    case 'tutor-turns':case 'tutor-context':case 'tutor-exposed':case 'tutor-propose':return database.call(action,payload);
     case 'tutor-code-remove':return database.call(action);
     case 'tutor-approve':{const result=await database.call(action,payload);await broadcast();return result;}
     case 'tutor-send':return tutorService.send(payload as TutorSendInput);
     case 'tutor-stop':if(typeof payload!=='string')throw new Error('Choose a running response.');await tutorService.stop(payload);return null;
     case 'tutor-settings':{const result=await database.call(action,payload);if((payload as {contestMode?:boolean})?.contestMode){cancelVoice();await tutorService.cancelAll();}return result;}
-    case 'tutor-configure':await tutorService.cancelAll();cancelVoice();tutorConfiguration.update(payload);return tutorProvider.status();
+    case 'tutor-configure':{
+      cancelVoice();
+      return tutorService.configure(()=>{tutorConfiguration.update(payload);const status=tutorProvider.status();emitTutor({kind:'configuration',provider:status.provider});return status;});
+    }
     case 'tutor-delete':await tutorService.cancelAll();cancelVoice();return database.call(action,payload);
     case 'tutor-export':{
       const json=await database.call<string>(action,payload);const choice=await dialog.showSaveDialog(window,{defaultPath:'forma-tutor-conversation.json',filters:[{name:'Tutor conversation',extensions:['json']}]});
       if(choice.canceled||!choice.filePath)return {saved:false};writeFileSync(choice.filePath,json,{mode:0o600});return {saved:true};
     }
     case 'tutor-microphone':{
-      const settings=(await database.call<TutorStoredView>('tutor-view')).settings;if(settings.contestMode)throw new Error('Contest mode disables voice assistance.');
-      if(!tutorProvider.status().configured)throw new Error('Set up your OpenAI API key before voice transcription.');
-      cancelVoice();if(process.platform==='darwin'&&!await systemPreferences.askForMediaAccess('microphone'))throw new Error('Microphone access was denied. Enable it in macOS Privacy settings, or type your question.');
-      microphoneLeaseUntil=Date.now()+15000;return {allowed:true};
+      cancelVoice();const request=hostVoice.begin();
+      try{
+        const settings=(await database.call<TutorStoredView>('tutor-view')).settings;request.assertCurrent();
+        if(settings.contestMode)throw new Error('Contest mode disables voice assistance.');voiceReady('transcription');
+        if(process.platform==='darwin'&&!await systemPreferences.askForMediaAccess('microphone'))throw new Error('Microphone access was denied. Enable it in macOS Privacy settings, or type your question.');
+        request.assertCurrent();voiceReady('transcription');microphoneLeaseUntil=Date.now()+15000;return {allowed:true};
+      }catch(error){request.finish();throw error;}
     }
     case 'tutor-voice-cancel':cancelVoice();return null;
     case 'tutor-transcribe':{
-      const settings=(await database.call<TutorStoredView>('tutor-view')).settings;if(settings.contestMode)throw new Error('Contest mode disables voice assistance.');
-      if(!payload||typeof payload!=='object'||Object.keys(payload).some(k=>!['bytes','mime'].includes(k)))throw new Error('Invalid voice recording.');
-      const {bytes,mime}=payload as {bytes:Uint8Array;mime:string};if(!(bytes instanceof Uint8Array)||bytes.byteLength>8*1024*1024||typeof mime!=='string')throw new Error('Use a recording smaller than 8 MB.');
-      cancelVoice();const controller=new AbortController();voiceController=controller;
-      try{return {text:await tutorProvider.transcribe(bytes,mime,controller.signal)};}finally{if(voiceController===controller)voiceController=null;}
+      if(!payload||typeof payload!=='object'||Object.keys(payload).some(k=>!['conversationId','bytes','mime'].includes(k)))throw new Error('Invalid voice recording.');
+      const {conversationId,bytes,mime}=payload as {conversationId:string;bytes:Uint8Array;mime:string};if(typeof conversationId!=='string'||!(bytes instanceof Uint8Array)||bytes.byteLength===0||bytes.byteLength>8*1024*1024||typeof mime!=='string')throw new Error('Choose a conversation and a nonempty recording smaller than 8 MB.');
+      cancelVoice();const request=hostVoice.begin();
+      try{
+        const settings=(await database.call<TutorStoredView>('tutor-view')).settings;request.assertCurrent();
+        if(settings.contestMode)throw new Error('Contest mode disables voice assistance.');voiceReady('transcription');
+        await database.call('tutor-context',conversationId);request.assertCurrent();voiceReady('transcription');
+        const text=await tutorProvider.transcribe(bytes,mime,request.signal);request.assertCurrent();return {text};
+      }finally{request.finish();}
     }
     case 'tutor-speech':{
-      const settings=(await database.call<TutorStoredView>('tutor-view')).settings;if(settings.contestMode||!settings.voiceOutput)throw new Error('Enable spoken replies to hear a completed response.');
       if(!payload||typeof payload!=='object'||Object.keys(payload).some(k=>!['conversationId','turnId'].includes(k)))throw new Error('Choose a completed response.');
-      const {conversationId,turnId}=payload as {conversationId:string;turnId:string};const turn=(await database.call<TutorTurn[]>('tutor-turns',conversationId)).find(t=>t.id===turnId&&t.status==='completed');
-      if(!turn)throw new Error('Only completed responses can be spoken.');const text=speechReadyText(turn.assistantText);if(!text)throw new Error('This response is best read as text.');
-      cancelVoice();const controller=new AbortController();voiceController=controller;try{return await tutorProvider.speech(text,controller.signal);}finally{if(voiceController===controller)voiceController=null;}
+      cancelVoice();const request=hostVoice.begin();
+      try{
+        const settings=(await database.call<TutorStoredView>('tutor-view')).settings;request.assertCurrent();
+        if(settings.contestMode||!settings.voiceOutput)throw new Error('Enable spoken replies to hear a completed response.');voiceReady('speech');
+        const {conversationId,turnId}=payload as {conversationId:string;turnId:string};const turn=(await database.call<TutorTurn[]>('tutor-turns',conversationId)).find(t=>t.id===turnId&&t.status==='completed');request.assertCurrent();
+        if(!turn)throw new Error('Only completed responses can be spoken.');const text=speechReadyText(turn.assistantText);if(!text)throw new Error('This response is best read as text.');voiceReady('speech');
+        const audio=await tutorProvider.speech(text,request.signal);request.assertCurrent();return audio;
+      }finally{request.finish();}
     }
     default:throw new Error('Unsupported Tutor action.');
   }
@@ -221,10 +263,7 @@ async function ui(action:string,payload:unknown){
     case 'hide':cancelVoice();window.hide();return null;
     case 'hitbox':if(typeof payload!=='boolean')throw new Error('Invalid hitbox.');window.setIgnoreMouseEvents(!payload,{forward:true});return null;
     case 'open-external': {
-      if(typeof payload!=='string')throw new Error('Invalid link.');
-      const url=new URL(payload);
-      if(url.protocol!=='https:'||url.username||url.password||url.port||!['codeforces.com','www.codeforces.com'].includes(url.hostname))throw new Error('Only verified Codeforces links may open from the companion.');
-      await shell.openExternal(url.toString());return null;
+      await shell.openExternal(tutorExternalUrl(payload));return null;
     }
     case 'open-vscode':await shell.openExternal('vscode://');return null;
     case 'open-forma':await shell.openExternal('http://localhost:3001');return null;
@@ -262,8 +301,8 @@ async function main(){
   database=new DatabaseClient(join(userData,'notebook.sqlite'));
   preferences=await database.call('preferences');
   tutorConfiguration=new TutorConfiguration(join(userData,'tutor-provider.enc'),{available:secureAvailable,encrypt:v=>safeStorage.encryptString(v),decrypt:v=>safeStorage.decryptString(v)});
-  tutorProvider=new OpenAITutorProvider(()=>tutorConfiguration.get());
-  tutorService=new TutorService({call:(method,...args)=>database.call(method,...args),emit:event=>{if(window&&!window.isDestroyed())window.webContents.send('forma:tutor-event',event);}},tutorProvider);
+  tutorProvider=new ConfiguredTutorProvider(provider=>tutorConfiguration.get(provider));
+  tutorService=new TutorService({call:(method,...args)=>database.call(method,...args),emit:emitTutor},tutorProvider);
   await database.call('reconcile');
   recognition=new RecognitionHub({snapshot:()=>database.call<LocalSnapshot>('snapshot'),command:c=>database.call('command',c,'vscode'),select:(file,client)=>database.call('selectBinding',file,client),changed:()=>{void broadcast();}});
   const browserSecret=join(userData,'browser-pairing.enc');
@@ -295,8 +334,8 @@ async function main(){
   tray.setContextMenu(Menu.buildFromTemplate([{label:'Open Fenn',click:show},{label:'Pet only',click:()=>expand(false)},{label:'Hide companion',click:()=>window.hide()},{label:'Snooze for an hour',click:()=>void setPreferences({snoozedUntil:new Date(Date.now()+3600000).toISOString()})},{type:'separator'},{label:'Export notebook…',click:()=>void saveFile('notebook')},{label:'Unsigned development build',enabled:false},{label:'Quit Forma Companion',click:()=>app.quit()}]));
   tray.on('click',show);
   try{registerShortcut(preferences.shortcut);}catch{ /* Tray recovery stays available when the shortcut is occupied. */ }
-  transport=await startTransport({...(developmentData?{endpoint:join(userData,'runtime','companion.sock')}:{}),credential:()=>credential,command:command=>applyCommand(command,'vscode'),tutorCode:async(code:SharedCode)=>{await database.call('tutor-code',code);const local=await database.call<LocalSnapshot>('snapshot');const binding=local.state.bindings.find(b=>b.fileUri===code.fileUri&&b.identity===code.identity&&(!b.clientId||b.clientId===code.clientId));if(!binding)throw new Error('Confirm the shared code association first.');await openTutor({problemId:binding.problemId,workspaceId:code.workspaceId});return {revision:local.revision};},recognition:request=>recognition.request(request),action:async action=>{if(action==='open'||action==='memory'){panelRequest={id:(panelRequest?.id??0)+1,panel:action==='memory'?'memory':'home'};show();}return (await database.call<LocalSnapshot>('snapshot')).revision;},context:async()=>{const local=await database.call<LocalSnapshot>('snapshot');return {identity:local.state.identity,sessionId:local.data.session?.id??null,hostEpoch};},connected:value=>{connected=value;void broadcast();}});
-  if(process.platform==='darwin')browserTransport=await startBrowserTransport({endpoint:join(userData,'runtime','browser.sock'),credential:()=>browserCredential,message:async m=>{if((m as {kind?:string})?.kind==='statement'){await database.call('tutor-statement',(m as {statement:unknown}).statement);return {ok:true,status:'saved'};}return recognition.browser(m);}});
+  transport=await startTransport({...(developmentData?{endpoint:join(userData,'runtime','companion.sock')}:{}),credential:()=>credential,command:command=>applyCommand(command,'vscode'),tutorCode:shareTutorCode,recognition:request=>recognition.request(request),action:async action=>{if(action==='open'||action==='memory'){panelRequest={id:(panelRequest?.id??0)+1,panel:action==='memory'?'memory':'home'};show();}return (await database.call<LocalSnapshot>('snapshot')).revision;},context:async()=>{const local=await database.call<LocalSnapshot>('snapshot');return {identity:local.state.identity,sessionId:local.data.session?.id??null,hostEpoch};},connected:value=>{connected=value;void broadcast();}});
+  if(process.platform==='darwin')browserTransport=await startBrowserTransport({endpoint:join(userData,'runtime','browser.sock'),credential:()=>browserCredential,message:async m=>{if((m as {kind?:string})?.kind==='statement'){await captureTutorStatement((m as {statement:unknown}).statement);return {ok:true,status:'saved'};}return recognition.browser(m);}});
   powerMonitor.on('suspend',()=>void database.call('pause','suspend').then(broadcast));
   powerMonitor.on('lock-screen',()=>void database.call('pause','screen-lock').then(broadcast));
   powerMonitor.on('resume',()=>{lastTick=Date.now();void broadcast();});

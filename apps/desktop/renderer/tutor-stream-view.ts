@@ -1,4 +1,11 @@
 import type { TutorTurn } from '../../../packages/tutor/types';
+export function tutorNearBottom(region:{scrollTop:number;scrollHeight:number;clientHeight:number}):boolean {
+  return region.scrollHeight-region.clientHeight-region.scrollTop<=64;
+}
+/** Exposure acknowledgements and usage metadata are not new conversation content. */
+export function tutorContentRevision(turns:TutorTurn[]):string {
+  return turns.map(turn=>`${turn.id}:${turn.requestId}:${turn.status}:${turn.assistantText.length}`).join('|');
+}
 /** A late queued/partial snapshot may not erase already rendered text or a final state. */
 export function mergeTutorTurns(previous:TutorTurn[],incoming:TutorTurn[]):TutorTurn[]{
   return incoming.map(turn=>{

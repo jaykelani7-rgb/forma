@@ -17,7 +17,7 @@ The unsigned Apple Silicon app can be prepared with `npm run companion:package`;
 
 ## Forma Tutor
 
-**Ask Fenn** opens optional local conversations with inspectable problem/statement/code context, streamed text, progressive hints, approved learning notes and recorded voice questions. Add your own key in Tutor Setup when ready; practice stays usable without it. See [Tutor setup, privacy, voice and walkthrough](tutor.md).
+**Ask Fenn** opens optional local conversations with inspectable problem/statement/code context, streamed text, progressive hints, approved learning notes and recorded voice questions. Gemini is the new-install default, with existing OpenAI setup preserved. Add your own provider key in Tutor Setup when ready; practice stays usable without it. See [Tutor setup, privacy, voice and walkthrough](tutor.md).
 
 ## Practice
 

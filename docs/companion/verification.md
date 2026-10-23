@@ -1,3 +1,23 @@
+# Gemini Tutor completion — 21 October 2026
+
+| Check | Result |
+| --- | --- |
+| `TZ=UTC npm test` | **542 passed**, zero skipped. Includes capture ordering/migration/rollback/retention/deletion, legacy OpenAI configuration, independent provider keys, provider switching during preparation/streaming, immutable provenance, structured errors, Gemini SSE/usage/refusal/timeout, transcription, WAV/PCM formats and cancellation. Every provider transport is injected; no provider calls were made. |
+| Full browser regression suite | **296 passed**, two pre-existing intentional skips. After the final manual-save/browser-capture race fix, all **18** targeted desktop/mobile Tutor cases passed. They cover inspected-versus-sent context, explicit adoption, frozen source, Stop/Retry, lost acknowledgement after navigation, provider switching, editable voice drafts, cancellation, Markdown/math, safe links and scroll position. Browser audio devices and bridge/provider responses are explicit fixtures. |
+| Sharing regressions | **24 passed** with the isolated local fixture service; no real publication. |
+| Lint, root/extension TypeScript and builds | Passed. Production website build and isolated sharing build passed; companion, VS Code and Chrome/native-host builds passed. Five teaching-rubric fixtures validated without generation. |
+| `npm run tutor:verify` | Real isolated Electron/SQLite/paired IPC passed: Gemini default, A → B → A capture selection, explicit draft adoption, new-code notification without redirecting an existing draft, separate OS-encrypted provider setup, restart, deletion, unchanged practice selection, zero provider turns and zero renderer errors. Temporary fake unused keys exercised encryption and snapshot exclusion. No microphone permission was requested. |
+| `npm run companion:verify` | Existing real native tracking, durability, Today, pairing/revocation, recognition, file-switch and original-target protections passed with zero renderer errors. |
+| Visual review | Actual native Ink context/code preview and compiled Light Markdown/math conversation screenshots inspected. Existing mascot/palette retained. Reduced motion disables the recording pulse. |
+
+The final review found and fixed an additional race: a manually saved A snapshot could be displayed as a newer browser capture B while Send still selected A. The composer now uses the exact immutable snapshot returned by the successful save; B remains separately available for explicit adoption. Regression fixtures reproduce that interleaving.
+
+Verification caught a new test fixture missing Next's required `NODE_ENV` typing; that fixture was corrected, and type checks plus sharing build/tests passed. An initial native inspection step toggled an already-open context section closed; it now opens the section only when needed, and the full native check passed. No checks were disabled or treated as passed while failing. Generated existing website screenshots were restored.
+
+**Deferred by request:** no live provider requests, API-key setup for the user, personal app installation, real microphone/transcription/playback acceptance or teaching-quality evaluation. No blocked environment check remains. Model access, account limits, actual audio/device behavior and teaching quality still require the user's later live walkthrough. Account sync remains deferred. [Architecture/setup/privacy/manual checklist](tutor.md) · [Official Gemini API references and chosen defaults](gemini-api.md).
+
+---
+
 # Companion recovery verification — 21 October 2026
 
 The installed companion was restarted and its real VS Code connection was confirmed in settings. Both local sockets were restored. VS Code now explains missing/refused endpoints with “Start Forma Companion, then retry this action” while preserving pairing, permission and other errors. Desktop shutdown now completes even if startup failed before Tutor initialization, avoiding a hidden process retaining the single-instance lock.

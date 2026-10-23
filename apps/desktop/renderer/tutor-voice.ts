@@ -1,4 +1,13 @@
 /** Small cancellation scope shared by microphone, transcription and playback. No browser globals. */
+export const TUTOR_RECORDING_LIMITS={durationMs:60_000,bytes:8*1024*1024} as const;
+export function recordedAudioMime(supported:(mime:string)=>boolean):string|null {
+  return ['audio/webm;codecs=opus','audio/webm','audio/mp4'].find(supported)??null;
+}
+/** PCM from Gemini is wrapped as WAV by the host. Raw PCM must never reach Audio. */
+export function speechAudioMime(value:string):string|null {
+  const mime=value.split(';')[0].trim().toLowerCase();
+  return ['audio/wav','audio/x-wav','audio/mpeg','audio/mp4','audio/ogg','audio/webm'].includes(mime)?mime:null;
+}
 export class TutorVoiceController {
   private generation=0;
   private cleanups=new Set<()=>void>();

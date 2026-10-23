@@ -85,7 +85,7 @@ test('speech formatting: code, long formulas and links stay readable in text and
 
 function harness(){
   const saved=turn();const events:TutorEvent[]=[];let calls=0;let release:()=>void=()=>{};let signal:AbortSignal|undefined;let late:(text:string)=>void|Promise<void>=()=>{};
-  const provider:TutorProvider={status:()=>({configured:true,model:'mock-text',transcriptionModel:'mock-transcribe',speechModel:'mock-speech',message:'Mock'}),async stream(_input,s,onDelta){calls++;signal=s;late=onDelta;await onDelta('First hint.');await new Promise<void>(resolve=>{release=resolve;});return {model:'mock-text',usage:{inputTokens:1,outputTokens:2,totalTokens:3}};},async transcribe(){return 'mock';},async speech(){return {bytes:new Uint8Array(),mime:'audio/mpeg'};}};
+  const provider:TutorProvider={status:()=>({provider:'openai',name:'OpenAI',capabilities:{text:true,transcription:true,speech:true},configured:true,model:'mock-text',transcriptionModel:'mock-transcribe',speechModel:'mock-speech',message:'Mock'}),async stream(_input,s,onDelta){calls++;signal=s;late=onDelta;await onDelta('First hint.');await new Promise<void>(resolve=>{release=resolve;});return {model:'mock-text',usage:{inputTokens:1,outputTokens:2,totalTokens:3}};},async transcribe(){return 'mock';},async speech(){return {bytes:new Uint8Array(),mime:'audio/mpeg'};}};
   const ports={async call<T>(method:string,...args:unknown[]):Promise<T>{
     if(method==='tutor-prepare')return structuredClone(saved) as T;
     if(method==='tutor-turns')return [structuredClone(saved)] as T;
@@ -110,4 +110,9 @@ test('mock service: Stop preserves partial answer, aborts request, and discards 
 });
 test('mock service: unrelated request is rejected while one stream is active',async()=>{
   const h=harness();await h.service.send(sendInput);await assert.rejects(h.service.send({...sendInput,requestId:'request-two'}),/already processing/);await assert.rejects(h.service.send({...sendInput,text:'Different message under the same ID'}),/different message/);await h.service.cancelAll();h.release();
+});
+
+test('OpenAI whitespace-only completion is typed as malformed without losing the caller partial buffer',async()=>{
+ const provider=new OpenAITutorProvider(()=>config,async()=>streamResponse(delta(' \n ')+complete()));let partial='';
+ await assert.rejects(provider.stream(input(),new AbortController().signal,text=>{partial+=text;}),(error:unknown)=>error instanceof TutorProviderError&&error.code==='malformed');assert.equal(partial,' \n ');
 });

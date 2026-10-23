@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CompanionStore } from '../apps/desktop/main/store';
 import { buildProviderMessages, hintLevelForAction, policyInstructions } from '../packages/tutor/policy';
-import { parseSharedCode, parseStatementInput, providerContext, tutorHash } from '../packages/tutor/context';
+import { parseSharedCode, parseStatementInput, providerContext, tutorHash, validateStatement } from '../packages/tutor/context';
 import type { SharedCode, StatementInput, TutorAction, TutorTurn } from '../packages/tutor/types';
 
 const now=Date.now(),url='https://codeforces.com/contest/4/problem/A';
@@ -35,12 +35,148 @@ test('schema two migrates non-destructively to tutor tables on the original SQLi
     store.command({id:'legacy-attach',type:'attach',payload:{url}},'desktop',now);
     store.command({id:'legacy-thought',type:'thought',payload:{text:'Keep this original thought.'}},'desktop',now);
     const before=store.snapshot(),receipts=store.db.prepare('SELECT * FROM applied_commands').all(),outbox=store.db.prepare('SELECT * FROM outbox').all();
-    store.db.exec('DROP TABLE tutor_proposals; DROP TABLE tutor_requests; DROP TABLE tutor_turns; DROP TABLE tutor_conversations; DROP TABLE tutor_codes; DROP TABLE tutor_statements; DROP TABLE tutor_settings; PRAGMA user_version=2;');
+    store.db.exec('DROP TABLE tutor_proposals; DROP TABLE tutor_requests; DROP TABLE tutor_turns; DROP TABLE tutor_conversations; DROP TABLE tutor_codes; DROP TABLE tutor_statement_current; DROP TABLE tutor_statement_captures; DROP TABLE tutor_statements; DROP TABLE tutor_settings; PRAGMA user_version=2;');
     store.close();store=new CompanionStore(path);
-    assert.equal(store.tutor.db,store.db);assert.equal(store.db.prepare('PRAGMA user_version').get()!.user_version,3);
+    assert.equal(store.tutor.db,store.db);assert.equal(store.db.prepare('PRAGMA user_version').get()!.user_version,4);
     assert.deepEqual(store.snapshot(),before);assert.deepEqual(store.db.prepare('SELECT * FROM applied_commands').all(),receipts);assert.deepEqual(store.db.prepare('SELECT * FROM outbox').all(),outbox);
     assert.deepEqual(store.tutor.view().conversations,[]);
   }finally{store.close();rmSync(folder,{recursive:true,force:true});}
+});
+test('A → B → A chooses the latest capture while historical turns and a selected older draft keep exact provenance after restart',()=>{
+  const folder=mkdtempSync(join(tmpdir(),'forma-tutor-recapture-')),path=join(folder,'notebook.sqlite');
+  let store=new CompanionStore(path);const f=fixture(store);
+  try{
+    const first=send(f,'capture-a');show(store,first);
+    const b=store.tutor.statement({...statement,description:'A different statement revision B.'},now+1)!;
+    const second=send(f,'capture-b','small-hint',{statementId:b.id});show(store,second);
+    const aAgain=store.tutor.statement(statement,now+2)!;
+    assert.notEqual(aAgain.id,f.saved.id);assert.equal(aAgain.revision,f.saved.revision);
+    assert.equal(aAgain.capturedAt,new Date(now+2).toISOString());
+    assert.deepEqual(store.tutor.context(f.conversation.id).statement,aAgain);
+    assert.equal(store.db.prepare('SELECT COUNT(*) n FROM tutor_statements').get()!.n,2);
+    assert.equal(store.db.prepare('SELECT COUNT(*) n FROM tutor_statement_captures').get()!.n,3);
+    // The draft explicitly adopted the first capture. A recapture cannot rewrite
+    // the provenance presented for that unsent question.
+    const oldDraft=send(f,'capture-old-draft');assert.deepEqual(oldDraft.context.statement,f.saved);show(store,oldDraft);
+    const historical=store.tutor.turns(f.conversation.id).map(turn=>turn.context);
+    store.close();store=new CompanionStore(path);
+    assert.equal(store.tutor.open({conversationId:f.conversation.id}).id,f.conversation.id);
+    assert.deepEqual(store.tutor.context(f.conversation.id).statement,aAgain);
+    assert.deepEqual(store.tutor.turns(f.conversation.id).map(turn=>turn.context),historical);
+    assert.deepEqual(historical[0].statement,f.saved);assert.deepEqual(historical[1].statement,b);
+  }finally{store.close();rmSync(folder,{recursive:true,force:true});}
+});
+test('equal-time and backwards-clock recaptures use durable monotonic capture order, not timestamp or content insertion order',()=>{
+  const f=fixture();
+  try{
+    const b=f.store.tutor.statement({...statement,source:'browser'},now)!;
+    const a=f.store.tutor.statement(statement,now)!;
+    assert.notEqual(a.id,f.saved.id);assert.equal(a.capturedAt,b.capturedAt);
+    assert.deepEqual(f.store.tutor.statement({identity:statement.identity}),a);
+    const olderClock=f.store.tutor.statement({...statement,source:'browser'},now-10000)!;
+    assert.deepEqual(f.store.tutor.context(f.conversation.id).statement,olderClock);
+    assert.equal(olderClock.source,'browser');assert.equal(olderClock.capturedAt,new Date(now-10000).toISOString());
+    assert.equal(f.store.db.prepare('SELECT COUNT(*) n FROM tutor_statements').get()!.n,2);
+    const sequences=f.store.db.prepare('SELECT sequence FROM tutor_statement_captures ORDER BY sequence').all().map(row=>Number(row.sequence));
+    assert.equal(new Set(sequences).size,4);assert.ok(sequences.every((sequence,index)=>!index||sequence>sequences[index-1]));
+  }finally{f.store.close();}
+});
+test('capture content, metadata and current selection roll back together if updating the current pointer fails',()=>{
+  const f=fixture();
+  try{
+    const before=f.store.tutor.context(f.conversation.id).statement;
+    f.store.db.exec("CREATE TRIGGER reject_capture_fixture BEFORE UPDATE ON tutor_statement_current BEGIN SELECT RAISE(ABORT,'fixture rejects current capture'); END;");
+    assert.throws(()=>f.store.tutor.statement({...statement,description:'A content row that must be rolled back.'},now+1),/fixture rejects/);
+    assert.deepEqual(f.store.tutor.context(f.conversation.id).statement,before);
+    assert.equal(f.store.db.prepare('SELECT COUNT(*) n FROM tutor_statements').get()!.n,1);
+    assert.equal(f.store.db.prepare('SELECT COUNT(*) n FROM tutor_statement_captures').get()!.n,1);
+    f.store.db.exec('DROP TRIGGER reject_capture_fixture');
+    assert.notEqual(f.store.tutor.statement(statement,now+2)!.id,before!.id);
+  }finally{f.store.close();}
+});
+test('schema three deterministically selects its latest legacy content and adds OpenAI provenance without rewriting frozen contexts or request history',()=>{
+  const folder=mkdtempSync(join(tmpdir(),'forma-tutor-schema-three-')),path=join(folder,'notebook.sqlite');
+  let store=new CompanionStore(path);const f=fixture(store);
+  try{
+    const legacyA=validateStatement(statement,now),legacyB=validateStatement({...statement,description:'Legacy B at the same timestamp.'},now);
+    store.tutor.statement({...statement,description:legacyB.description},now);
+    const first=send(f,'legacy-request');store.tutor.append({turnId:first.id,requestId:first.requestId,text:'Legacy partial.'});
+    store.tutor.finalize({turnId:first.id,requestId:first.requestId,status:'interrupted'},now);
+    const retry=send(f,'legacy-request','small-hint',{requestId:'legacy-retry'});show(store,retry);
+    for(const table of ['tutor_turns','tutor_requests'])for(const row of store.db.prepare(`SELECT id,body FROM ${table}`).all()){
+      const body=JSON.parse(String(row.body));delete body.provider;body.context.statement=legacyA;
+      store.db.prepare(`UPDATE ${table} SET body=? WHERE id=?`).run(JSON.stringify(body),row.id);
+    }
+    const originalContext=store.tutor.turns(f.conversation.id)[0].context;
+    const originalArchive=JSON.parse(String(store.db.prepare('SELECT body FROM tutor_requests').get()!.body));
+    const notebook=store.snapshot(),receipts=store.db.prepare('SELECT * FROM applied_commands').all(),outbox=store.db.prepare('SELECT * FROM outbox').all();
+    store.db.exec('DROP TABLE tutor_statement_current; DROP TABLE tutor_statement_captures; PRAGMA user_version=3;');
+    store.close();store=new CompanionStore(path);
+    assert.equal(store.db.prepare('PRAGMA user_version').get()!.user_version,4);
+    assert.deepEqual(store.tutor.context(f.conversation.id).statement,legacyB);
+    assert.deepEqual(store.tutor.turns(f.conversation.id)[0].context,originalContext);
+    assert.equal(store.tutor.turns(f.conversation.id)[0].provider,'openai');
+    const archived=JSON.parse(String(store.db.prepare('SELECT body FROM tutor_requests').get()!.body));
+    assert.deepEqual(archived,{...originalArchive,provider:'openai'});
+    assert.deepEqual(store.snapshot(),notebook);assert.deepEqual(store.db.prepare('SELECT * FROM applied_commands').all(),receipts);assert.deepEqual(store.db.prepare('SELECT * FROM outbox').all(),outbox);
+    store.close();store=new CompanionStore(path);
+    assert.deepEqual(store.tutor.context(f.conversation.id).statement,legacyB);
+    assert.equal(store.db.prepare('SELECT COUNT(*) n FROM tutor_statement_captures').get()!.n,2);
+    const recaptured=store.tutor.statement(statement,now+1)!;
+    assert.deepEqual(store.tutor.context(f.conversation.id).statement,recaptured);assert.notEqual(recaptured.id,legacyA.id);
+    assert.deepEqual(store.tutor.turns(f.conversation.id)[0].context.statement,legacyA);
+  }finally{store.close();rmSync(folder,{recursive:true,force:true});}
+});
+test('provider switching on an explicit retry archives the original provider and actual model without changing requested model or frozen context',()=>{
+  const f=fixture();
+  try{
+    const input={turnId:'provider-history',requestId:'request-openai',conversationId:f.conversation.id,action:'discuss',text:'Discuss the original approach.',statementId:f.saved.id,codeId:null,noteIds:[]};
+    const first=f.store.tutor.prepare(input,'openai-requested','openai',now);
+    f.store.tutor.append({turnId:first.id,requestId:first.requestId,text:'Preserved partial.'});
+    const stopped=f.store.tutor.finalize({turnId:first.id,requestId:first.requestId,status:'interrupted',responseModel:'openai-resolved'},now)!;
+    assert.equal(stopped.model,'openai-requested');assert.equal(stopped.responseModel,'openai-resolved');
+    assert.throws(()=>f.store.tutor.prepare({...input,requestId:'invalid-provider'},'model','unknown',now),/supported tutor provider/);
+    const retry=f.store.tutor.prepare({...input,requestId:'request-gemini'},'gemini-requested','gemini',now+1);
+    assert.equal(retry.provider,'gemini');assert.equal(retry.model,'gemini-requested');assert.equal(retry.responseModel,undefined);assert.deepEqual(retry.context,first.context);
+    const archived=JSON.parse(String(f.store.db.prepare('SELECT body FROM tutor_requests WHERE id=?').get(first.requestId)!.body));
+    assert.equal(archived.provider,'openai');assert.equal(archived.model,'openai-requested');assert.equal(archived.responseModel,'openai-resolved');assert.equal(archived.assistantText,'Preserved partial.');
+    assert.equal(f.store.tutor.turns(f.conversation.id).length,1);
+  }finally{f.store.close();}
+});
+test('retention uses capture recency rather than immutable content age, and deleting the final conversation cascades capture metadata',()=>{
+  const f=fixture();
+  try{
+    f.store.tutor.setSettings({retentionDays:1},now);
+    f.store.tutor.statement({...statement,description:'A second version retained alongside its recapture.'},now+86400000);
+    const recaptured=f.store.tutor.statement(statement,now+86400000+100)!;
+    assert.equal(f.store.tutor.view(now+2*86400000).conversations.length,0);
+    assert.deepEqual(f.store.tutor.statement({identity:statement.identity}),recaptured);
+    assert.equal(f.store.db.prepare('SELECT COUNT(*) n FROM tutor_statements').get()!.n,2);
+    assert.equal(f.store.db.prepare('SELECT COUNT(*) n FROM tutor_statement_captures').get()!.n,2);
+    const reopened=f.store.tutor.open({problemId:f.conversation.problemId,workspaceId:'workspace-one'},now+2*86400000);
+    const otherWorkspace=f.store.tutor.open({problemId:f.conversation.problemId,workspaceId:'workspace-two'},now+2*86400000);
+    f.store.tutor.delete(reopened.id);
+    assert.deepEqual(f.store.tutor.context(otherWorkspace.id).statement,recaptured);
+    f.store.tutor.delete(otherWorkspace.id);
+    for(const table of ['tutor_statements','tutor_statement_captures','tutor_statement_current'])assert.equal(f.store.db.prepare(`SELECT COUNT(*) n FROM ${table}`).get()!.n,0);
+    assert.equal(f.store.snapshot().data.problems.length,1);
+  }finally{f.store.close();}
+});
+test('a staged code share for another problem does not erase the original conversation’s available or explicitly selected code',()=>{
+  const f=fixture();
+  try{
+    const original=f.store.tutor.code(code());
+    f.store.command({id:'attach-other-code',type:'attach',payload:{url:'https://codeforces.com/contest/1/problem/A',fileUri:'file:///practice/b.cpp',workspaceId:'workspace-one',clientId:'vscode-one',source:'manual'}},'desktop',now);
+    const otherConversation=f.store.tutor.open({workspaceId:'workspace-one'},now);
+    const other=f.store.tutor.code({...code('other-problem-code'),identity:'contest:1:A',fileUri:'file:///practice/b.cpp',filename:'b.cpp'});
+    assert.deepEqual(f.store.tutor.context(f.conversation.id).pendingCode,original);
+    assert.deepEqual(f.store.tutor.context(otherConversation.id).pendingCode,other);
+    const selected=send(f,'selected-original-after-switch','check-code',{codeId:original.id});
+    assert.deepEqual(selected.context.code,original);show(f.store,selected);
+    f.store.tutor.view(now+2*86400000);
+    assert.equal(f.store.tutor.context(f.conversation.id).pendingCode,null);
+    assert.deepEqual(f.store.tutor.turns(f.conversation.id)[0].context.code,original);
+  }finally{f.store.close();}
 });
 test('missing/incomplete statements are explicit and Gym A1/A2 snapshots cannot cross problem targets',()=>{
   const f=fixture();
@@ -74,7 +210,8 @@ test('code is explicitly associated, bounded, revisioned and frozen despite rapi
     assert.equal(f.store.tutor.turns(f.conversation.id)[0].context.code!.text,original.text);
     assert.equal(f.store.tutor.turns(f.conversation.id)[0].context.code!.revision,original.revision);
     show(f.store,turn);
-    assert.throws(()=>send(f,'stale-code','check-code',{codeId:original.id}),/snapshot changed/);
+    const selectedOld=send(f,'selected-old-code','check-code',{codeId:original.id});
+    assert.deepEqual(selectedOld.context.code,original);show(f.store,selectedOld);
     assert.equal(f.store.tutor.context(f.conversation.id).pendingCode!.id,'code-two');
   }finally{f.store.close();}
 });
@@ -233,7 +370,7 @@ test('untimed chat cannot manufacture an attempt; conversation exports remain se
     assert.ok(!f.store.exportNotebook().includes('Unique local conversation content'));assert.ok(!f.store.exportCompanion().includes('Unique local conversation content'));
     assert.match(f.store.tutor.export(f.conversation.id),/Unique local conversation content/);
     f.store.tutor.delete(f.conversation.id);
-    for(const table of ['tutor_turns','tutor_requests','tutor_proposals','tutor_statements'])assert.equal(f.store.db.prepare(`SELECT COUNT(*) n FROM ${table}`).get()!.n,0);
+    for(const table of ['tutor_turns','tutor_requests','tutor_proposals','tutor_statements','tutor_statement_captures','tutor_statement_current'])assert.equal(f.store.db.prepare(`SELECT COUNT(*) n FROM ${table}`).get()!.n,0);
     assert.equal(f.store.snapshot().data.problems.length,1);assert.equal(f.store.snapshot().data.attempts.length,0);
   }finally{f.store.close();}
 });

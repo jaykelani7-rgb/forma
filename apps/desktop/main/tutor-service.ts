@@ -12,21 +12,27 @@ export class TutorService {
   private active:ActiveRequest|null=null;
   private preparing:{requestId:string;fingerprint:string;promise:Promise<{turnId:string;requestId:string}>}|null=null;
   private closed=false;
+  private configuring=false;
   constructor(private readonly ports:TutorServicePorts,private readonly provider:TutorProvider){}
   get activeRequestId():string|null{return this.active?.turn.requestId??this.preparing?.requestId??null;}
+  get isConfiguring():boolean{return this.configuring;}
   send(input:TutorSendInput):Promise<{turnId:string;requestId:string}>{
     if(this.closed)return Promise.reject(new Error('Tutor has closed. Reopen the companion to continue.'));
+    if(this.configuring)return Promise.reject(new TutorProviderError('busy'));
     const fingerprint=JSON.stringify([input.turnId,input.requestId,input.conversationId,input.action,input.text,input.statementId,input.codeId,input.noteIds]);
     if(this.preparing?.requestId===input.requestId)return this.preparing.fingerprint===fingerprint?this.preparing.promise:Promise.reject(new Error('This request identifier already belongs to a different message.'));
     if(this.active?.turn.requestId===input.requestId)return this.active.fingerprint===fingerprint?Promise.resolve({turnId:this.active.turn.id,requestId:input.requestId}):Promise.reject(new Error('This request identifier already belongs to a different message.'));
     if(this.active||this.preparing)return Promise.reject(new TutorProviderError('busy'));
-    if(!this.provider.status().configured)return Promise.reject(new TutorProviderError('setup'));
+    const selected=this.provider.status();
+    if(!selected.configured)return Promise.reject(new TutorProviderError('setup',selected.provider??'openai'));
+    if(selected.capabilities&&!selected.capabilities.text)return Promise.reject(new TutorProviderError('model-capability',selected.provider));
     const promise=this.prepare(input,fingerprint).finally(()=>{if(this.preparing?.requestId===input.requestId)this.preparing=null;});
     this.preparing={requestId:input.requestId,fingerprint,promise};return promise;
   }
   private async prepare(input:TutorSendInput,fingerprint:string):Promise<{turnId:string;requestId:string}>{
     // The writer verifies contest mode, canonical target, permissions and request identity.
-    const turn=await this.ports.call<TutorTurn>('tutor-prepare',input,this.provider.status().model);
+    const selected=this.provider.status();
+    const turn=await this.ports.call<TutorTurn>('tutor-prepare',input,selected.model,selected.provider??'openai');
     const result={turnId:turn.id,requestId:turn.requestId};
     if(this.closed){await this.finalize(turn,'interrupted');return result;}
     if(turn.status==='completed'||turn.status==='failed'||turn.status==='interrupted')return result;
@@ -45,18 +51,18 @@ export class TutorService {
         const accepted=await this.ports.call<TutorTurn|null>('tutor-append',{turnId:request.turn.id,requestId:request.turn.requestId,text});
         if(accepted&&this.current(request))this.emit(request.turn,'delta',text);
       });
-      if(this.current(request))await this.finalize(request.turn,'completed',undefined,result.usage);
+      if(this.current(request))await this.finalize(request.turn,'completed',undefined,result.usage,result.model);
     }catch(error){
       if(this.current(request)){
         try{await this.finalize(request.turn,'failed',tutorProviderError(error));}catch{/* The queued/partial turn recovers as interrupted if storage is unavailable. */}
       }
     }finally{if(this.active===request)this.active=null;this.emit(request.turn,'updated');}
   }
-  private emit(turn:TutorTurn,kind:TutorEvent['kind'],text?:string):void{
+  private emit(turn:TutorTurn,kind:'delta'|'updated',text?:string):void{
     try{this.ports.emit({kind,conversationId:turn.conversationId,turnId:turn.id,requestId:turn.requestId,...(text===undefined?{}:{text})});}catch{/* A closing renderer must not affect durable completion. */}
   }
-  private async finalize(turn:TutorTurn,status:'completed'|'interrupted'|'failed',error?:string,usage?:TutorUsage|null):Promise<void>{
-    await this.ports.call('tutor-finalize',{turnId:turn.id,requestId:turn.requestId,status,error,usage});
+  private async finalize(turn:TutorTurn,status:'completed'|'interrupted'|'failed',error?:string,usage?:TutorUsage|null,responseModel?:string):Promise<void>{
+    await this.ports.call('tutor-finalize',{turnId:turn.id,requestId:turn.requestId,status,error,usage,...(responseModel?{responseModel}:{})});
   }
   async stop(requestId:string):Promise<void>{
     if(this.preparing?.requestId===requestId)await this.preparing.promise;
@@ -68,6 +74,13 @@ export class TutorService {
   async cancelAll():Promise<void>{
     if(this.preparing)await this.preparing.promise.catch(()=>{});
     if(this.active)await this.stop(this.active.turn.requestId);
+  }
+  /** Blocks new sends before waiting for a prepared request to stop. */
+  async configure<T>(update:()=>T|Promise<T>):Promise<T>{
+    if(this.configuring||this.closed)throw new TutorProviderError('busy');
+    this.configuring=true;
+    try{await this.cancelAll();return await update();}
+    finally{this.configuring=false;}
   }
   async dispose():Promise<void>{this.closed=true;await this.cancelAll();}
   async whenIdle():Promise<void>{if(this.preparing)await this.preparing.promise.catch(()=>{});await this.active?.task;}
