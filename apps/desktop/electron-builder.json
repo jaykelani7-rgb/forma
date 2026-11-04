@@ -5,7 +5,7 @@
   "asar": true,
   "directories": {
     "output": "../dist/companion",
-    "buildResources": "../packages/pet-ui/assets"
+    "buildResources": "../packages/ribbon"
   },
   "files": [
     "main.cjs",
@@ -16,7 +16,7 @@
     "package.json"
   ],
   "mac": {
-    "icon": "fenn.icns",
+    "icon": "ribbon-icon.png",
     "target": [
       {
         "target": "dir",

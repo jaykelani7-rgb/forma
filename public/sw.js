@@ -1,8 +1,9 @@
 // This worker caches only an explicit list of public resources. Notebook records
 // live in IndexedDB; API responses, page HTML and account credentials stay out.
-const CACHE = "forma-public-v1";
+const CACHE = "forma-public-ribbon-v2";
 const PUBLIC_RESOURCES = [
   "/offline.html",
+  "/art/ribbon-landscape.webp",
   "/icons/forma-192.png",
   "/icons/forma-512.png",
   "/icons/forma-maskable-512.png",

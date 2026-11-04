@@ -14,7 +14,7 @@ const report={kind:'real-native-no-provider-credentials',folder,verifiedAt:new D
 try{
  let page=await application.firstWindow();const errors=[];page.on('pageerror',e=>errors.push(e.message));await page.waitForFunction(()=>!!window.forma);
  await page.evaluate(()=>window.forma.command({id:'tutor-native-problem',type:'attach',payload:{url:'https://codeforces.com/contest/4/problem/A',title:'Watermelon'}}));
- await page.evaluate(()=>window.forma.ui('expand',true));await page.getByRole('button',{name:'Ask Fenn',exact:true}).click();
+ await page.evaluate(()=>window.forma.ui('expand',true));await page.getByRole('button',{name:'Ask Tutor',exact:true}).click();
  await page.getByRole('textbox',{name:'Your question or editable voice transcript'}).waitFor();
  const view=await page.evaluate(()=>window.forma.ui('tutor-view'));assert.equal(view.provider.configured,false);assert.equal(view.provider.provider,'gemini');
  assert.equal(await page.getByRole('button',{name:'Send',exact:true}).isDisabled(),true);

@@ -8,7 +8,7 @@ import {
   Check,
   Eye,
   EyeOff,
-  Leaf,
+  Bookmark,
   Pause,
   Play,
   RotateCcw,
@@ -31,6 +31,7 @@ import {
   addDays,
 } from "@/lib/model";
 import { useWorkspace, pauseSession } from "./provider";
+import { RibbonMark } from "../../packages/ribbon/RibbonMark";
 import { BrandMark, FocusBack } from "./shell";
 import { EmptyState, Modal, ProblemLink } from "./ui";
 import type { TrackContext } from "@/lib/tracks-types";
@@ -411,7 +412,7 @@ export function FocusedSession() {
         <div
           className={`completion-symbol ${completed.milestone ? "milestone" : ""}`}
         >
-          <Leaf size={44} strokeWidth={1.2} />
+          <Bookmark size={38} fill="currentColor" strokeWidth={1.2} />
         </div>
         <span className="eyebrow">A LITTLE TIME, WELL SPENT</span>
         <h1 ref={successRef} tabIndex={-1}>
@@ -466,8 +467,8 @@ export function FocusedSession() {
             Back to Today
             <ArrowRight size={16} />
           </Link>
-          <Link href="/progress" className="text-link">
-            See your progress
+          <Link href="/journal" className="text-link">
+            Open journal
             <ArrowRight size={16} />
           </Link>
           <Link
@@ -636,6 +637,9 @@ export function FocusedSession() {
                   className="timer"
                   aria-label={`${clockTime(duration)} elapsed`}
                 >
+                  <span className="ribbon-timer-mark">
+                    <RibbonMark size={28} />
+                  </span>{" "}
                   {clockTime(duration)}
                 </div>
               ) : (

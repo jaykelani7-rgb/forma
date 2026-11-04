@@ -42,66 +42,8 @@ import { TodayActivity } from "./codeforces";
 import { PracticePlanPreferences } from "./practice-plan-preferences";
 import styles from "./today-discovery.module.css";
 
-function PracticeIllustration({ empty = false }: { empty?: boolean }) {
-  return (
-    <div
-      className={`practice-art ${empty ? "empty-art" : ""}`}
-      aria-hidden="true"
-    >
-      <svg width="170" height="190" viewBox="0 0 170 190" fill="none">
-        <path
-          d="M15 163C15 140 18 20 83 20C148 20 155 121 155 163H15Z"
-          fill="currentColor"
-          opacity=".06"
-        />
-        <path
-          d="M35 149H135M35 123H135M35 97H135M35 71H135M35 45H135M35 45V149M61 45V149M87 45V149M113 45V149M135 45V149"
-          stroke="currentColor"
-          strokeWidth=".75"
-          opacity=".17"
-        />
-        {[0, 1, 2, 3].map((i) => (
-          <rect
-            key={i}
-            x={38 + i * 25}
-            y={126 - i * 26}
-            width="20"
-            height="20"
-            rx="2"
-            fill="currentColor"
-            opacity={0.15 + i * 0.12}
-          />
-        ))}
-        <path
-          d="M42 157L142 57M131 57H142V68"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          strokeDasharray="3 4"
-          opacity=".55"
-        />
-        <circle cx="32" cy="26" r="3" fill="currentColor" opacity=".35" />
-        <path
-          d="M144 30V40M139 35H149"
-          stroke="currentColor"
-          strokeWidth="1"
-          opacity=".5"
-        />
-        <text
-          x="85"
-          y="184"
-          textAnchor="middle"
-          fill="currentColor"
-          fontSize="12"
-          fontFamily="monospace"
-          letterSpacing="2"
-          opacity=".6"
-        >
-          ONE STEP AT A TIME
-        </text>
-      </svg>
-    </div>
-  );
-}
+import { RibbonJournal } from "./ribbon-journal";
+
 export function WeeklyRhythm() {
   const { data } = useWorkspace();
   const days = weekActivity(data);
@@ -460,326 +402,286 @@ export function Today() {
           </Link>
         </section>
       )}
-      <header
-        className={`today-header ${data.problems.length ? "returning" : ""}`}
-      >
-        <div className="eyebrow">
-          <span className="small-line" />
-          {now
-            .toLocaleDateString("en-US", {
-              weekday: "long",
-              month: "long",
-              day: "2-digit",
-            })
-            .toUpperCase()}
-        </div>
-        {data.problems.length ? (
-          <h1>
-            {data.settings.displayName
-              ? `Welcome back, ${data.settings.displayName}.`
-              : "A little practice today."}
-          </h1>
-        ) : (
-          <h1>
-            A little sharper,
-            <br />
-            <em>every day.</em>
-          </h1>
-        )}
-        <p>A small plan. One activity at a time.</p>
-        <span className="header-side-note">
-          THE ART OF
-          <br />
-          SHOWING UP<span>01 — DAILY PRACTICE</span>
-        </span>
+      <header className="ribbon-today-header">
+        <h1>Today</h1>
+        <time dateTime={localDate(now)}>
+          {now.toLocaleDateString(undefined, {
+            weekday: "long",
+            month: "long",
+            day: "numeric",
+          })}
+        </time>
       </header>
       <div className="today-grid">
         <div className="today-primary">
-          <section
-            className={styles.availability}
-            aria-label="Today's availability"
-          >
-            <form
-              onSubmit={(event) => {
-                event.preventDefault();
-                void saveAvailability();
-              }}
-            >
-              <label>
-                Today I have…
-                <span className={styles.minuteInput}>
-                  <input
-                    name="availableMinutes"
-                    type="number"
-                    min={5}
-                    max={180}
-                    step={1}
-                    required
-                    value={availability}
-                    onChange={(event) =>
-                      setAvailabilityDraft(event.target.value)
-                    }
-                    disabled={busy || storagePending}
-                  />
-                  <span>minutes</span>
-                </span>
-              </label>
-              <button
-                type="submit"
-                className="button secondary"
-                disabled={busy || storagePending}
-              >
-                {busy ? "Saving…" : "Apply today’s time"}
-              </button>
-            </form>
-            <div className={styles.availabilityNote}>
-              <span>
-                Usual budget: {usualMinutes} min
-                {plan?.availabilityOverride ? " · today only" : ""}
-              </span>
-              {plan?.availabilityOverride && budget !== usualMinutes && (
-                <button
-                  className="text-link"
-                  disabled={busy || storagePending}
-                  onClick={() => void saveAvailability(usualMinutes)}
-                >
-                  Use usual time
-                </button>
-              )}
-            </div>
-            {!view.preferredDay && (
-              <p className="small muted">
-                Today is outside your preferred practice days. You can still
-                choose a small session.
-              </p>
-            )}
-            {view.timezoneChanged && (
-              <p className="small muted">
-                Your timezone changed. This local day’s selections stay in
-                place; an active session continues.
-              </p>
-            )}
-          </section>
-          {view.restart && !restartDismissed && !active && (
-            <section className={styles.restart} aria-label="A gentle return">
-              <Leaf size={20} aria-hidden="true" />
-              <div>
-                <p>Welcome back. Start with one short session?</p>
-                <span className="small muted">
-                  Your last saved practice was{" "}
-                  {shortDate(view.restart.lastPractisedAt)}. Your learning
-                  history is kept as it is.
-                </span>
-                <div className={styles.restartActions}>
-                  <button
-                    className="button secondary"
-                    disabled={disabled}
-                    onClick={() => void saveAvailability(15)}
-                  >
-                    Make today 15 minutes
-                  </button>
-                  <button
-                    className="text-link"
-                    onClick={() => setRestartDismissed(true)}
-                    disabled={busy}
-                  >
-                    Continue normally
-                  </button>
-                </div>
-              </div>
-            </section>
-          )}
           <section
             className={`session-card ${styles.primaryCard}`}
             aria-labelledby="session-card-title"
             data-practice-plan={plan?.id}
           >
-            <div className="session-card-top">
-              <span className="eyebrow">
-                <span className="green-square" />
-                {active ? "YOUR SESSION IS WAITING" : "MY PRACTICE PLAN"}
-              </span>
-              <span className="card-number mono">
-                {plan?.status === "ended" ? "ENDED FOR TODAY" : "01 / NEXT"}
-              </span>
-            </div>
-            <div className="session-card-content">
-              <div>
-                {primary && resolved ? (
-                  <>
-                    <div className="focus-kind">
-                      <RotateCcw size={13} />
-                      {activityLabel(primary).toUpperCase()}
-                    </div>
-                    <h2 id="session-card-title">
-                      {active
-                        ? "Continue "
-                        : primary.activity !== "coding"
-                          ? "Recall "
-                          : primary.kind === "coding"
-                            ? "Revisit "
-                            : "Explore "}
-                      <span>{resolved.problem.title}</span>
-                    </h2>
-                    <div className="problem-meta">
-                      <span>{resolved.problem.platform}</span>
-                      {resolved.problem.problemCode && (
-                        <span className="mono">
-                          #{resolved.problem.problemCode}
-                        </span>
-                      )}
-                      {resolved.problem.rating !== null && (
-                        <span className="mono">
-                          {resolved.problem.rating} rating
-                        </span>
-                      )}
-                    </div>
-                    <p className="suggestion-reason">{primary.reason}</p>
-                    <p className={styles.allocation}>
-                      <Clock3 size={14} />
-                      <span>
-                        {active?.targetMinutes ?? primary.timeboxMinutes} min{" "}
-                        {active ? "session timebox" : "planned timebox"}
-                      </span>
-                    </p>
-                    <p className={`small muted ${styles.timeHonesty}`}>
-                      An allocation for practice, rather than a prediction of
-                      solving time.
-                    </p>
-                    {sourceTimeSuggestion && (
-                      <p className={`small muted ${styles.timeHonesty}`}>
-                        Source time suggestion: {sourceTimeSuggestion}. This is
-                        guidance from your sheet; measured duration comes from
-                        recorded timed sessions.
-                      </p>
-                    )}
-                    {trackContext && (
-                      <div className="today-track-context">
-                        {stageHref ? (
-                          <Link className="text-link" href={stageHref}>
-                            {trackContext.trackTitle} ·{" "}
-                            {trackContext.stageTitle}
-                          </Link>
-                        ) : (
-                          <p className="small muted">
-                            {trackContext.trackTitle} ·{" "}
-                            {trackContext.stageTitle}
-                          </p>
-                        )}
-                      </div>
-                    )}
-                    {sameProblemDue && sameProblemDue <= localDay && (
-                      <p className={`small muted ${styles.relatedSchedule}`}>
-                        {primary.activity === "coding"
-                          ? "Written recall is also due for this problem. It keeps its separate schedule and is left in your backlog."
-                          : "A coding reattempt is also due for this problem. It keeps its separate schedule and is left in your backlog."}
-                      </p>
-                    )}
-                    <details className={styles.evidence}>
-                      <summary>Why this activity?</summary>
-                      <ul>
-                        {primary.evidence.map((evidence, index) => (
-                          <li
-                            key={`${evidence.type}:${evidence.recordId ?? index}`}
-                          >
-                            {evidence.type === "track" && stageHref ? (
-                              <Link href={stageHref}>
-                                {evidence.label}
-                                <ArrowUpRight size={13} />
-                              </Link>
-                            ) : resolved.fresh ? (
-                              <span>{evidence.label}</span>
-                            ) : (
-                              <Link
-                                href={memoryHref(
-                                  planData,
-                                  primary,
-                                  evidence.recordId,
-                                  evidence.type,
-                                )}
-                              >
-                                {evidence.label}
-                                <ArrowUpRight size={13} />
-                              </Link>
-                            )}
-                          </li>
-                        ))}
-                      </ul>
-                      {primary.relatedCodingAt && (
-                        <p className="small muted">
-                          Coding date: {shortDate(primary.relatedCodingAt)}
-                        </p>
-                      )}
-                      {primary.relatedRecallAt && (
-                        <p className="small muted">
-                          Written recall date:{" "}
-                          {shortDate(primary.relatedRecallAt)}
-                        </p>
-                      )}
-                      {!resolved.fresh && (
-                        <Link
-                          className="text-link"
-                          href={memoryHref(planData, primary)}
-                        >
-                          View Learning Memory
-                          <ArrowUpRight size={14} />
-                        </Link>
-                      )}
-                    </details>
-                    {resolved.problem.tags.length > 0 && (
-                      <details className={`discovery-tags ${styles.savedTags}`}>
-                        <summary>Reveal topic tags</summary>
-                        <p className="small muted">
-                          {resolved.problem.tags.join(" · ")}
-                        </p>
-                      </details>
-                    )}
-                  </>
-                ) : (
-                  <>
-                    <div className="focus-kind">
-                      <Leaf size={14} />
-                      {plan?.status === "ended" || view.completed.length
-                        ? "ROOM TO REST, OR CONTINUE"
-                        : "GOOD THINGS BEGIN SMALL"}
-                    </div>
-                    <h2 id="session-card-title">
-                      {plan?.status === "ended" ? (
-                        <>
-                          Today’s plan is
-                          <br />
-                          <em>set aside.</em>
-                        </>
-                      ) : view.completed.length ? (
-                        <>
-                          You made room
-                          <br />
-                          <em>for practice.</em>
-                        </>
-                      ) : (
-                        <>
-                          Your next chapter
-                          <br />
-                          <em>starts here.</em>
-                        </>
-                      )}
-                    </h2>
-                    <p className="suggestion-reason">
-                      {plan?.status === "ended"
-                        ? "Ending a plan keeps your recorded activity and pending choices. It does not mark a problem solved or create a learning result."
+            <div
+              className="ribbon-hero"
+              data-ribbon-launch={
+                active || primary?.activity === "coding" ? true : undefined
+              }
+            >
+              <div className="ribbon-hero-copy">
+                <span className="ribbon-kicker">
+                  {active
+                    ? "Continue practice"
+                    : primary
+                      ? activityLabel(primary)
+                      : plan?.status === "ended"
+                        ? "Plan complete"
+                        : "Your practice notebook"}
+                </span>
+                <h2 id="session-card-title">
+                  {active
+                    ? (planData.problems.find((p) => p.id === active.problemId)
+                        ?.title ?? "Your session")
+                    : (resolved?.problem.title ??
+                      (plan?.status === "ended"
+                        ? "Today’s plan is set aside."
                         : view.completed.length
-                          ? "Your saved activity is recorded below. You can stop here or deliberately choose another activity."
-                          : (plan?.items.length ?? 0) > 0
-                            ? "Your previous choices are kept in this plan. Choose an optional extra when useful, or stop here. A new allocation stays editable before starting."
-                            : !view.preferredDay
-                              ? "An open day outside your usual rhythm. Choose today’s availability if you want to practise."
-                              : "Add a problem, choose from your collection, or find a fresh alternative below. Your first plan starts from real practice."}
-                    </p>
-                  </>
+                          ? "A session to remember."
+                          : "Begin your practice."))}
+                </h2>
+                <p>
+                  {resolved
+                    ? [
+                        resolved.problem.platform,
+                        resolved.problem.problemCode,
+                        resolved.problem.rating,
+                      ]
+                        .filter((value) => value !== null && value !== "")
+                        .join(" · ")
+                    : active
+                      ? "Your session is waiting."
+                      : view.completed.length
+                        ? "Your reflection is in the journal."
+                        : "A place for your problems, practice, and reflections."}
+                </p>
+                {primary?.upsolvePriority && (
+                  <p className="ribbon-priority">
+                    Saved upsolve priority: {primary.upsolvePriority}.
+                  </p>
+                )}
+                {primaryAction}
+                {!data.problems.length && mode !== "demo" && (
+                  <button
+                    className="ribbon-demo"
+                    onClick={() => setMode("demo")}
+                  >
+                    Explore the demo <ArrowUpRight size={14} />
+                  </button>
                 )}
               </div>
-              <PracticeIllustration empty={!primary} />
             </div>
+          </section>
+          <RibbonJournal recent />
+          <section
+            className="ribbon-plan-details"
+            aria-label="Today's practice plan"
+          >
+            <div className="ribbon-plan-heading">
+              <span className="ribbon-kicker">Notebook</span>
+              <h2>Your practice plan</h2>
+            </div>
+            <section
+              className={styles.availability}
+              aria-label="Today's availability"
+            >
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void saveAvailability();
+                }}
+              >
+                <label>
+                  Today I have…
+                  <span className={styles.minuteInput}>
+                    <input
+                      name="availableMinutes"
+                      type="number"
+                      min={5}
+                      max={180}
+                      step={1}
+                      required
+                      value={availability}
+                      onChange={(event) =>
+                        setAvailabilityDraft(event.target.value)
+                      }
+                      disabled={busy || storagePending}
+                    />
+                    <span>minutes</span>
+                  </span>
+                </label>
+                <button
+                  type="submit"
+                  className="button secondary"
+                  disabled={busy || storagePending}
+                >
+                  {busy ? "Saving…" : "Apply today’s time"}
+                </button>
+              </form>
+              <div className={styles.availabilityNote}>
+                <span>
+                  Usual budget: {usualMinutes} min
+                  {plan?.availabilityOverride ? " · today only" : ""}
+                </span>
+                {plan?.availabilityOverride && budget !== usualMinutes && (
+                  <button
+                    className="text-link"
+                    disabled={busy || storagePending}
+                    onClick={() => void saveAvailability(usualMinutes)}
+                  >
+                    Use usual time
+                  </button>
+                )}
+              </div>
+              {!view.preferredDay && (
+                <p className="small muted">
+                  Today is outside your preferred practice days. You can still
+                  choose a small session.
+                </p>
+              )}
+              {view.timezoneChanged && (
+                <p className="small muted">
+                  Your timezone changed. This local day’s selections stay in
+                  place; an active session continues.
+                </p>
+              )}
+            </section>
+            {view.restart && !restartDismissed && !active && (
+              <section className={styles.restart} aria-label="A gentle return">
+                <Leaf size={20} aria-hidden="true" />
+                <div>
+                  <p>Welcome back. Start with one short session?</p>
+                  <span className="small muted">
+                    Your last saved practice was{" "}
+                    {shortDate(view.restart.lastPractisedAt)}. Your learning
+                    history is kept as it is.
+                  </span>
+                  <div className={styles.restartActions}>
+                    <button
+                      className="button secondary"
+                      disabled={disabled}
+                      onClick={() => void saveAvailability(15)}
+                    >
+                      Make today 15 minutes
+                    </button>
+                    <button
+                      className="text-link"
+                      onClick={() => setRestartDismissed(true)}
+                      disabled={busy}
+                    >
+                      Continue normally
+                    </button>
+                  </div>
+                </div>
+              </section>
+            )}
+            {primary && resolved && (
+              <>
+                <p className="suggestion-reason">{primary.reason}</p>
+                <p className={styles.allocation}>
+                  <Clock3 size={14} />
+                  <span>
+                    {active?.targetMinutes ?? primary.timeboxMinutes} min{" "}
+                    {active ? "session timebox" : "planned timebox"}
+                  </span>
+                </p>
+                <p className={`small muted ${styles.timeHonesty}`}>
+                  An allocation for practice, rather than a prediction of
+                  solving time.
+                </p>
+                {sourceTimeSuggestion && (
+                  <p className={`small muted ${styles.timeHonesty}`}>
+                    Source time suggestion: {sourceTimeSuggestion}. This is
+                    guidance from your sheet; measured duration comes from
+                    recorded timed sessions.
+                  </p>
+                )}
+                {trackContext && (
+                  <div className="today-track-context">
+                    {stageHref ? (
+                      <Link className="text-link" href={stageHref}>
+                        {trackContext.trackTitle} · {trackContext.stageTitle}
+                      </Link>
+                    ) : (
+                      <p className="small muted">
+                        {trackContext.trackTitle} · {trackContext.stageTitle}
+                      </p>
+                    )}
+                  </div>
+                )}
+                {sameProblemDue && sameProblemDue <= localDay && (
+                  <p className={`small muted ${styles.relatedSchedule}`}>
+                    {primary.activity === "coding"
+                      ? "Written recall is also due for this problem. It keeps its separate schedule and is left in your backlog."
+                      : "A coding reattempt is also due for this problem. It keeps its separate schedule and is left in your backlog."}
+                  </p>
+                )}
+                <details className={styles.evidence}>
+                  <summary>Why this activity?</summary>
+                  <ul>
+                    {primary.evidence.map((evidence, index) => (
+                      <li
+                        key={`${evidence.type}:${evidence.recordId ?? index}`}
+                      >
+                        {evidence.type === "track" && stageHref ? (
+                          <Link href={stageHref}>
+                            {evidence.label}
+                            <ArrowUpRight size={13} />
+                          </Link>
+                        ) : resolved.fresh ? (
+                          <span>{evidence.label}</span>
+                        ) : (
+                          <Link
+                            href={memoryHref(
+                              planData,
+                              primary,
+                              evidence.recordId,
+                              evidence.type,
+                            )}
+                          >
+                            {evidence.label}
+                            <ArrowUpRight size={13} />
+                          </Link>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                  {primary.relatedCodingAt && (
+                    <p className="small muted">
+                      Coding date: {shortDate(primary.relatedCodingAt)}
+                    </p>
+                  )}
+                  {primary.relatedRecallAt && (
+                    <p className="small muted">
+                      Written recall date: {shortDate(primary.relatedRecallAt)}
+                    </p>
+                  )}
+                  {!resolved.fresh && (
+                    <Link
+                      className="text-link"
+                      href={memoryHref(planData, primary)}
+                    >
+                      View Learning Memory
+                      <ArrowUpRight size={14} />
+                    </Link>
+                  )}
+                </details>
+                {resolved.problem.tags.length > 0 && (
+                  <details className={`discovery-tags ${styles.savedTags}`}>
+                    <summary>Reveal topic tags</summary>
+                    <p className="small muted">
+                      {resolved.problem.tags.join(" · ")}
+                    </p>
+                  </details>
+                )}
+              </>
+            )}
             {overBudget && !active && (
               <div className={styles.budgetNotice}>
                 <p className="small">
@@ -790,7 +692,6 @@ export function Today() {
               </div>
             )}
             <div className="session-card-actions">
-              {primaryAction}
               <Link href="/problems" className="quiet-action">
                 {data.problems.length
                   ? "Choose my own problem"
@@ -1072,12 +973,6 @@ export function Today() {
           </Link>
           <PracticePlanPreferences compact />
           <FreshDiscovery duration={discoveryDuration} secondary />
-          {!data.problems.length && mode !== "demo" && (
-            <button className="quiet-action" onClick={() => setMode("demo")}>
-              Explore the demo
-              <ArrowUpRight size={15} />
-            </button>
-          )}
           <TodayActivity />
         </div>
         <aside className={`today-support ${styles.support}`}>

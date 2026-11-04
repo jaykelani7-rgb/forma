@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { BRAND } from "@/lib/model";
 import { WorkspaceBoundary } from "@/components/workspace-boundary";
 import "./globals.css";
+import "./ribbon.css";
 export const metadata: Metadata = {
   title: `${BRAND} — A practice in progress`,
   description:
@@ -9,14 +10,14 @@ export const metadata: Metadata = {
   appleWebApp: { capable: true, title: BRAND, statusBarStyle: "default" },
   icons: { apple: "/icons/apple-touch-icon.png" },
 };
-const themeScript = `try{var t=localStorage.getItem('forma.theme');document.documentElement.dataset.theme=t==='dark'||(t==='system'&&matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light'}catch(e){}`;
+const themeScript = `try{var t=localStorage.getItem('forma.theme');document.documentElement.dataset.theme=!t||t==='dark'||(t==='system'&&matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light'}catch(e){}`;
 export default function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" data-design="ribbon" data-theme="dark" suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>

@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 const root=process.cwd();
 await mkdir('.companion-build',{recursive:true});
 await mkdir('.companion-build/assets',{recursive:true});
-await copyFile('packages/pet-ui/assets/fenn-tray.png','.companion-build/assets/fenn-tray.png');
+await copyFile('packages/ribbon/ribbon-tray.png','.companion-build/assets/ribbon-tray.png');
 await Promise.all([
   ...['index','database-worker'].map(name=>build({entryPoints:[`apps/desktop/main/${name}.ts`],outfile:`.companion-build/${name==='index'?'main':name}.cjs`,bundle:true,platform:'node',format:'cjs',target:'node24',external:['electron','node:*'],logLevel:'warning'})),
   build({entryPoints:['apps/desktop/preload/index.ts'],outfile:'.companion-build/preload.cjs',bundle:true,platform:'node',format:'cjs',external:['electron'],target:'node24'}),

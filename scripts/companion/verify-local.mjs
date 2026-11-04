@@ -13,12 +13,12 @@ try{
  let page=await application.firstWindow();page.on('pageerror',e=>errors.push(e.message));await page.waitForFunction(()=>!!window.forma);
  await page.evaluate(()=>window.forma.command({id:'local-attach',type:'attach',payload:{url:'https://codeforces.com/contest/4/problem/A',title:'Watermelon'}}));
  await page.evaluate(()=>window.forma.command({id:'local-thought',type:'thought',payload:{text:'Original learning record.'}}));
- await page.evaluate(()=>window.forma.ui('expand',true));await page.getByRole('button',{name:'Ask Fenn',exact:true}).click();
+ await page.evaluate(()=>window.forma.ui('expand',true));await page.getByRole('button',{name:'Ask Tutor',exact:true}).click();
  const question='An unfinished question that must survive app restart.';await page.locator('#tutor-draft').fill(question);
  const view=await page.evaluate(()=>window.forma.ui('tutor-view')),id=view.conversations[0].id;assert.equal(view.provider.configured,false);
  await page.waitForFunction(async({id,question})=>(await window.forma.ui('tutor-draft',id)).text===question,{id,question});
  await application.close();application=await electron.launch({executablePath,args:['.companion-build'],env});page=await application.firstWindow();page.on('pageerror',e=>errors.push(e.message));await page.waitForFunction(()=>!!window.forma);
- await page.evaluate(()=>window.forma.ui('expand',true));await page.getByRole('button',{name:'Ask Fenn',exact:true}).click();await page.locator('#tutor-draft').waitFor();assert.equal(await page.locator('#tutor-draft').inputValue(),question);
+ await page.evaluate(()=>window.forma.ui('expand',true));await page.getByRole('button',{name:'Ask Tutor',exact:true}).click();await page.locator('#tutor-draft').waitFor();assert.equal(await page.locator('#tutor-draft').inputValue(),question);
  report.drafts={committedThroughIPC:true,recoveredAfterRealRestart:true};
  const status=await page.evaluate(()=>window.forma.ui('setup-status'));assert.equal(status.storage.state,'ready');assert.equal(status.pairing.state,'not configured');assert.equal(status.connection.state,'disconnected');assert.equal(status.practiceFolders.state,'unavailable');assert.equal(status.provider.state,'not configured');assert.equal(status.login.canChange,false);
  report.setup={independentObservedStates:true,unpackagedLoginUnavailable:true,noProviderVerificationClaim:true};

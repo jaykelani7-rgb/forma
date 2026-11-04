@@ -126,17 +126,17 @@ test('mock bridge: setup is honest and file changes preserve the original conver
 test('mock provider: explicit context, early streaming, Stop and Retry preserve frozen identity and a single user turn',async({page})=>{
   await openTutor(page);await page.getByText(/^Context included/).click();await page.getByText('Inspect selected code',{exact:true}).click();await expect(page.locator('pre').filter({hasText:'int n; cin >> n;'})).toBeVisible();
   await page.locator('label.toggle-row').filter({hasText:'Problem statement'}).getByRole('checkbox').uncheck();await page.locator('label.toggle-row').filter({hasText:'Shared code'}).getByRole('checkbox').uncheck();
-  await page.getByLabel('How can Fenn help?').selectOption('small-hint');await page.getByLabel('Your question or editable voice transcript').fill('One observation, please.');
+  await page.getByLabel('How can Tutor help?').selectOption('small-hint');await page.getByLabel('Your question or editable voice transcript').fill('One observation, please.');
   await page.locator('.tutor-composer').evaluate((form:HTMLFormElement)=>{form.requestSubmit();form.requestSubmit();});
   await expect(page.getByText('Early mock observation.',{exact:true})).toBeVisible();expect(await page.evaluate(()=>window.__tutorMock.sendCount)).toBe(1);
   await expect.poll(()=>page.evaluate(()=>window.__tutorMock.turns[0].exposed)).toBe(true);
   const frozen=await page.evaluate(()=>window.__tutorMock.turns[0]);expect(frozen.context.statement).toBeNull();expect(frozen.context.code).toBeNull();expect(frozen.context.notes).toEqual([]);
   await page.evaluate(()=>window.__tutorMock.switchFile());await expect(page.getByText(/This conversation and draft still belong to Mock parity practice/)).toBeVisible();expect((await page.evaluate(()=>window.__tutorMock.turns[0])).context.identity).toBe('contest:4:A');
   await expect(page.getByLabel('Your question or editable voice transcript')).toHaveValue('');await page.getByRole('button',{name:'Stop response',exact:true}).click();
-  await expect(page.getByText('FENN · interrupted',{exact:true})).toBeVisible();await page.getByRole('button',{name:/Retry this turn/}).click();
+  await expect(page.getByText('TUTOR · interrupted',{exact:true})).toBeVisible();await page.getByRole('button',{name:/Retry this turn/}).click();
   await expect(page.getByRole('button',{name:'Stop response',exact:true})).toBeVisible();const retry=await page.evaluate(()=>({turns:window.__tutorMock.turns,calls:window.__tutorMock.calls.filter(call=>call.action==='tutor-send')}));
   expect(retry.turns).toHaveLength(1);expect(retry.turns[0].id).toBe(frozen.id);expect(retry.turns[0].requestId).not.toBe(frozen.requestId);expect(retry.turns[0].context.statement).toBeNull();expect(retry.turns[0].context.code).toBeNull();expect(retry.calls).toHaveLength(2);
-  await page.evaluate(()=>window.__tutorMock.finish('A completed fixture response.'));await expect(page.getByText('FENN · completed',{exact:true})).toBeVisible();
+  await page.evaluate(()=>window.__tutorMock.finish('A completed fixture response.'));await expect(page.getByText('TUTOR · completed',{exact:true})).toBeVisible();
 });
 
 test('mock provider: unsafe output stays text and notebook changes require reviewed approval',async({page})=>{
@@ -165,7 +165,7 @@ test('mock audio devices: denial, cancellation and late speech/transcription can
   await draft.fill('Reviewed voice follow-up.');await page.getByRole('button',{name:'Send',exact:true}).click();await page.evaluate(()=>window.__tutorMock.finish('Completed answer for optional speech.'));
   await page.getByLabel('Allow spoken replies · AI-generated voice').check();await page.getByRole('button',{name:'Read completed reply',exact:true}).click();await page.getByRole('button',{name:'Back to practice',exact:true}).click();await page.evaluate(()=>window.__tutorMock.releaseSpeech());
   expect(await page.evaluate(()=>({created:window.__tutorMock.audioCreated,played:window.__tutorMock.audioPlayed}))).toEqual({created:0,played:0});
-  await page.getByRole('button',{name:'Ask Fenn',exact:true}).click();await page.getByRole('button',{name:'Read completed reply',exact:true}).click();await page.evaluate(()=>window.__tutorMock.releaseSpeech());await expect.poll(()=>page.evaluate(()=>window.__tutorMock.audioPlayed)).toBe(1);
+  await page.getByRole('button',{name:'Ask Tutor',exact:true}).click();await page.getByRole('button',{name:'Read completed reply',exact:true}).click();await page.evaluate(()=>window.__tutorMock.releaseSpeech());await expect.poll(()=>page.evaluate(()=>window.__tutorMock.audioPlayed)).toBe(1);
   await mic.click();await expect(page.getByRole('button',{name:'Finish recording and transcribe',exact:true})).toBeVisible();expect(await page.evaluate(()=>window.__tutorMock.audioPaused)).toBe(1);
   await page.getByRole('button',{name:'Cancel recording',exact:true}).click();expect(await page.evaluate(()=>window.__tutorMock.calls.filter(call=>call.action==='tutor-transcribe').length)).toBe(2);
 });
@@ -182,7 +182,7 @@ test('context arrivals require adoption; another conversation and collapse prese
   await draft.fill('An unsent draft to retain across navigation.');
   await page.getByLabel('Saved problem conversations').selectOption('other-conversation');await draft.fill('A separate draft for the other conversation.');
   await page.getByLabel('Saved problem conversations').selectOption('mock-conversation');await expect(draft).toHaveValue('An unsent draft to retain across navigation.');
-  await page.getByRole('button',{name:'Collapse to Fenn',exact:true}).click();await expect(draft).toBeHidden();
+  await page.getByRole('button',{name:'Collapse to ribbon',exact:true}).click();await expect(draft).toBeHidden();
   await page.getByRole('button',{name:/^Open companion/}).click();await expect(draft).toHaveValue('An unsent draft to retain across navigation.');
   await page.evaluate(()=>window.__tutorMock.captureStatement('Most recent captured statement.'));await page.getByRole('button',{name:'Use latest context for this draft',exact:true}).click();
   await page.getByRole('button',{name:'Send',exact:true}).click();
@@ -195,7 +195,7 @@ test('provider switching keeps partial answers and drafts and cancels late voice
   await draft.fill('Discuss my original Gemini approach.');await page.getByRole('button',{name:'Send',exact:true}).click();
   await draft.fill('A follow-up I have not sent.');
   await page.getByRole('button',{name:'Setup',exact:true}).click();await page.getByLabel('Provider',{exact:true}).selectOption('openai');await page.getByRole('button',{name:'Use OpenAI',exact:true}).click();
-  await expect(page.getByText('FENN · interrupted',{exact:true})).toBeVisible();await expect(draft).toHaveValue('A follow-up I have not sent.');
+  await expect(page.getByText('TUTOR · interrupted',{exact:true})).toBeVisible();await expect(draft).toHaveValue('A follow-up I have not sent.');
   expect((await page.evaluate(()=>window.__tutorMock.turns[0])).provider).toBe('gemini');expect(await page.evaluate(()=>window.__tutorMock.sendCount)).toBe(1);
   await page.getByLabel('Your OpenAI API key',{exact:true}).fill('fixture-not-a-real-provider-key');await page.getByRole('button',{name:'Save local provider setup',exact:true}).click();
   await page.getByRole('button',{name:'Record voice question',exact:true}).click();await page.getByRole('button',{name:'Finish recording and transcribe',exact:true}).click();
@@ -245,9 +245,9 @@ test('manual save A followed by browser capture B never displays B as the select
 
 test('durable drafts: committed question and selected mode recover after renderer restart without Send or voice',async({page})=>{
   await openTutor(page);const draft=page.getByLabel('Your question or editable voice transcript');
-  await draft.fill('Continue my unfinished boundary-case question.');await page.getByLabel('How can Fenn help?').selectOption('stronger-hint');
+  await draft.fill('Continue my unfinished boundary-case question.');await page.getByLabel('How can Tutor help?').selectOption('stronger-hint');
   await expect(page.getByText('Draft saved locally',{exact:true})).toBeVisible();
-  await page.reload();await expect(draft).toHaveValue('Continue my unfinished boundary-case question.');await expect(page.getByLabel('How can Fenn help?')).toHaveValue('stronger-hint');
+  await page.reload();await expect(draft).toHaveValue('Continue my unfinished boundary-case question.');await expect(page.getByLabel('How can Tutor help?')).toHaveValue('stronger-hint');
   expect(await page.evaluate(()=>({send:window.__tutorMock.sendCount,mic:window.__tutorMock.microphoneRequests,audio:window.__tutorMock.audioCreated}))).toEqual({send:0,mic:0,audio:0});
 });
 test('durable drafts: expired selected context retains question and asks for explicit review',async({page})=>{

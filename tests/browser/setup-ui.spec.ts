@@ -50,8 +50,8 @@ test("setup presents independent observed states and never tests credentials or 
   await expect(page.getByText("Not observable", { exact: true })).toBeVisible();
   await expect(page.getByText("Not verified", { exact: true })).toBeVisible();
   await expect(page.getByText("Gemini · key configured", { exact: true })).toBeVisible();
-  await expect(page.getByLabel("Open Fenn when I sign in")).toBeDisabled();
-  await expect(page.getByLabel("Open Fenn when I sign in")).not.toBeChecked();
+  await expect(page.getByLabel("Open Ribbon when I sign in")).toBeDisabled();
+  await expect(page.getByLabel("Open Ribbon when I sign in")).not.toBeChecked();
   const calls = await page.evaluate(() => window.__setupMock.calls.map(call => call.action));
   expect(calls).toContain("setup-status");
   expect(calls.some(action => /tutor-send|tutor-transcribe|tutor-microphone|launch-at-login/.test(action))).toBe(false);

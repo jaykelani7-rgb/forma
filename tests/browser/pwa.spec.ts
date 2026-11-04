@@ -131,6 +131,7 @@ test("install assets are served and the real service worker keeps API responses 
     resources.every(
       (path) =>
         path === "/offline.html" ||
+        path === "/art/ribbon-landscape.webp" ||
         path.startsWith("/icons/") ||
         path.startsWith("/fonts/"),
     ),

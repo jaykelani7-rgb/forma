@@ -151,8 +151,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const cloudLock = useRef(false);
   const cloudAbort = useRef<AbortController | null>(null);
   const cloudVersion = useRef(0);
-  const [theme, setThemeState] = useState<Theme>("light");
-  const [resolvedTheme, setResolvedTheme] = useState<"light" | "dark">("light");
+  const [theme, setThemeState] = useState<Theme>("dark");
+  const [resolvedTheme, setResolvedTheme] = useState<"light" | "dark">("dark");
   const [storageError, setStorageError] = useState<string | null>(null);
   const persistBlocked = useRef(false);
   const volatile = useRef(

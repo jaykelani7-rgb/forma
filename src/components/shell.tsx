@@ -4,16 +4,14 @@ import { usePathname } from "next/navigation";
 import {
   ArrowLeft,
   ArrowRight,
-  BarChart3,
+  BookMarked,
   BookOpen,
   CalendarDays,
   CircleHelp,
-  Activity,
   Leaf,
   Moon,
   Settings2,
   Sun,
-  RotateCcw,
   Plus,
   ShieldCheck,
   Layers3,
@@ -24,42 +22,44 @@ import { BRAND } from "@/lib/model";
 import { useWorkspace } from "./provider";
 import { AddProblem } from "./problem-form";
 import { Modal } from "./ui";
+import { RibbonFlight } from "./ribbon-flight";
+import { RibbonDock } from "./ribbon-dock";
+import { RibbonMark } from "../../packages/ribbon/RibbonMark";
 
 const navigation = [
   { href: "/", label: "Today", icon: CalendarDays },
-  { href: "/problems", label: "Problems", icon: BookOpen },
+  { href: "/problems", label: "Practice", icon: BookOpen },
   { href: "/tracks", label: "Tracks", icon: Layers3 },
-  { href: "/contests", label: "Contest Lab", icon: Timer },
-  { href: "/revisit", label: "Revisit", icon: RotateCcw },
-  { href: "/activity", label: "Activity", icon: Activity },
-  { href: "/progress", label: "Progress", icon: BarChart3 },
+  { href: "/contests", label: "Contests", icon: Timer },
+  { href: "/journal", label: "Journal", icon: BookMarked },
+];
+const practiceTabs = [
+  { href: "/problems", label: "Problems" },
+  { href: "/revisit", label: "Revisit" },
+];
+const journalTabs = [
+  { href: "/journal", label: "Entries" },
+  { href: "/activity", label: "Activity" },
+  { href: "/progress", label: "Progress" },
 ];
 export function BrandMark({ small = false }: { small?: boolean }) {
-  return (
-    <svg
-      viewBox="0 0 32 36"
-      width={small ? 25 : 30}
-      height={small ? 28 : 34}
-      fill="none"
-      aria-hidden="true"
-    >
-      <path
-        d="M5 31V8.5C5 5.5 8 3 11 3H27V10H13V17H23V24H13V31H5Z"
-        fill="currentColor"
-      />
-      <path d="M17 28V33H27V28H17Z" fill="currentColor" opacity=".45" />
-    </svg>
-  );
+  return <RibbonMark size={small ? 36 : 45} />;
 }
 export function Shell({ children }: { children: ReactNode }) {
   const path = usePathname();
-  const activePath = path.startsWith("/contests/")
-    ? "/contests"
-    : path.startsWith("/tracks/")
-      ? "/tracks"
-      : path.startsWith("/problems/")
-        ? "/problems"
-        : path;
+  const sectionPath = "/" + (path.split("/")[1] ?? "");
+  const activePath =
+    sectionPath === "/revisit"
+      ? "/problems"
+      : journalTabs.some((tab) => tab.href === sectionPath)
+        ? "/journal"
+        : sectionPath;
+  const sectionTabs =
+    path === "/problems" || path === "/revisit"
+      ? practiceTabs
+      : journalTabs.some((tab) => tab.href === path)
+        ? journalTabs
+        : [];
   const {
     data,
     ready,
@@ -82,12 +82,9 @@ export function Shell({ children }: { children: ReactNode }) {
         <aside className="sidebar">
           <Link href="/" className="brand" aria-label={`${BRAND} home`}>
             <BrandMark />
-            <span>
-              {BRAND.toLowerCase()}
-              <span className="brand-period">.</span>
-            </span>
+            <span>{BRAND.toLowerCase()}</span>
           </Link>
-          <div className="sidebar-caption">A PRACTICE IN PROGRESS</div>
+
           <nav aria-label="Primary navigation">
             {navigation.map(({ href, label, icon: Icon }) => (
               <Link
@@ -106,15 +103,6 @@ export function Shell({ children }: { children: ReactNode }) {
             <Plus size={17} />
             Add a problem
           </button>
-          <div className="sidebar-note">
-            <Leaf size={21} strokeWidth={1.4} />
-            <p>
-              Progress grows
-              <br />
-              with practice.
-            </p>
-            <span>A little, often.</span>
-          </div>
           <div className="sidebar-bottom">
             <button
               className="nav-link"
@@ -168,16 +156,9 @@ export function Shell({ children }: { children: ReactNode }) {
             <div className="mobile-top">
               <Link href="/" className="brand">
                 <BrandMark small />
-                <span>{BRAND.toLowerCase()}.</span>
+                <span>{BRAND.toLowerCase()}</span>
               </Link>
               <div>
-                <Link
-                  href="/contests"
-                  className="icon-button"
-                  aria-label="Contest Lab"
-                >
-                  <Timer size={19} />
-                </Link>
                 <button
                   className="icon-button"
                   onClick={() =>
@@ -200,7 +181,7 @@ export function Shell({ children }: { children: ReactNode }) {
                 </Link>
               </div>
             </div>
-            <div className="topbar">
+            <div className={path === "/" ? "topbar ribbon-home-bar" : "topbar"}>
               <div className="breadcrumb">
                 Your workspace<span>/</span>
                 <strong>
@@ -210,7 +191,12 @@ export function Shell({ children }: { children: ReactNode }) {
               </div>
               <div className="topbar-right">
                 <span className="local-indicator">
-                  <span />A space to get better
+                  <span />
+                  {mode === "demo"
+                    ? "Demo workspace"
+                    : account
+                      ? `Account · ${cloudStatus}`
+                      : "On this device"}
                 </span>
                 <button
                   className="icon-button"
@@ -250,6 +236,22 @@ export function Shell({ children }: { children: ReactNode }) {
             id="main-content"
             className={focused ? "focus-main" : "main-content"}
           >
+            {sectionTabs.length > 0 && (
+              <nav
+                className="ribbon-section-tabs"
+                aria-label="Section navigation"
+              >
+                {sectionTabs.map((tab) => (
+                  <Link
+                    key={tab.href}
+                    href={tab.href}
+                    aria-current={path === tab.href ? "page" : undefined}
+                  >
+                    {tab.label}
+                  </Link>
+                ))}
+              </nav>
+            )}
             {children}
           </main>
         ) : (
@@ -268,23 +270,23 @@ export function Shell({ children }: { children: ReactNode }) {
               </span>
             </footer>
             <nav className="mobile-nav" aria-label="Mobile navigation">
-              {navigation
-                .filter((item) => item.href !== "/contests")
-                .map(({ href, label, icon: Icon }) => (
-                  <Link
-                    key={href}
-                    href={href}
-                    className={activePath === href ? "active" : ""}
-                    aria-current={activePath === href ? "page" : undefined}
-                  >
-                    <Icon size={20} />
-                    <span>{label}</span>
-                  </Link>
-                ))}
+              {navigation.map(({ href, label, icon: Icon }) => (
+                <Link
+                  key={href}
+                  href={href}
+                  className={activePath === href ? "active" : ""}
+                  aria-current={activePath === href ? "page" : undefined}
+                >
+                  <Icon size={20} />
+                  <span>{label}</span>
+                </Link>
+              ))}
             </nav>
           </>
         )}
       </div>
+      <RibbonFlight path={path} />
+      {!focused && ready && data.session && <RibbonDock />}
       {addOpen && <AddProblem onClose={() => setAddOpen(false)} />}
       {help && (
         <Modal
@@ -297,10 +299,9 @@ export function Shell({ children }: { children: ReactNode }) {
               in your own editor, and leave a quick reflection.
             </p>
             <p>
-              Your records stay in this browser. A connected Codeforces handle
-              imports public activity when you refresh; your reflections and
-              notebook stay on this device. Export a backup in Settings whenever
-              you need one.
+              {account && mode !== "demo"
+                ? "This account has a separate device cache. Check sync and recovery in Settings."
+                : "This workspace is stored in this browser. Export a backup in Settings to keep a copy."}
             </p>
             <div className="rule-note">
               <Leaf size={20} />

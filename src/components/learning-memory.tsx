@@ -41,6 +41,7 @@ import {
 import styles from "./memory.module.css";
 
 function returnDestination(from?: string) {
+  if (from === "/journal") return { href: "/journal", label: "Back to journal" };
   if (from === "/") return { href: "/", label: "Back to Today" };
   if (!from || !from.startsWith("/") || from.startsWith("//"))
     return { href: "/problems", label: "Back to problems" };

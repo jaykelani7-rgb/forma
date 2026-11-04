@@ -21,7 +21,7 @@ try {
   await page.waitForTimeout(100);
   await page.screenshot({path:join(output,'native-welcome.png')});
   await page.evaluate(()=>window.forma.command({id:'native-attach',type:'attach',payload:{url:'https://codeforces.com/contest/4/problem/A',title:'Watermelon'}}));
-  await page.getByRole('button',{name:/Today with Fenn/}).click();
+  await page.getByRole('button',{name:/Today’s plan/}).click();
   await page.getByRole('button',{name:'Start & open problem',exact:true}).waitFor();
   const planned=await page.evaluate(()=>window.forma.getSnapshot());
   assert.equal(planned.today.items[0].title,'Watermelon');
@@ -29,6 +29,10 @@ try {
   assert.equal(planned.data.session,null);
   await page.screenshot({path:join(output,'native-today-suggestion.png')});
   await page.getByRole('button',{name:'Back to practice',exact:true}).click();
+  await page.getByRole('button', {name:'Begin a session',exact:true}).click();
+  await page.getByRole('button', {name:'Pause from ribbon',exact:true}).click();
+  await page.getByRole('button', {name:'Resume from ribbon',exact:true}).click();
+  await page.getByRole('button', {name:'Pause from ribbon',exact:true}).waitFor();
   const timings=await page.evaluate(async()=>{
     const api=window.forma;
     await api.command({id:'native-attach',type:'attach',payload:{url:'https://codeforces.com/contest/4/problem/A',title:'Watermelon'}});
@@ -38,7 +42,6 @@ try {
       await api.command({id:`native-note-${i}`,type:'thought',payload:{text:`Native durability check ${i}`}});
       samples.push(performance.now()-before);
     }
-    await api.command({id:'native-start',type:'start',payload:{}});
     await api.command({id:'native-pause',type:'pause',payload:{}});
     await api.command({id:'native-finish',type:'finish',payload:{}});
     await api.command({id:'native-reflect',type:'reflect',payload:{outcome:'hint',takeaway:'Check parity before branching.'}});
@@ -48,8 +51,8 @@ try {
   });
   assert.equal(timings.noteCount,20);assert.equal(timings.attempts,1);assert.equal(timings.outcome,'hint');
   await page.screenshot({path:join(output,'native-practice.png')});
-  await page.getByRole('button',{name:/Today with Fenn/}).click();
-  await page.getByText('TODAY WITH FENN',{exact:true}).waitFor();
+  await page.getByRole('button',{name:/Today’s plan/}).click();
+  await page.getByText('TODAY’S PLAN',{exact:true}).waitFor();
   await page.screenshot({path:join(output,'native-today.png')});
   const todayWindow=await application.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].getBounds());
   assert.equal(todayWindow.height,520);
@@ -137,7 +140,7 @@ try {
   const idleEnd=await application.evaluate(({app})=>app.getAppMetrics().map(p=>({pid:p.pid,type:p.type,cpu:p.cpu.cumulativeCPUUsage,kib:p.memory.workingSetSize})));
   const cpuSeconds=idleEnd.reduce((sum,p)=>sum+Math.max(0,p.cpu-(idleStart.find(s=>s.pid===p.pid)?.cpu??p.cpu)),0);
   const traySvgEmpty=await application.evaluate(({nativeImage})=>nativeImage.createFromBuffer(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22"><circle cx="11" cy="11" r="9"/></svg>')).isEmpty());
-  const trayPngEmpty=await application.evaluate(({nativeImage},path)=>nativeImage.createFromPath(path).isEmpty(),resolve('.companion-build/assets/fenn-tray.png'));
+  const trayPngEmpty=await application.evaluate(({nativeImage},path)=>nativeImage.createFromPath(path).isEmpty(),resolve('.companion-build/assets/ribbon-tray.png'));
   assert.equal(trayPngEmpty,false);
   const report={today:{suggestionRendered:true,compactHeight:todayWindow.height,readingCreatedNoSession:true},recognition,verifiedAt:new Date().toISOString(),platform:process.platform,architecture:process.arch,softwareRendering:software,notebook:folder,traySvgEmpty,trayPngEmpty,pairing:{acknowledged:pairedAck.ok,revocationRejected:!revokedAck.ok},cardP95Ms,...timings,idle:{durationMs:idleMs,cpuPercentOfOneCore:cpuSeconds/(idleMs/1000)*100,totalWorkingSetMiB:idleEnd.reduce((s,p)=>s+p.kib,0)/1024,processes:idleEnd},pageErrors:errors};
   assert.deepEqual(errors,[]);

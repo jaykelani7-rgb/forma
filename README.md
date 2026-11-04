@@ -1,10 +1,10 @@
 # Forma
 
-A daily competitive-programming notebook with a clean light appearance and black-and-ivory **Ink**. Shared Tracks lets you send a curriculum as a portable file or an explicitly published unlisted link while keeping each person's practice history separate. Contest Lab adds chosen practice contests, accurate submission evidence, optional reviews and deliberate upsolves. My Practice Plan keeps a small, explainable plan on Today from your availability, saved schedules and active track. Use Track Studio to upload a DOCX, PDF or image, paste Codeforces links/IDs, or build a manual track. Practice in Forma or on Codeforces, and use Learning Memory to revisit recorded approaches, mistakes and takeaways. Timed re-solves and written recall share a manageable revisit list. Comfortable and Large text preferences apply across the app and work alongside browser zoom.
+A daily competitive-programming notebook with the **Ribbon** design in Ink and Light. Today places your current practice in an illustrated paper landscape. A compact timer follows an open session through the workspace, and Journal links each saved reflection to its original record. Shared Tracks lets you send a curriculum as a portable file or an explicitly published unlisted link while keeping each person's practice history separate. Contest Lab adds chosen practice contests, accurate submission evidence, optional reviews and deliberate upsolves. My Practice Plan keeps a small, explainable plan on Today from your availability, saved schedules and active track. Use Track Studio to upload a DOCX, PDF or image, paste Codeforces links/IDs, or build a manual track. Practice in Forma or on Codeforces, and use Learning Memory to revisit recorded approaches, mistakes and takeaways. Timed re-solves and written recall share a manageable revisit list. Comfortable and Large text preferences apply across the app and work alongside browser zoom.
 
 ## Run locally
 
-Forma Companion's local desktop milestone is also available: `npm run companion:dev`. It adds Fenn, SQLite-backed practice/reflections and a paired VS Code extension while keeping this website independently usable. Desktop account sync is pending; see [companion setup and current scope](docs/companion/README.md).
+Forma Companion's local desktop milestone is also available: `npm run companion:dev`. It adds the floating Ribbon timer, SQLite-backed practice/reflections and a paired VS Code extension while keeping this website independently usable. Desktop account sync is pending; see [companion setup and current scope](docs/companion/README.md).
 
 Requires Node.js 22 or later. CI uses Node.js 22.
 
@@ -45,6 +45,7 @@ Demo, personal, and each verified account use separate workspaces. Demo explorat
 | `/session`                              | Persistent timer, notes, reflection                                                            |
 | `/revisit`                              | Recommended batch, full queue, completion, rescheduling, undo                                  |
 | `/progress`                             | Shared learning outcomes, dated evidence-based observations, topics and measured time          |
+| `/journal`                              | Searchable practice entries, outcomes, reflections, and links to Learning Memory              |
 | `/activity`                             | Handle-scoped submissions, grouped attempts, reflections, older history                        |
 | `/settings`                             | Practice Plan preferences, Codeforces/account, appearance, backups, installation and reminders |
 

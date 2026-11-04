@@ -62,7 +62,7 @@ function worker(offline = false) {
         },
       }),
       match: async (key: string) => stored.get(key)?.clone(),
-      keys: async () => ["forma-public-v0", "forma-public-v1", "another-app"],
+      keys: async () => ["forma-public-v1", "forma-public-ribbon-v2", "another-app"],
       delete: async (key: string) => {
         deleted.push(key);
       },
@@ -141,6 +141,7 @@ test("worker installation only caches public resources without credentials and w
       const path = new URL(request.url).pathname;
       return (
         path === "/offline.html" ||
+        path === "/art/ribbon-landscape.webp" ||
         path.startsWith("/icons/") ||
         path.startsWith("/fonts/")
       );
@@ -152,7 +153,7 @@ test("worker installation only caches public resources without credentials and w
   await serviceWorker.lifecycle("message", { type: "ACTIVATE_UPDATE" });
   assert.equal(serviceWorker.activated(), 1);
   await serviceWorker.lifecycle("activate");
-  assert.deepEqual(serviceWorker.deleted, ["forma-public-v0"]);
+  assert.deepEqual(serviceWorker.deleted, ["forma-public-v1"]);
   assert.equal(serviceWorker.claimed(), 1);
 });
 

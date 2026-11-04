@@ -33,6 +33,7 @@ const developmentData = !app.isPackaged || process.argv.includes('--companion-sm
 if(developmentData)app.setPath('userData',resolve(developmentData));
 const lock=app.requestSingleInstanceLock();
 if(!lock)app.quit();
+const ribbonWindow = { width: 216, height: 78 };
 let window: BrowserWindow;
 let tray: Tray;
 let database: DatabaseClient;
@@ -221,7 +222,7 @@ async function broadcast() {
   const next=await snapshot();
   if(!expanded){
     const bubble=!!(next.presentation.recognition||next.presentation.verdict)&&!(preferences.snoozedUntil&&Date.parse(preferences.snoozedUntil)>Date.now());
-    const b=window.getBounds(), size={width:bubble?340:148,height:bubble?310:164};
+    const b=window.getBounds(), size=bubble?{width:340,height:310}:ribbonWindow;
     if(b.width!==size.width||b.height!==size.height){const area=screen.getDisplayMatching(b).workArea;const at=clampPosition({x:b.x+b.width-size.width,y:b.y+b.height-size.height},size,area);window.setBounds({...at,...size});}
   }
   window.webContents.send('forma:changed',next);
@@ -229,7 +230,7 @@ async function broadcast() {
 function constrain(){if(!window||window.isDestroyed())return;const b=window.getBounds();const a=screen.getDisplayMatching(b).workArea;window.setPosition(...Object.values(clampPosition(b,b,a)) as [number,number]);}
 function expand(value:boolean,focus=false,glance=false){
   const b=window.getBounds();expanded=value;
-  const width=value?380:148, height=value?(glance?520:700):164;
+  const width=value?380:ribbonWindow.width, height=value?(glance?520:700):ribbonWindow.height;
   const a=screen.getDisplayMatching(b).workArea;
   const size={width:Math.min(width,a.width),height:Math.min(height,a.height)};
   const at=clampPosition({x:b.x+b.width-size.width,y:b.y+b.height-size.height},size,a);
@@ -386,7 +387,7 @@ async function main(){
 
   if(existsSync(credentialPath())&&secureAvailable())try{credential=safeStorage.decryptString(readFileSync(credentialPath()))||null;}catch{credential=null;}
   const a=screen.getPrimaryDisplay().workArea;
-  const size={width:148,height:164};const position=clampPosition(preferences.position??{x:a.x+a.width-180,y:a.y+a.height-200},size,a);
+  const size=ribbonWindow;const position=clampPosition(preferences.position??{x:a.x+a.width-180,y:a.y+a.height-200},size,a);
   window=new BrowserWindow({...size,...position,frame:false,transparent:true,resizable:false,show:false,hasShadow:false,alwaysOnTop:true,skipTaskbar:true,title:'Forma Companion — unsigned development build',webPreferences:{preload:join(__dirname,'preload.cjs'),contextIsolation:true,sandbox:true,nodeIntegration:false,webSecurity:true,backgroundThrottling:true}});
   window.setVisibleOnAllWorkspaces(true,{visibleOnFullScreen:true});
   window.webContents.setWindowOpenHandler(()=>({action:'deny'}));
@@ -401,13 +402,13 @@ async function main(){
   window.on('hide',cancelVoice);
   window.on('close',event=>{if(!quitting){event.preventDefault();window.hide();}});
   let moveTimer:ReturnType<typeof setTimeout>;
-  window.on('moved',()=>{clearTimeout(moveTimer);moveTimer=setTimeout(()=>{constrain();const b=window.getBounds();void setPreferences({position:{x:b.x+b.width-148,y:b.y+b.height-164}});},400);});
+  window.on('moved',()=>{clearTimeout(moveTimer);moveTimer=setTimeout(()=>{constrain();const b=window.getBounds();void setPreferences({position:{x:b.x+b.width-ribbonWindow.width,y:b.y+b.height-ribbonWindow.height}});},400);});
   screen.on('display-removed',constrain);screen.on('display-metrics-changed',constrain);
   // A static original fox mark remains discoverable when the pet is hidden.
-  const icon=nativeImage.createFromPath(join(__dirname,'assets','fenn-tray.png'));
+  const icon=nativeImage.createFromPath(join(__dirname,'assets','ribbon-tray.png'));
   if(icon.isEmpty())throw new Error('The menu-bar recovery icon is missing from this build.');
   icon.setTemplateImage(true);tray=new Tray(icon);tray.setToolTip('Forma Companion');
-  tray.setContextMenu(Menu.buildFromTemplate([{label:'Open Fenn',click:show},{label:'Pet only',click:()=>expand(false)},{label:'Hide companion',click:()=>window.hide()},{label:'Snooze for an hour',click:()=>void setPreferences({snoozedUntil:new Date(Date.now()+3600000).toISOString()})},{type:'separator'},{label:'Export notebook…',click:()=>void saveFile('notebook')},{label:'Unsigned development build',enabled:false},{label:'Quit Forma Companion',click:()=>app.quit()}]));
+  tray.setContextMenu(Menu.buildFromTemplate([{label:'Open Forma Ribbon',click:show},{label:'Compact ribbon',click:()=>expand(false)},{label:'Hide companion',click:()=>window.hide()},{label:'Snooze for an hour',click:()=>void setPreferences({snoozedUntil:new Date(Date.now()+3600000).toISOString()})},{type:'separator'},{label:'Export notebook…',click:()=>void saveFile('notebook')},{label:'Unsigned development build',enabled:false},{label:'Quit Forma Companion',click:()=>app.quit()}]));
   tray.on('click',show);
   try{registerShortcut(preferences.shortcut);}catch{ /* Tray recovery stays available when the shortcut is occupied. */ }
   transport=await startTransport({...(developmentData?{endpoint:join(userData,'runtime','companion.sock')}:{}),credential:()=>credential,command:(command,epoch)=>{if(!epoch)throw new Error('Update the Forma VS Code extension before delivering saved captures.');return applyCommand(command,'vscode',epoch);},recoveryEpoch:()=>database.call<string>('recovery-epoch'),tutorCode:shareTutorCode,recognition:request=>{recoveryFence.lease();return recognition.request(request);},action:async action=>{recoveryFence.lease();if(action==='open'||action==='memory'){panelRequest={id:(panelRequest?.id??0)+1,panel:action==='memory'?'memory':'home'};show();}return (await database.call<LocalSnapshot>('snapshot')).revision;},context:async()=>{const local=await database.call<LocalSnapshot>('snapshot');return {identity:local.state.identity,sessionId:local.data.session?.id??null,hostEpoch,recoveryEpoch:await database.call<string>('recovery-epoch')};},connected:value=>{connected=value;void broadcast();}});
