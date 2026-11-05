@@ -1,3 +1,4 @@
+import { readRibbonOptions } from "../../../packages/ribbon/options";
 import { applyCompanionCommand, initialCompanionState } from "../../../packages/core/src/companion";
 import { companionToday } from "../../../packages/core/src/companion-today";
 import { reconcilePracticePlan } from "../../../src/lib/practice-plan";
@@ -29,7 +30,8 @@ export function createPreviewBridge(): FormaBridge {
         const status = deriveSetupStatus({ storage: { available: false, error: "This browser preview keeps its fixture in memory. Durable notebook storage is unavailable." }, vscode: { paired: false, connected: false }, practiceFolders: { observable: false }, browser: { supported: false, enabled: false, hostInstalled: null }, provider: { provider: "gemini", configured: false }, login: { supported: false, packaged: false, enabled: false } });
         return { ...status, summary: "Browser preview · no durable storage" };
       }
-      if (action === "theme" && (payload === "light" || payload === "ink" || payload === "system")) snapshot.preferences.theme = payload;
+      if (action === "ribbon-options") snapshot.preferences.ribbon = readRibbonOptions(payload);
+      else if (action === "theme" && (payload === "light" || payload === "ink" || payload === "system")) snapshot.preferences.theme = payload;
       else if (action === "reduced-motion" && typeof payload === "boolean") snapshot.preferences.reducedMotion = payload;
       else if (action === "snooze") snapshot.preferences.snoozedUntil = payload === false ? null : new Date(Date.now() + 3600000).toISOString();
       else if (action === "shortcut" && typeof payload === "string") snapshot.preferences.shortcut = payload;

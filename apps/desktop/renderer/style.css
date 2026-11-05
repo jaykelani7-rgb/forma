@@ -317,3 +317,8 @@ input[type=checkbox]:focus-visible { outline: 2px solid var(--sage); outline-off
   .companion:not(.is-reduced) .ribbon-native-dock .ribbon-mark {animation:ribbon-appear .35s ease-out}
   @keyframes ribbon-appear {from{transform:perspective(150px) rotateY(-55deg)}to{transform:perspective(150px) rotateY(0)}}
 }
+.ribbon-native-dock[data-folded="true"] .ribbon-open {min-width:44px}
+.ribbon-native-dock[data-tucked="true"] .drag-handle {display:none}
+.ribbon-native-dock[data-still="true"] .ribbon-mark {animation:none}
+.companion-window.is-collapsed:has(.ribbon-native-dock[data-tucked="true"]) {width:fit-content}
+.companion.is-reduced .rs-bookmark svg {animation:none}

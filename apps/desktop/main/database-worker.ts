@@ -45,6 +45,7 @@ parentPort!.on('message', (request: {id:number;method:string;args:unknown[]}) =>
       }
       case 'selectBinding': value=store.selectBinding(String(a[0]),String(a[1]),now); break;
       case 'preferences': value=store.preferences(); break;
+      case 'patchPreferences': value=store.setPreferences({...store.preferences(), ...a[0] as object}); break;
       case 'setPreferences': value=store.setPreferences(a[0]); break;
       case 'pause': value=store.pauseForLifecycle(String(a[0])); break;
       case 'checkpoint': value=store.checkpoint(); break;

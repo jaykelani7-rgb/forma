@@ -469,3 +469,7 @@ body:has(.ribbon-dock) .page-footer {
     flex-direction: row;
   }
 }
+.ribbon-dock[data-edge="left"] {left:0;right:auto;border-top-left-radius:0;border-bottom-left-radius:0}
+.ribbon-dock[data-edge="right"] {right:0;border-top-right-radius:0;border-bottom-right-radius:0}
+.ribbon-dock .ribbon-unfold {border:0}
+.ribbon-dock[data-still="true"] .ribbon-mark {animation:none}

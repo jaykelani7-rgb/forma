@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef } from "react";
+import { useWebRibbon } from "./use-web-ribbon";
 import { RibbonMark } from "../../packages/ribbon/RibbonMark";
 
 /** The artwork folds into the session timer after a successful navigation. */
 export function RibbonFlight({ path }: { path: string }) {
+  const options = useWebRibbon();
   const overlay = useRef<HTMLSpanElement>(null);
   const launch = useRef<{ x: number; y: number; at: number } | null>(null);
 
@@ -36,6 +38,7 @@ export function RibbonFlight({ path }: { path: string }) {
       !start ||
       path !== "/session" ||
       performance.now() - start.at > 6000 ||
+      options.motion === "still" ||
       matchMedia("(prefers-reduced-motion: reduce)").matches
     )
       return;
@@ -70,7 +73,7 @@ export function RibbonFlight({ path }: { path: string }) {
       { duration: 520, easing: "cubic-bezier(.22,.72,.28,1)" },
     );
     return () => animation.cancel();
-  }, [path]);
+  }, [path, options.motion]);
 
   return (
     <span className="ribbon-flight" ref={overlay} aria-hidden="true">

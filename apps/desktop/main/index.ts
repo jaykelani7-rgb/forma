@@ -1,3 +1,4 @@
+import { readRibbonOptions } from "../../../packages/ribbon/options";
 import { app, BrowserWindow, ipcMain, screen, Tray, Menu, nativeImage, globalShortcut, shell, dialog, safeStorage, powerMonitor, nativeTheme, systemPreferences } from "electron";
 import { mkdirSync, readFileSync, writeFileSync, existsSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -33,6 +34,8 @@ const developmentData = !app.isPackaged || process.argv.includes('--companion-sm
 if(developmentData)app.setPath('userData',resolve(developmentData));
 const lock=app.requestSingleInstanceLock();
 if(!lock)app.quit();
+let parkedAt: Electron.Rectangle | null = null;
+let shortcutPress = 0;
 const ribbonWindow = { width: 216, height: 78 };
 let window: BrowserWindow;
 let tray: Tray;
@@ -215,21 +218,34 @@ const snapshot=async()=>{
   const local=await database.call<LocalSnapshot>('snapshot');
   const slot=attention.view(local.state,recognition?.presentation()??null,!!preferences.snoozedUntil&&Date.parse(preferences.snoozedUntil)>Date.now(),Date.now());
   const tutorAssistance=local.data.session?.phase==='reflection'?await database.call('tutor-assistance',{problemId:local.data.session.problemId,sessionId:local.data.session.id}):null;
-  return {...local,tutorAssistance,today:companionToday(local.data),preferences,presentation:{expanded,panelRequest,activeFileUri:recognition?.activeFileUri()??null,recognition:slot.recognition,verdict:slot.verdict},integration:{connected,paired:!!credential,browserEnabled:!!browserCredential,browserSupported:process.platform==='darwin',status:connected?'VS Code connected':credential?'Waiting for VS Code':'Pair VS Code when you’re ready'},codeforces:platformStatus(local.state)};
+  return {...local,tutorAssistance,today:companionToday(local.data),preferences,presentation:{expanded,shortcutPress,panelRequest,activeFileUri:recognition?.activeFileUri()??null,recognition:slot.recognition,verdict:slot.verdict},integration:{connected,paired:!!credential,browserEnabled:!!browserCredential,browserSupported:process.platform==='darwin',status:connected?'VS Code connected':credential?'Waiting for VS Code':'Pair VS Code when you’re ready'},codeforces:platformStatus(local.state)};
 };
 async function broadcast() {
   if(!window||window.isDestroyed())return;
   const next=await snapshot();
   if(!expanded){
     const bubble=!!(next.presentation.recognition||next.presentation.verdict)&&!(preferences.snoozedUntil&&Date.parse(preferences.snoozedUntil)>Date.now());
-    const b=window.getBounds(), size=bubble?{width:340,height:310}:ribbonWindow;
-    if(b.width!==size.width||b.height!==size.height){const area=screen.getDisplayMatching(b).workArea;const at=clampPosition({x:b.x+b.width-size.width,y:b.y+b.height-size.height},size,area);window.setBounds({...at,...size});}
+    const b=window.getBounds();
+    const edge=preferences.ribbon.edge;
+    const tuck = !bubble && edge !== "free" && next.data.session?.phase === "focus" && next.data.session.runningSince !== null;
+    if (tuck) {
+      parkedAt ??= b;
+      const area = screen.getDisplayMatching(b).workArea;
+      const size = {width:96, height:ribbonWindow.height};
+      const at = clampPosition({x:edge === "left" ? area.x : area.x+area.width-size.width, y:b.y+b.height-size.height},size,area);
+      if(b.x!==at.x || b.y!==at.y || b.width!==size.width || b.height!==size.height) window.setBounds({...at,...size});
+    } else {
+      const base = parkedAt ?? b;
+      parkedAt = null;
+      const size=bubble?{width:340,height:310}:ribbonWindow;
+    if(base!==b || b.width!==size.width || b.height!==size.height){const area=screen.getDisplayMatching(base).workArea;const at=clampPosition({x:base.x+base.width-size.width,y:base.y+base.height-size.height},size,area);window.setBounds({...at,...size});}
+    }
   }
   window.webContents.send('forma:changed',next);
 }
 function constrain(){if(!window||window.isDestroyed())return;const b=window.getBounds();const a=screen.getDisplayMatching(b).workArea;window.setPosition(...Object.values(clampPosition(b,b,a)) as [number,number]);}
 function expand(value:boolean,focus=false,glance=false){
-  const b=window.getBounds();expanded=value;
+  const b=parkedAt ?? window.getBounds();parkedAt=null;expanded=value;
   const width=value?380:ribbonWindow.width, height=value?(glance?520:700):ribbonWindow.height;
   const a=screen.getDisplayMatching(b).workArea;
   const size={width:Math.min(width,a.width),height:Math.min(height,a.height)};
@@ -259,9 +275,9 @@ async function saveFile(kind:'notebook'|'companion'){
   const json=await database.call<string>(kind==='notebook'?'exportNotebook':'exportCompanion');
   writeFileSync(choice.filePath,json,{mode:0o600});return {saved:true};
 }
-async function setPreferences(change:Partial<CompanionPreferences>){preferences=await database.call('setPreferences',{...preferences,...change});await broadcast();return preferences;}
+async function setPreferences(change:Partial<CompanionPreferences>){preferences=await database.call('patchPreferences',change);await broadcast();return preferences;}
 function registerShortcut(shortcut:string){
-  if(!globalShortcut.register(shortcut,show))throw new Error('That shortcut is in use. Choose another shortcut.');
+  if(!globalShortcut.register(shortcut,()=>{shortcutPress++;show();}))throw new Error('That shortcut is in use. Choose another shortcut.');
 }
 
 // One paced adapter and one in-flight batch coalesce all attempts for a handle.
@@ -358,6 +374,7 @@ async function ui(action:string,payload:unknown){
     }
     case 'revoke-pairing':saveCredential(null);await broadcast();return null;
     case 'check-codeforces':await checkCodeforces(true);return snapshot();
+    case 'ribbon-options':return setPreferences({ribbon:readRibbonOptions(payload)});
     case 'theme':if(!['light','ink','system'].includes(String(payload)))throw new Error('Choose Light, Ink, or System.');return setPreferences({theme:payload as CompanionPreferences['theme']});
     case 'reduced-motion':if(typeof payload!=='boolean')throw new Error('Invalid motion preference.');return setPreferences({reducedMotion:payload});
     case 'snooze':return setPreferences({snoozedUntil:payload===false?null:new Date(Date.now()+60*60*1000).toISOString()});
@@ -402,9 +419,9 @@ async function main(){
   window.on('hide',cancelVoice);
   window.on('close',event=>{if(!quitting){event.preventDefault();window.hide();}});
   let moveTimer:ReturnType<typeof setTimeout>;
-  window.on('moved',()=>{clearTimeout(moveTimer);moveTimer=setTimeout(()=>{constrain();const b=window.getBounds();void setPreferences({position:{x:b.x+b.width-ribbonWindow.width,y:b.y+b.height-ribbonWindow.height}});},400);});
+  window.on('moved',()=>{clearTimeout(moveTimer);moveTimer=setTimeout(()=>{if(parkedAt)return;constrain();const b=window.getBounds();void setPreferences({position:{x:b.x+b.width-ribbonWindow.width,y:b.y+b.height-ribbonWindow.height}});},400);});
   screen.on('display-removed',constrain);screen.on('display-metrics-changed',constrain);
-  // A static original fox mark remains discoverable when the pet is hidden.
+  // The menu-bar ribbon remains available when the companion is hidden.
   const icon=nativeImage.createFromPath(join(__dirname,'assets','ribbon-tray.png'));
   if(icon.isEmpty())throw new Error('The menu-bar recovery icon is missing from this build.');
   icon.setTemplateImage(true);tray=new Tray(icon);tray.setToolTip('Forma Companion');

@@ -33,6 +33,42 @@ try {
   await page.getByRole('button', {name:'Pause from ribbon',exact:true}).click();
   await page.getByRole('button', {name:'Resume from ribbon',exact:true}).click();
   await page.getByRole('button', {name:'Pause from ribbon',exact:true}).waitFor();
+
+  // Rehearsal must not mutate the real, paused session in this isolated profile.
+  await page.getByRole('button',{name:'Pause from ribbon',exact:true}).click();
+  const original=await page.evaluate(()=>window.forma.getSnapshot());
+  await page.getByRole('button',{name:'Companion settings',exact:true}).click();
+  const studio=page.getByRole('region',{name:'Ribbon personalization'});
+  await studio.getByRole('button',{name:'Small fold',exact:true}).click();
+  await studio.getByRole('button',{name:'Right edge',exact:true}).click();
+  await studio.getByRole('button',{name:'Save appearance',exact:true}).click();
+  await studio.getByRole('status').filter({hasText:'saved'}).waitFor();
+  await studio.getByRole('button',{name:'Rehearse a session'}).click();
+  await page.getByRole('button',{name:'Open sample ribbon'}).click();
+  await page.getByRole('button',{name:'Start sample timer'}).click();
+  await page.getByRole('button',{name:'Pause sample timer'}).click();
+  await page.getByLabel('Sample outcome').selectOption('unsolved');
+  await page.getByLabel('One thought for next time').fill('Sample bookmark only.');
+  await page.getByRole('button',{name:'Bookmark sample thought'}).click();
+  await page.locator('.rs-bookmark').filter({hasText:'Sample bookmark only.'}).waitFor();
+  const afterRehearsal=await page.evaluate(()=>window.forma.getSnapshot());
+  assert.deepEqual(afterRehearsal.data.attempts,original.data.attempts);
+  assert.deepEqual(afterRehearsal.data.session,original.data.session);
+  await page.getByRole('button',{name:'Finish rehearsal'}).click();
+  await page.evaluate(async()=>{
+    await window.forma.command({id:'edge-resume',type:'resume',payload:{}});
+    await window.forma.ui('expand',false);
+  });
+  await page.waitForFunction(()=>document.querySelector('[data-tucked="true"]'));
+  const tucked=await application.evaluate(({BrowserWindow,screen})=>{
+    const b=BrowserWindow.getAllWindows()[0].getBounds(),a=screen.getDisplayMatching(b).workArea;
+    return {right:b.x+b.width,edge:a.x+a.width,width:b.width};
+  });
+  assert.equal(tucked.width,96);assert.equal(tucked.right,tucked.edge);
+  await page.getByRole('button',{name:/^Open companion/}).click();
+  await page.getByRole('button',{name:'Pause from ribbon'}).click();
+  await page.evaluate(()=>window.forma.ui('ribbon-options',{shape:'strip',edge:'free',motion:'gentle'}));
+  await page.getByRole('button',{name:'Back to practice',exact:true}).click();
   const timings=await page.evaluate(async()=>{
     const api=window.forma;
     await api.command({id:'native-attach',type:'attach',payload:{url:'https://codeforces.com/contest/4/problem/A',title:'Watermelon'}});

@@ -1,0 +1,197 @@
+.ribbon-studio,
+.ribbon-rehearsal {
+  --rs-ink: var(--text, var(--ink));
+  --rs-muted: var(--muted);
+  --rs-border: var(--line, var(--rule));
+  --rs-ground: var(--surface, var(--paper-raised));
+  --rs-fg: var(--button-text, var(--action-ink));
+  --rs-action: var(--button-bg, var(--action));
+  color: var(--rs-ink);
+  background: var(--rs-ground);
+  border: 1px solid var(--rs-border);
+  border-radius: 16px;
+  padding: clamp(16px, 3vw, 30px);
+  margin: 16px 0 24px;
+}
+.rs-kicker,
+.rs-stage-label {
+  font:
+    600 0.75em/1.4 Geist,
+    sans-serif;
+  letter-spacing: 0.12em;
+}
+:is(.ribbon-studio, .ribbon-rehearsal) h2 {
+  font:
+    400 2.3em/1.1 "Instrument Serif",
+    Georgia,
+    serif;
+  margin: 6px 0 9px;
+}
+:is(.ribbon-studio, .ribbon-rehearsal) p {
+  font-size: 1em;
+  line-height: 1.5;
+  color: var(--rs-muted);
+  margin: 7px 0 14px;
+}
+.rs-stage {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  isolation: isolate;
+  height: 128px;
+  overflow: hidden;
+  border-radius: 12px;
+  border: 1px solid #574636;
+  background:
+    radial-gradient(ellipse at 65% 110%, #704635 0%, transparent 65%), #211c19;
+  margin: 16px 0 9px;
+  color: #f9eddd;
+}
+.rs-stage-label {
+  position: absolute;
+  left: 12px;
+  top: 10px;
+  color: #e9c8ac;
+  text-transform: uppercase;
+}
+.rs-specimen {
+  position: absolute;
+  left: 50%;
+  bottom: 20px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  min-height: 44px;
+  border: 1px solid #746458;
+  background: #302823;
+  color: #fbefdc;
+  border-radius: 22px;
+  padding: 4px 14px;
+  font-variant-numeric: tabular-nums;
+}
+.rs-stage[data-edge="left"] .rs-specimen {
+  left: 4px;
+  transform: none;
+}
+.rs-stage[data-edge="right"] .rs-specimen {
+  left: 100%;
+  transform: translateX(calc(-100% - 4px));
+}
+.ribbon-studio fieldset {
+  border: 0;
+  margin: 15px 0;
+  padding: 0;
+}
+.ribbon-studio legend,
+.ribbon-rehearsal label {
+  display: block;
+  font-weight: 600;
+  margin: 0 0 7px;
+  font-size: 1em;
+}
+.rs-choices,
+.rs-buttons {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.rs-choices button,
+.rs-secondary,
+.rs-primary {
+  font: inherit;
+  border: 1px solid var(--rs-border);
+  border-radius: 18px;
+  padding: 7px 13px;
+  min-height: 38px;
+  background: transparent;
+  color: var(--rs-ink);
+}
+.rs-choices [aria-pressed="true"],
+.rs-primary {
+  color: var(--rs-fg);
+  background: var(--rs-action);
+}
+.rs-primary:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.rs-buttons {
+  margin-top: 18px;
+}
+.rs-rehearsal-sheet {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  color: #292019;
+  background: #eee5ba;
+  border-radius: 12px;
+  padding: 20px;
+  margin: 14px 0 18px;
+}
+.rs-rehearsal-sheet strong {
+  font:
+    400 2em/1.12 "Instrument Serif",
+    Georgia,
+    serif;
+}
+.rs-rehearsal-sheet time {
+  font-variant-numeric: tabular-nums;
+  font-size: 1.3em;
+}
+.rs-bookmark {
+  display: flex;
+  align-items: start;
+  gap: 9px;
+  border-top: 1px solid #bbb08e;
+  padding-top: 12px;
+  width: 100%;
+}
+.rs-bookmark svg {
+  color: #a63d24;
+  flex-shrink: 0;
+}
+.rs-bookmark p {
+  color: #33251b;
+  margin: 3px 0;
+  overflow-wrap: anywhere;
+}
+.ribbon-rehearsal :is(textarea, select) {
+  display: block;
+  width: 100%;
+  margin: 5px 0 12px;
+}
+.rs-exit {
+  margin: 8px 0 0 6px;
+}
+.companion :is(.ribbon-studio, .ribbon-rehearsal) {
+  padding: 14px;
+  font-size: 13px;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .ribbon-studio[data-still="false"] .rs-specimen {
+    transition:
+      left 0.25s ease,
+      transform 0.25s ease;
+  }
+  :is(.ribbon-studio, .ribbon-native-dock, .ribbon-dock)[data-still="false"]
+    button:hover
+    .ribbon-mark {
+    transform: rotate(-7deg);
+    transition: transform 0.2s ease;
+  }
+  .rs-bookmark svg {
+    animation: rs-bookmark-settle 0.35s ease-out;
+  }
+  @keyframes rs-bookmark-settle {
+    from {
+      transform: translateY(-7px) rotate(-18deg);
+    }
+    to {
+      transform: none;
+    }
+  }
+}

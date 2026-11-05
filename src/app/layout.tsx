@@ -3,6 +3,7 @@ import { BRAND } from "@/lib/model";
 import { WorkspaceBoundary } from "@/components/workspace-boundary";
 import "./globals.css";
 import "./ribbon.css";
+import "../../packages/ribbon/studio.css";
 export const metadata: Metadata = {
   title: `${BRAND} — A practice in progress`,
   description:

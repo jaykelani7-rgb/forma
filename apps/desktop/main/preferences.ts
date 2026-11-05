@@ -1,14 +1,17 @@
+import { defaultRibbon, readRibbonOptions, type RibbonOptions } from "../../../packages/ribbon/options";
 export interface CompanionPreferences {
   theme: "light" | "ink" | "system";
   reducedMotion: boolean;
   snoozedUntil: string | null;
   shortcut: string;
+  ribbon: RibbonOptions;
   position?: { x: number; y: number };
 }
 
 export const defaultPreferences = (): CompanionPreferences => ({
   theme: "system",
   reducedMotion: false,
+  ribbon: {...defaultRibbon},
   snoozedUntil: null,
   shortcut: "Control+Option+F",
 });
@@ -28,7 +31,7 @@ export function validatePreferences(value: unknown): CompanionPreferences {
       throw new Error("Invalid window position.");
     position = { x: Math.round(at.x), y: Math.round(at.y) };
   }
-  return { theme: p.theme as CompanionPreferences['theme'], reducedMotion: p.reducedMotion, snoozedUntil: p.snoozedUntil as string | null, shortcut: p.shortcut, ...(position ? {position} : {}) };
+  return { ribbon: p.ribbon === undefined ? {...defaultRibbon} : readRibbonOptions(p.ribbon), theme: p.theme as CompanionPreferences['theme'], reducedMotion: p.reducedMotion, snoozedUntil: p.snoozedUntil as string | null, shortcut: p.shortcut, ...(position ? {position} : {}) };
 }
 
 export function clampPosition(position: {x:number;y:number}, size: {width:number;height:number}, area: {x:number;y:number;width:number;height:number}) {

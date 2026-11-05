@@ -467,6 +467,7 @@ export function Today() {
                   </p>
                 )}
                 {primaryAction}
+                {!data.problems.length && <Link href="/rehearsal" className="ribbon-demo">Try a sample session <ArrowUpRight size={14}/></Link>}
                 {!data.problems.length && mode !== "demo" && (
                   <button
                     className="ribbon-demo"

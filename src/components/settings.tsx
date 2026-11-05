@@ -13,6 +13,7 @@ import {
 import { BRAND, Data, Duration, Focus, Theme, matchesFocus } from "@/lib/model";
 import { useWorkspace } from "./provider";
 import { CodeforcesConnection, RevisitDefaults } from "./codeforces";
+import { WebRibbonSettings } from "./web-ribbon-settings";
 import { AccountSettings } from "./account";
 import { Modal, PageHeader } from "./ui";
 import {
@@ -348,6 +349,7 @@ export function Settings() {
           </div>
         </section>
       </form>
+      <WebRibbonSettings />
       <PracticePlanPreferences />
       <section className="settings-section">
         <div className="settings-section-heading">
