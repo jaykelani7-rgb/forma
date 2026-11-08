@@ -1,7 +1,10 @@
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useEffectEvent, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { ArrowLeft, ArrowRight, ArrowUpRight, BookOpen, Check, ChevronRight, CircleHelp, Clock3, Code2, Ellipsis, Feather, FileCode2, Link2, LoaderCircle, Mic, Moon, Pause, Play, Plus, Settings2, ShieldCheck, Sun, X } from "lucide-react";
 import { TutorPanel, type TutorActivity } from "./TutorPanel";
 import { useThoughtVoice } from "./thought-voice";
+import { ThoughtTakeRecovery } from "./ThoughtTakeRecovery";
+import { ThoughtShortcutSettings } from "./ThoughtShortcutSettings";
+import { DEFAULT_THOUGHT_SHORTCUT } from "../main/preferences";
 import { SetupPanel } from "./SetupPanel";
 import { BackupPanel } from "./BackupPanel";
 import { RibbonStudio } from "../../../packages/ribbon/RibbonStudio";
@@ -62,6 +65,7 @@ export function App() {
   const focusTarget = useRef<HTMLDivElement>(null);
   const busyRef = useRef(false);
   const panelRequestId = useRef<number | null>(null);
+  const lastThoughtShortcutPress = useRef<number | undefined>(undefined);
   const pendingCommand = useRef<{ signature: string; command: CompanionCommand } | null>(null);
   const [draftTargets, setDraftTargets] = useState<Partial<Record<"thought" | "reflect" | "recall", CaptureTarget>>>({});
   const visible = usePageVisible();
@@ -96,11 +100,22 @@ export function App() {
   const problem = view?.problem;
   const session = view?.session;
   const thoughtVoice = useThoughtVoice(
-    bridge, expanded && panel === "thought", snapshot?.state.identity, snapshot?.data.session?.id,
+    window.forma ? bridge : null, expanded && panel === "thought", snapshot?.state.identity, snapshot?.data.session?.id,
   );
   const thoughtVoiceBusy = thoughtVoice.phase !== "idle";
   const canDictate = !!window.forma && !!problem && !!snapshot?.state.identity;
   const thoughtLimit = 10_000;
+  const thoughtShortcut = snapshot?.preferences.thoughtShortcut === undefined
+    ? DEFAULT_THOUGHT_SHORTCUT : snapshot.preferences.thoughtShortcut;
+  const thoughtTarget = snapshot ? freezeCaptureTarget(snapshot) : undefined;
+  const savedThoughtTarget = draftTargets.thought;
+  const differentDraft = !!thought.trim() && !!savedThoughtTarget && (
+    savedThoughtTarget.problemKey !== thoughtTarget?.problemKey ||
+    (!!savedThoughtTarget.sessionId && savedThoughtTarget.sessionId !== thoughtTarget?.sessionId)
+  );
+  const draftMismatchReason = differentDraft
+    ? "This draft belongs to an earlier practice context. Save it there or clear it before adding another thought."
+    : undefined;
   const binding = snapshot && activeSolutionBinding(snapshot.state.bindings, problem?.id, snapshot.presentation?.activeFileUri);
   const bindingFilename = binding ? decodeURIComponent(new URL(binding.fileUri).pathname.split("/").at(-1) ?? "Solution file") : null;
   const latestThought = snapshot?.state.thoughts.filter((item) => item.problemId === problem?.id).at(-1);
@@ -145,19 +160,48 @@ export function App() {
     else {setRecallActivity(item.activity as "explain"|"complexity");const next=await bridge?.getSnapshot();openPanel("recall",next?freezeCaptureTarget(next):undefined);}
   }
   async function openRecall() { setRecallActivity("explain"); if (!snapshot || !view) return; const due = view.due[0]; let target: CaptureTarget | undefined; if (due && due.id !== problem?.id) { if (session) { setNotice("Finish your current session before switching to a revisit."); return; } if (!await command("attach", { url: due.url, title: due.title })) return; const identity = normalizeCodeforcesIdentity(due.url); if (identity) target = { problemKey: identity.key, title: due.title }; } openPanel("recall", target); }
+  function addTranscript(text: string) {
+    setThought(current => [current.trimEnd(), text].filter(Boolean).join("\n\n"));
+  }
+
   function speakThought() {
-    if (!snapshot || !canDictate || thoughtVoiceBusy) return;
-    const target = freezeCaptureTarget(snapshot);
-    if (!target) return;
-    openPanel("thought", target);
-    const draft = draftTargets.thought;
-    if (thought.trim() && draft && (draft.problemKey !== target.problemKey || (draft.sessionId && draft.sessionId !== target.sessionId))) {
-      setError("This draft belongs to an earlier practice context. Save it there or clear it before recording a new thought.");
+    if (busy || thoughtVoiceBusy) return;
+    openPanel("thought", thoughtTarget);
+    if (!thoughtTarget || !canDictate) {
+      setError("Attach a problem before recording a thought.");
       return;
     }
-    void thoughtVoice.start(target, text => setThought(current => [current.trimEnd(), text].filter(Boolean).join("\n\n")));
+    if (draftMismatchReason) {
+      setError(draftMismatchReason);
+      return;
+    }
+    void thoughtVoice.start(thoughtTarget, addTranscript);
   }
-  async function saveThought() { if (await command("thought", { text: thought }, "Thought saved locally.", "home")) setThought(""); }
+
+  function retryThought(takeId: string) {
+    if (!thoughtTarget || draftMismatchReason || busy || thoughtVoiceBusy) return;
+    openPanel("thought", thoughtTarget);
+    void thoughtVoice.retry(takeId, thoughtTarget, addTranscript);
+  }
+
+  const onThoughtShortcut = useEffectEvent(() => {
+    if (!bridge || !window.forma || busy) return;
+    if (thoughtVoice.phase === "recording" || thoughtVoice.phase === "recorded") thoughtVoice.finish();
+    else if (thoughtVoice.phase === "idle") speakThought();
+  });
+  const thoughtShortcutEvent = snapshot?.presentation?.thoughtShortcutPress;
+  useEffect(() => {
+    if (thoughtShortcutEvent === undefined) return;
+    const previous = lastThoughtShortcutPress.current;
+    if (previous !== undefined && thoughtShortcutEvent <= previous) return;
+    lastThoughtShortcutPress.current = thoughtShortcutEvent;
+    if (previous !== undefined) onThoughtShortcut();
+  }, [thoughtShortcutEvent]);
+
+  async function saveThought() {
+    if (!thoughtTarget || thoughtVoiceBusy || thought.length > thoughtLimit) return;
+    if (await command("thought", { text: thought }, "Thought saved locally.", "home")) setThought("");
+  }
   async function saveReflection() { if (outcome && await command("reflect", { outcome, takeaway, notes: "" }, "Reflection saved locally. Your next revisit follows your notebook’s learning rules.", "home")) { setTakeaway(""); setOutcome(null); } }
   const footer = <footer className="card-footer"><span><span className="status-dot"/>{previewMode ? "In-memory preview" : "Local notebook"}</span><span>{busy ? <><LoaderCircle className="spin" size={11}/> Saving…</> : snapshot ? <><ShieldCheck size={11}/>{previewMode ? "Preview only" : "Saved locally"}</> : "Connecting…"}</span></footer>;
 
@@ -181,6 +225,10 @@ export function App() {
           {bridge&&snapshot&&<TutorPanel bridge={bridge} snapshot={snapshot} active={expanded&&panel==="tutor"} conversationRequest={tutorRequest} onActivity={setTutorActivity}/>}
           {panel === "rehearsal" && <RibbonRehearsal shortcut={previewMode ? undefined : snapshot.preferences.shortcut} shortcutPress={snapshot.presentation?.shortcutPress} onExit={() => openPanel(rehearsalReturn.current)}/>}
           {(panel === "home" || panel === "today") && !session && !snapshot.data.attempts.length && <button className="settings-link" onClick={rehearse}>Try a sample session <ArrowRight size={14}/></button>}
+          {(panel === "home" || panel === "today") && thoughtVoice.recovery.takes.length > 0 &&
+            <button type="button" className="settings-link" onClick={() => openPanel("thought")}>
+              <Mic size={14}/> Recover spoken thoughts <span aria-hidden="true">{thoughtVoice.recovery.takes.length}</span>
+            </button>}
           {panel === "today" && <><button className="text-button tutor-entry" onClick={()=>openPanel("tutor")}>Ask Tutor about this problem <ArrowRight size={12}/></button><div className="today-heading"><span className="eyebrow">TODAY’S PLAN</span>{!today?.items.length && <p>{today?.emptyMessage ?? "Today is unavailable. Reopen the local companion to try again."}</p>}</div>{today?.items.map((item,index)=><details open={index===0} className="today-choice" key={item.id}><summary>{index===0?"Suggested activity":`Another activity · ${item.title}`}</summary><section className="today-item" key={item.id}><span className="eyebrow">{item.resume?"UNFINISHED SESSION":item.activity==="coding"?"CODING":item.activity==="complexity"?"COMPLEXITY RECALL":"APPROACH RECALL"}{index?" · NEXT":""}</span><strong>{item.title}</strong><p>{item.reason}</p><small>{item.timeboxMinutes} min planned · {item.resume?"Your timer stays paused until you resume.":"Only tracked coding time counts."}</small><Button disabled={busy} onClick={()=>void chooseToday(item)} icon={ArrowRight}>{item.resume?"Continue current session":item.activity==="coding"?"Start & open problem":"Try recall"}</Button><button className="text-button" disabled={busy||!!snapshot.data.session} onClick={()=>void command("plan-later",{itemId:item.id,until:localDate(addDays(new Date(),1))},"Activity deferred until tomorrow.")}>Later · tomorrow</button></section></details>)}</>}
           {panel === "home" && <>
             <button className="tutor-entry text-button" onClick={()=>openPanel("tutor")}>Ask Tutor <Feather size={12}/></button>
@@ -207,6 +255,8 @@ export function App() {
                 {!thoughtVoiceBusy && <button type="button" className="settings-link" onClick={speakThought} disabled={busy}>
                   <Mic size={15}/> {thoughtVoice.notice ? "Record more" : "Start voice recording"}
                 </button>}
+                {!thoughtVoiceBusy && thoughtShortcut && snapshot.presentation?.thoughtShortcutAvailable &&
+                  <p className="field-help"><kbd>{thoughtShortcut}</kbd> to start or finish.</p>}
                 {thoughtVoice.phase !== "idle" && <>
                   <p className="thought-voice-status" role="status">
                     {thoughtVoice.phase === "permission" ? "Preparing the microphone…"
@@ -227,6 +277,9 @@ export function App() {
                 {thoughtVoice.error && <p className="inline-error" role="alert">{thoughtVoice.error}</p>}
                 {thoughtVoice.notice && <p className="field-help" role="status">{thoughtVoice.notice}</p>}
               </div>}
+              <ThoughtTakeRecovery recovery={thoughtVoice.recovery}
+                problemKey={snapshot.state.identity} busy={busy || thoughtVoiceBusy}
+                retryDisabledReason={draftMismatchReason} onRetry={retryThought}/>
               <label className="field-label" htmlFor="thought">Your thought</label>
               <textarea id="thought" value={thought} onChange={event => setThought(event.target.value)}
                 placeholder="What I’m noticing is…" rows={5} required autoFocus={!thoughtVoiceBusy}/>
@@ -234,7 +287,7 @@ export function App() {
                 <span>{thought.length > thoughtLimit ? "Shorten your thought before saving" : "Private to your local notebook"}</span>
                 <span>{thought.length.toLocaleString()} / {thoughtLimit.toLocaleString()}</span>
               </div>
-              <Button type="submit" disabled={busy || thoughtVoiceBusy || !thought.trim() || thought.length > thoughtLimit} icon={Feather}>
+              <Button type="submit" disabled={busy || thoughtVoiceBusy || !thoughtTarget || !thought.trim() || thought.length > thoughtLimit} icon={Feather}>
                 Save thought locally
               </Button>
             </Form>
@@ -242,7 +295,11 @@ export function App() {
           {panel === "reflect" && <><PanelHeading eyebrow="THE PART THAT STAYS" title={<>How did<br/><em>you get here?</em></>} description={snapshot.state.platform === "accepted" ? "Codeforces recorded Accepted. You choose what the learning record says." : "Your reflection gives this session its meaning."}/><Form onSubmit={() => void saveReflection()}>{!!snapshot.tutorAssistance?.shown&&<p className="tutor-context-warning">Tutor assistance was shown in this attempt{snapshot.tutorAssistance.hintLevels.length?` · levels ${snapshot.tutorAssistance.hintLevels.join(", ")}`:""}. You still choose the learning outcome.</p>}<fieldset className="outcome-group"><legend className="field-label">How did this attempt go?</legend><div className="outcome-grid">{(Object.keys(outcomeLabels) as Outcome[]).map((value, index) => <button key={value} type="button" aria-pressed={outcome === value} className={outcome === value ? "selected" : ""} onClick={() => setOutcome(value)}><span className="outcome-marker" aria-hidden="true">{outcome === value ? <Check size={12}/> : String(index + 1).padStart(2, "0")}</span>{outcomeLabels[value]}</button>)}</div></fieldset><label className="field-label" htmlFor="takeaway">One thing to carry forward <span>optional</span></label><textarea id="takeaway" value={takeaway} onChange={(event) => setTakeaway(event.target.value)} rows={3} placeholder="Next time, I’ll remember…" maxLength={300}/><Button type="submit" disabled={busy || !outcome} icon={Check}>Save reflection locally</Button><button type="button" className="text-button centered" onClick={() => { setPanel("home"); setNotice("Your session is waiting for reflection. Come back when you like."); }}>I’ll reflect later</button></Form></>}
           {panel === "memory" && <><PanelHeading eyebrow="YOUR OWN WORDS" title={<>Pick up<br/><em>the thread.</em></>} description="Only opened because you asked. These are your saved observations."/>{latestThought && <div className="memory-note"><span className="eyebrow">LAST THOUGHT</span><p>{latestThought.text}</p><small>{new Date(latestThought.createdAt).toLocaleDateString(undefined, { day: "numeric", month: "short" })}</small></div>}{view?.memory?.latestTakeaway ? <div className="memory-note"><span className="eyebrow">LAST TAKEAWAY</span><p>{view.memory.latestTakeaway}</p></div> : <div className="memory-empty"><BookOpen size={22}/><p>No earlier reflection for this problem yet.<br/>Your next takeaway can start the thread.</p></div>}<Button secondary onClick={() => openPanel("home")} icon={ArrowRight}>Back to the problem</Button></>}
           {panel === "recall" && <><PanelHeading eyebrow="A SMALL RETURN" title={<>What do<br/><em>you remember?</em></>} description="Try explaining the approach or invariant before opening your earlier notes."/><div className="recall-problem"><BookOpen size={14}/><strong>{draftTargets.recall?.title ?? problem?.title ?? "Choose an attached problem"}</strong></div><Form onSubmit={() => void command("recall", { activity: recallActivity, outcome: recallOutcome, response: recallResponse, cue: "" }, "Recall saved locally. Your next revisit has been scheduled.", "home")}><label className="field-label" htmlFor="recall-response">Your explanation</label><textarea id="recall-response" rows={4} value={recallResponse} onChange={(event) => setRecallResponse(event.target.value)} maxLength={2000} placeholder="The key idea was…" required/><label className="field-label" htmlFor="recall-outcome">How did recall feel?</label><select id="recall-outcome" value={recallOutcome} onChange={(event) => setRecallOutcome(event.target.value as typeof recallOutcome)}><option value="independent">Recalled independently</option><option value="cue">Needed a cue</option><option value="unrecalled">Could not recall yet</option></select><Button disabled={busy || !recallResponse.trim()} type="submit" icon={Check}>Save this recall</Button><div className="split-actions"><button type="button" onClick={() => openPanel("memory")}><BookOpen size={13}/>Open my memory</button><button type="button" disabled={busy} onClick={() => void command("defer", { until: localDate(addDays(new Date(), 1)) }, "Revisit deferred until tomorrow.", "home")}><Clock3 size={13}/>Tomorrow</button></div></Form></>}
-          {panel === "settings" && <><PanelHeading eyebrow="MAKE YOURSELF AT HOME" title={<>A companion,<br/><em>on your terms.</em></>} description="Local first. Quiet by default."/><RibbonStudio saved={ribbon} reducedMotion={reducedMotion} onSave={async value => {if(!bridge)throw new Error("Reconnect the companion to save.");await bridge.ui("ribbon-options",value);setSnapshot(await bridge.getSnapshot());}} onRehearse={rehearse}/>{bridge && <SetupPanel bridge={bridge} snapshot={snapshot} pairing={pairing} disabled={busy} onPair={() => void ui("pair")} onRevoke={() => void ui("revoke-pairing")} onDismissPairing={() => setPairing(null)} onOpenVscode={() => void ui("open-vscode")} onProvider={() => { setTutorRequest({id: Date.now(), settings: true}); setPanel("tutor"); void toggleExpanded(true); }}/>}<div className="settings-section"><label className="field-label">Appearance</label><div className="theme-choice">{([{ value: "light", label: "Light", icon: Sun }, { value: "ink", label: "Ink", icon: Moon }, { value: "system", label: "System", icon: Settings2 }] as const).map(({ value, label, icon: Icon }) => <button key={value} className={snapshot.preferences.theme === value ? "selected" : ""} onClick={() => void ui("theme", value)} disabled={busy}><Icon size={14}/>{label}</button>)}</div><label className="toggle-row"><span><strong>Reduced motion</strong><small>Still poses, with every action available</small></span><input type="checkbox" checked={snapshot.preferences.reducedMotion} onChange={(event) => void ui("reduced-motion", event.target.checked)} disabled={busy}/></label></div><div className="settings-section"><label className="field-label" htmlFor="cf-handle">Codeforces handle</label><Form onSubmit={() => void command("set-handle", { handle: handle.trim() || null }, "Handle saved locally.")}><div className="handle-row"><input id="cf-handle" value={handle} onChange={(event) => setHandle(event.target.value)} maxLength={64} placeholder="Your public handle" autoComplete="off"/><button type="submit" className="small-button" disabled={busy}>Save</button></div></Form><p className="field-help">Public submission evidence never chooses a learning outcome for you.</p><button className="settings-link" onClick={() => void ui("check-codeforces")} disabled={busy || !snapshot.state.handle}><Code2 size={14}/>{snapshot.codeforces.checking ? "Checking public submissions…" : "Check submissions now"}<ArrowUpRight size={12}/></button><span className="freshness">{snapshot.codeforces.checkedAt ? `Last checked ${new Date(snapshot.codeforces.checkedAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}` : "No submission check yet. No idle polling."}</span>{snapshot.codeforces.error && <p className="inline-error">{snapshot.codeforces.error}</p>}</div>{bridge && <><BackupPanel bridge={bridge} disabled={busy} onRestored={() => { void bridge.getSnapshot().then(setSnapshot).catch(reason => setError(errorMessage(reason))); setDraftTargets({}); setThought(""); setTakeaway(""); setOutcome(null); setRecallResponse(""); }}/></>}<div className="settings-section"><label className="field-label" htmlFor="shortcut">Open companion shortcut</label><Form onSubmit={() => { void ui("shortcut", shortcut).then((result) => { if (result !== undefined) setNotice("Shortcut saved. The menu-bar icon is always available."); }); }}><div className="handle-row"><input id="shortcut" value={shortcut} onChange={(event) => setShortcut(event.target.value)} maxLength={100} placeholder="Control+Option+F"/><button type="submit" className="small-button" disabled={busy || !shortcut.trim()}>Save</button></div></Form><p className="field-help">Use Electron accelerator names, for example Control+Option+F. Conflicts are checked before replacing your shortcut.</p></div><div className="settings-section last">{snoozed && <button className="settings-link" onClick={() => void ui("snooze", false)} disabled={busy}><Sun size={14}/>Resume suggestions</button>}<button className="settings-link" onClick={() => void ui("snooze", 60)} disabled={busy}><Moon size={14}/>Snooze suggestions for an hour</button><button className="settings-link" onClick={() => void ui("hide")} disabled={busy}><X size={14}/>Hide ribbon · recover from the menu bar</button><p className="settings-footnote">Tutor is optional. Only explicitly included context goes to your configured provider. No automatic learning credit. Recover the ribbon from the menu-bar icon at any time.</p></div></>}
+          {panel === "settings" && <><PanelHeading eyebrow="MAKE YOURSELF AT HOME" title={<>A companion,<br/><em>on your terms.</em></>} description="Local first. Quiet by default."/><RibbonStudio saved={ribbon} reducedMotion={reducedMotion} onSave={async value => {if(!bridge)throw new Error("Reconnect the companion to save.");await bridge.ui("ribbon-options",value);setSnapshot(await bridge.getSnapshot());}} onRehearse={rehearse}/>{bridge && <SetupPanel bridge={bridge} snapshot={snapshot} pairing={pairing} disabled={busy} onPair={() => void ui("pair")} onRevoke={() => void ui("revoke-pairing")} onDismissPairing={() => setPairing(null)} onOpenVscode={() => void ui("open-vscode")} onProvider={() => { setTutorRequest({id: Date.now(), settings: true}); setPanel("tutor"); void toggleExpanded(true); }}/>}<div className="settings-section"><label className="field-label">Appearance</label><div className="theme-choice">{([{ value: "light", label: "Light", icon: Sun }, { value: "ink", label: "Ink", icon: Moon }, { value: "system", label: "System", icon: Settings2 }] as const).map(({ value, label, icon: Icon }) => <button key={value} className={snapshot.preferences.theme === value ? "selected" : ""} onClick={() => void ui("theme", value)} disabled={busy}><Icon size={14}/>{label}</button>)}</div><label className="toggle-row"><span><strong>Reduced motion</strong><small>Still poses, with every action available</small></span><input type="checkbox" checked={snapshot.preferences.reducedMotion} onChange={(event) => void ui("reduced-motion", event.target.checked)} disabled={busy}/></label></div><div className="settings-section"><label className="field-label" htmlFor="cf-handle">Codeforces handle</label><Form onSubmit={() => void command("set-handle", { handle: handle.trim() || null }, "Handle saved locally.")}><div className="handle-row"><input id="cf-handle" value={handle} onChange={(event) => setHandle(event.target.value)} maxLength={64} placeholder="Your public handle" autoComplete="off"/><button type="submit" className="small-button" disabled={busy}>Save</button></div></Form><p className="field-help">Public submission evidence never chooses a learning outcome for you.</p><button className="settings-link" onClick={() => void ui("check-codeforces")} disabled={busy || !snapshot.state.handle}><Code2 size={14}/>{snapshot.codeforces.checking ? "Checking public submissions…" : "Check submissions now"}<ArrowUpRight size={12}/></button><span className="freshness">{snapshot.codeforces.checkedAt ? `Last checked ${new Date(snapshot.codeforces.checkedAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}` : "No submission check yet. No idle polling."}</span>{snapshot.codeforces.error && <p className="inline-error">{snapshot.codeforces.error}</p>}</div>{bridge && <><BackupPanel bridge={bridge} disabled={busy} onRestored={() => { void bridge.getSnapshot().then(setSnapshot).catch(reason => setError(errorMessage(reason))); setDraftTargets({}); setThought(""); setTakeaway(""); setOutcome(null); setRecallResponse(""); }}/></>}<div className="settings-section"><label className="field-label" htmlFor="shortcut">Open companion shortcut</label><Form onSubmit={() => { void ui("shortcut", shortcut).then((result) => { if (result !== undefined) setNotice("Shortcut saved. The menu-bar icon is always available."); }); }}><div className="handle-row"><input id="shortcut" value={shortcut} onChange={(event) => setShortcut(event.target.value)} maxLength={100} placeholder="Control+Option+F"/><button type="submit" className="small-button" disabled={busy || !shortcut.trim()}>Save</button></div></Form><p className="field-help">Use Electron accelerator names, for example Control+Option+F. Conflicts are checked before replacing your shortcut.</p></div>{window.forma && <ThoughtShortcutSettings key={thoughtShortcut ?? "off"}
+                shortcut={thoughtShortcut} available={!!snapshot.presentation?.thoughtShortcutAvailable} busy={busy}
+                onSave={value => void ui("thought-shortcut", value).then(result => {
+                  if (result !== undefined) setNotice(value ? "Recording shortcut saved." : "Recording shortcut turned off.");
+                })}/>}<div className="settings-section last">{snoozed && <button className="settings-link" onClick={() => void ui("snooze", false)} disabled={busy}><Sun size={14}/>Resume suggestions</button>}<button className="settings-link" onClick={() => void ui("snooze", 60)} disabled={busy}><Moon size={14}/>Snooze suggestions for an hour</button><button className="settings-link" onClick={() => void ui("hide")} disabled={busy}><X size={14}/>Hide ribbon · recover from the menu bar</button><p className="settings-footnote">Tutor is optional. Only explicitly included context goes to your configured provider. No automatic learning credit. Recover the ribbon from the menu-bar icon at any time.</p></div></>}
           </>}
           {error && snapshot && <div className="feedback feedback--error" role="alert"><CircleHelp size={15}/><span>{error}</span><button aria-label="Dismiss error" onClick={() => setError("")}><X size={12}/></button></div>}
           {notice && <div className="feedback" role="status"><Check size={14}/><span>{notice}</span></div>}

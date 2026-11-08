@@ -1,0 +1,52 @@
+.thought-take-recovery {
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  background: var(--paper-inset);
+}
+.thought-take-recovery h2 {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.thought-take-recovery .field-help {
+  margin: 6px 0 0;
+  font-size: 10px;
+  line-height: 1.55;
+}
+.thought-take-list {
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.thought-take-list li {
+  padding: 9px 0 3px;
+  border-top: 1px solid var(--rule);
+  overflow-wrap: anywhere;
+}
+.thought-take-list strong,
+.thought-take-list time {
+  display: block;
+  line-height: 1.5;
+}
+.thought-take-list strong {
+  font-size: 11px;
+}
+.thought-take-list time {
+  color: var(--muted);
+  font-size: 10px;
+}
+.thought-take-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-top: 3px;
+}
+.thought-take-actions button {
+  min-height: 32px;
+  padding: 4px;
+}
+.thought-take-recovery .inline-error {
+  margin: 8px 0 2px;
+}

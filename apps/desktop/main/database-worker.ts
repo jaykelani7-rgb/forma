@@ -23,7 +23,17 @@ parentPort!.on('message', (request: {id:number;method:string;args:unknown[]}) =>
       case 'recovery-epoch': value=String(store.db.prepare('SELECT epoch FROM tutor_draft_state WHERE id=1').get()!.epoch); break;
       case 'thought-voice-context': {
         const {data,state}=store.snapshot();
-        value={problemKey:state.identity,sessionId:data.session?.id,contestMode:store.tutor.settings().contestMode};
+        const problem = data.problems.find(item => item.id === state.problemId);
+        const recoveryEpoch = String(store.db.prepare('SELECT epoch FROM tutor_draft_state WHERE id=1').get()!.epoch);
+        value = {
+          problemKey: state.identity,
+          problemId: problem?.id ?? null,
+          title: problem?.title ?? null,
+          profileKey: state.handle?.toLowerCase() ?? null,
+          recoveryEpoch,
+          sessionId: data.session?.id,
+          contestMode: store.tutor.settings().contestMode,
+        };
         break;
       }
       case 'tutor-view': value=store.tutor.view(now); break;

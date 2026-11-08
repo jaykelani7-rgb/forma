@@ -14,6 +14,20 @@ const report={kind:'real-native-no-provider-credentials',folder,verifiedAt:new D
 try{
  let page=await application.firstWindow();const errors=[];page.on('pageerror',e=>errors.push(e.message));await page.waitForFunction(()=>!!window.forma);
  await page.evaluate(()=>window.forma.command({id:'tutor-native-problem',type:'attach',payload:{url:'https://codeforces.com/contest/4/problem/A',title:'Watermelon'}}));
+ const recordingKey='Control+Option+Shift+F11';
+ await page.evaluate(key=>window.forma.ui('thought-shortcut',key),recordingKey);
+ const shortcuts=await page.evaluate(()=>window.forma.getSnapshot());
+ assert.equal(shortcuts.preferences.thoughtShortcut,recordingKey);
+ assert.equal(shortcuts.presentation.thoughtShortcutAvailable,true);
+ assert.equal(await application.evaluate(({globalShortcut},key)=>globalShortcut.isRegistered(key),recordingKey),true);
+ const rejected=await page.evaluate(async()=>{
+   try{await window.forma.ui('thought-shortcut','R');return false;}catch{return true;}
+ });
+ assert.equal(rejected,true);
+ await page.evaluate(()=>window.forma.ui('thought-shortcut',null));
+ assert.equal((await page.evaluate(()=>window.forma.getSnapshot())).preferences.thoughtShortcut,null);
+ assert.equal(await application.evaluate(({globalShortcut},key)=>globalShortcut.isRegistered(key),recordingKey),false);
+ await page.evaluate(key=>window.forma.ui('thought-shortcut',key),recordingKey);
  await page.getByRole('button',{name:'Speak a thought',exact:true}).click();
  await page.getByRole('alert').filter({hasText:'Set up Gemini in Tutor settings'}).waitFor();
  await page.getByRole('textbox',{name:'Your thought',exact:true}).waitFor();
@@ -64,6 +78,11 @@ try{
  assert.equal((await page.evaluate(id=>window.forma.ui('tutor-turns',id),shared.id)).length,0);
  report.native={setupHonest:true,unsentDraftFrozen:true,statementSnapshotSaved:true,pairedSelectionPreview:true,sharingCreatedNoProviderTurn:true,practiceSelectionUnchanged:true,contestMode:true,microphoneNotRequested:true};
  await application.close();application=await electron.launch({executablePath,args:['.companion-build'],env});page=await application.firstWindow();page.on('pageerror',e=>errors.push(e.message));await page.waitForFunction(()=>!!window.forma);
+ await page.waitForFunction(async key=>{
+   const current=await window.forma.getSnapshot();
+   return current.preferences.thoughtShortcut===key&&current.presentation.thoughtShortcutAvailable;
+ },recordingKey);
+ report.recordingShortcut={registered:true,rejectsUnmodifiedKey:true,disableAndRestore:true,persistedOnRestart:true};
  const reopened=await page.evaluate(id=>window.forma.ui('tutor-open',{conversationId:id}),shared.id);assert.equal(reopened.id,shared.id);assert.equal((await page.evaluate(()=>window.forma.getSnapshot())).state.identity,'contest:5:A');report.restart={conversationRetained:true,practiceRetained:true};
  await page.evaluate(id=>window.forma.ui('tutor-delete',id),shared.id);assert.equal((await page.evaluate(()=>window.forma.ui('tutor-view'))).conversations.some(c=>c.id===shared.id),false);report.deletion={conversationDeleted:true,notebookAttemptsUnchanged:(await page.evaluate(()=>window.forma.getSnapshot())).data.attempts.length===0};
  assert.deepEqual(errors,[]);report.pageErrors=errors;

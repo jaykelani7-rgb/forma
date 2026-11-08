@@ -8,6 +8,7 @@ import { TutorConfiguration } from "./tutor-config";
 import { ConfiguredTutorProvider, speechReadyText, TutorProviderError } from "./tutor-provider";
 import { TutorService } from "./tutor-service";
 import { ThoughtHostVoice, TutorHostVoice, type ThoughtVoiceContext } from "./tutor-host-voice";
+import { ThoughtTakeStore } from "./thought-take-store";
 import { tutorExternalUrl } from "../../../packages/tutor/links";
 import type { SharedCode, StatementSnapshot, TutorConversation, TutorEvent, TutorSendInput, TutorStoredView, TutorTurn } from "../../../packages/tutor/types";
 import { AttentionPolicy } from "./attention";
@@ -17,7 +18,7 @@ import { RecognitionHub } from "./recognition";
 import { startBrowserTransport } from "./browser-transport";
 import { DatabaseClient } from "./database-client";
 import { startTransport } from "./transport";
-import { clampPosition, type CompanionPreferences } from "./preferences";
+import { clampPosition, validateThoughtShortcut, type CompanionPreferences } from "./preferences";
 import type { LocalSnapshot } from "./store";
 import { createCodeforcesAdapter } from "../../../src/lib/codeforces-api";
 import { parseVerifiedCodeforcesPage } from "../../../packages/integrations/codeforces";
@@ -36,6 +37,8 @@ const lock=app.requestSingleInstanceLock();
 if(!lock)app.quit();
 let parkedAt: Electron.Rectangle | null = null;
 let shortcutPress = 0;
+let thoughtShortcutPress = 0;
+let lastThoughtShortcutEvent = -Infinity;
 const ribbonWindow = { width: 216, height: 78 };
 let window: BrowserWindow;
 let tray: Tray;
@@ -64,6 +67,7 @@ let tutorService:TutorService;
 let microphoneLeaseUntil=0;
 const hostVoice=new TutorHostVoice();
 const recoveryFence=new RecoveryFence();
+let thoughtTakes: ThoughtTakeStore;
 const thoughtVoice = new ThoughtHostVoice({
   async readContext() {
     if (!expanded || !window.isVisible()) throw new Error("Open the thought panel to record.");
@@ -75,6 +79,12 @@ const thoughtVoice = new ThoughtHostVoice({
   requireProvider: () => voiceReady("transcription"),
   requestMicrophone: () => requestMicrophoneAccess("thought"),
   transcribe: (bytes, mime, signal) => tutorProvider.transcribe(bytes, mime, signal),
+  takes: {
+    list: () => thoughtTakes.list(),
+    keep: take => thoughtTakes.keep(take),
+    read: id => thoughtTakes.read(id),
+    remove: id => thoughtTakes.remove(id),
+  },
 });
 const loginStartup=createLoginStartup({platform:process.platform,isPackaged:app.isPackaged,getLoginItemSettings:()=>app.getLoginItemSettings(),setLoginItemSettings:settings=>app.setLoginItemSettings(settings)});
 let browserVerifiedAt:string|null=null;
@@ -239,7 +249,7 @@ const snapshot=async()=>{
   const local=await database.call<LocalSnapshot>('snapshot');
   const slot=attention.view(local.state,recognition?.presentation()??null,!!preferences.snoozedUntil&&Date.parse(preferences.snoozedUntil)>Date.now(),Date.now());
   const tutorAssistance=local.data.session?.phase==='reflection'?await database.call('tutor-assistance',{problemId:local.data.session.problemId,sessionId:local.data.session.id}):null;
-  return {...local,tutorAssistance,today:companionToday(local.data),preferences,presentation:{expanded,shortcutPress,panelRequest,activeFileUri:recognition?.activeFileUri()??null,recognition:slot.recognition,verdict:slot.verdict},integration:{connected,paired:!!credential,browserEnabled:!!browserCredential,browserSupported:process.platform==='darwin',status:connected?'VS Code connected':credential?'Waiting for VS Code':'Pair VS Code when you’re ready'},codeforces:platformStatus(local.state)};
+  return {...local,tutorAssistance,today:companionToday(local.data),preferences,presentation:{expanded,shortcutPress,thoughtShortcutPress,thoughtShortcutAvailable:!!preferences.thoughtShortcut && globalShortcut.isRegistered(preferences.thoughtShortcut) && preferences.thoughtShortcut !== preferences.shortcut,panelRequest,activeFileUri:recognition?.activeFileUri()??null,recognition:slot.recognition,verdict:slot.verdict},integration:{connected,paired:!!credential,browserEnabled:!!browserCredential,browserSupported:process.platform==='darwin',status:connected?'VS Code connected':credential?'Waiting for VS Code':'Pair VS Code when you’re ready'},codeforces:platformStatus(local.state)};
 };
 async function broadcast() {
   if(!window||window.isDestroyed())return;
@@ -301,6 +311,38 @@ async function setPreferences(change:Partial<CompanionPreferences>){preferences=
 function registerShortcut(shortcut:string){
   if(!globalShortcut.register(shortcut,()=>{shortcutPress++;show();}))throw new Error('That shortcut is in use. Choose another shortcut.');
 }
+function triggerThoughtShortcut() {
+  const now = performance.now();
+  const quietFor = now - lastThoughtShortcutEvent;
+  lastThoughtShortcutEvent = now;
+  if (quietFor < 750 || quitting || recoveryFence.busy) return;
+  thoughtShortcutPress++;
+  // Leave focus in the editor. The renderer owns the recorder and its cancellation.
+  expand(true);
+}
+
+function registerThoughtShortcut(shortcut: string) {
+  if (!globalShortcut.register(shortcut, triggerThoughtShortcut)) {
+    throw new Error("That recording shortcut is in use. Choose another key combination.");
+  }
+}
+
+async function changeThoughtShortcut(payload: unknown) {
+  const value = validateThoughtShortcut(payload);
+  const previous = preferences.thoughtShortcut;
+  if (value === preferences.shortcut) throw new Error("Choose a different key combination from Open companion.");
+  if (value === previous && (value === null || globalShortcut.isRegistered(value))) return preferences;
+  if (value !== null) registerThoughtShortcut(value);
+  try {
+    const saved = await setPreferences({ thoughtShortcut: value });
+    if (previous && previous !== value && previous !== preferences.shortcut) globalShortcut.unregister(previous);
+    return saved;
+  } catch (error) {
+    if (value !== null) globalShortcut.unregister(value);
+    throw error;
+  }
+}
+
 
 // One paced adapter and one in-flight batch coalesce all attempts for a handle.
 let verifiedContext:{handle:string;identities:string[]}|null=null;
@@ -368,6 +410,9 @@ async function ui(action:string,payload:unknown){
     case 'thought-microphone':cancelTutorVoice();return thoughtVoice.start(payload);
     case 'thought-transcribe':return thoughtVoice.transcribe(payload);
     case 'thought-voice-cancel':thoughtVoice.cancelRequest(payload);return null;
+    case 'thought-takes':return thoughtVoice.listTakes();
+    case 'thought-retry':cancelTutorVoice();return thoughtVoice.retryTake(payload);
+    case 'thought-discard':thoughtVoice.discardTake(payload);return null;
     case 'setup-status':return setupStatus();
     case 'launch-at-login':return loginStartup.set(payload as boolean);
     case 'backup-export':{
@@ -413,6 +458,7 @@ async function ui(action:string,payload:unknown){
     case 'theme':if(!['light','ink','system'].includes(String(payload)))throw new Error('Choose Light, Ink, or System.');return setPreferences({theme:payload as CompanionPreferences['theme']});
     case 'reduced-motion':if(typeof payload!=='boolean')throw new Error('Invalid motion preference.');return setPreferences({reducedMotion:payload});
     case 'snooze':return setPreferences({snoozedUntil:payload===false?null:new Date(Date.now()+60*60*1000).toISOString()});
+    case 'thought-shortcut':return changeThoughtShortcut(payload);
     case 'shortcut':{
       if(typeof payload!=='string'||payload.length>100||!/^[A-Za-z0-9+]+$/.test(payload))throw new Error('Invalid shortcut.');
       const old=preferences.shortcut;
@@ -428,6 +474,11 @@ async function main(){
   await app.whenReady();
   const userData=app.getPath('userData');mkdirSync(userData,{recursive:true,mode:0o700});
   database=new DatabaseClient(join(userData,'notebook.sqlite'));
+  thoughtTakes = new ThoughtTakeStore(join(userData, "thought-takes.sqlite"), {
+    available: secureAvailable,
+    encrypt: value => safeStorage.encryptString(value),
+    decrypt: value => safeStorage.decryptString(Buffer.from(value)),
+  });
   preferences=await database.call('preferences');
   tutorConfiguration=new TutorConfiguration(join(userData,'tutor-provider.enc'),{available:secureAvailable,encrypt:v=>safeStorage.encryptString(v),decrypt:v=>safeStorage.decryptString(v)});
   tutorProvider=new ConfiguredTutorProvider(provider=>tutorConfiguration.get(provider));
@@ -463,6 +514,10 @@ async function main(){
   tray.setContextMenu(Menu.buildFromTemplate([{label:'Open Forma Ribbon',click:show},{label:'Compact ribbon',click:()=>expand(false)},{label:'Hide companion',click:()=>window.hide()},{label:'Snooze for an hour',click:()=>void setPreferences({snoozedUntil:new Date(Date.now()+3600000).toISOString()})},{type:'separator'},{label:'Export notebook…',click:()=>void saveFile('notebook')},{label:'Unsigned development build',enabled:false},{label:'Quit Forma Companion',click:()=>app.quit()}]));
   tray.on('click',show);
   try{registerShortcut(preferences.shortcut);}catch{ /* Tray recovery stays available when the shortcut is occupied. */ }
+  if (preferences.thoughtShortcut && preferences.thoughtShortcut !== preferences.shortcut) {
+    try { registerThoughtShortcut(preferences.thoughtShortcut); } catch { /* Settings reports unavailable shortcuts. */ }
+  }
+  void broadcast();
   transport=await startTransport({...(developmentData?{endpoint:join(userData,'runtime','companion.sock')}:{}),credential:()=>credential,command:(command,epoch)=>{if(!epoch)throw new Error('Update the Forma VS Code extension before delivering saved captures.');return applyCommand(command,'vscode',epoch);},recoveryEpoch:()=>database.call<string>('recovery-epoch'),tutorCode:shareTutorCode,recognition:request=>{recoveryFence.lease();return recognition.request(request);},action:async action=>{recoveryFence.lease();if(action==='open'||action==='memory'){panelRequest={id:(panelRequest?.id??0)+1,panel:action==='memory'?'memory':'home'};show();}return (await database.call<LocalSnapshot>('snapshot')).revision;},context:async()=>{const local=await database.call<LocalSnapshot>('snapshot');return {identity:local.state.identity,sessionId:local.data.session?.id??null,hostEpoch,recoveryEpoch:await database.call<string>('recovery-epoch')};},connected:value=>{connected=value;void broadcast();}});
   if(process.platform==='darwin')browserTransport=await startBrowserTransport({endpoint:join(userData,'runtime','browser.sock'),credential:()=>browserCredential,message:async m=>{recoveryFence.lease();if((m as {kind?:string})?.kind==='statement'){await captureTutorStatement((m as {statement:unknown}).statement);browserVerifiedAt=new Date().toISOString();return {ok:true,status:'saved'};}return recognition.browser(m);}});
   powerMonitor.on('suspend',()=>{cancelVoice();void database.call('pause','suspend').then(broadcast);});

@@ -4,7 +4,7 @@ A daily competitive-programming notebook with the **Ribbon** design in Ink and L
 
 Ribbon appearance can be customized in Settings with a live preview, a small fold or timer strip, optional left/right edge resting during focus, and Gentle/Still motion. Appearance is saved per device. **Rehearse a session** opens a disposable copy of the demo notebook to try the shortcut/open action, timer, pause and reflection bookmark. Replay or leave it at any point. Web and desktop practice records are kept separate from this rehearsal.
 
-In Journal, combine search with outcome, source, and date filters. Open an entry to read its reflection and compare other attempts at the same problem. On desktop, **Speak a thought** on the Ribbon opens a recording for the attached problem. Finishing sends the audio to your configured Tutor provider for transcription. Edit the transcript and choose **Save thought locally** to add it to that problem’s notebook.
+In Journal, combine search with outcome, source, and date filters. Open an entry to read its reflection and compare other attempts at the same problem. On desktop, **Speak a thought** on the Ribbon opens a recording for the attached problem. Finishing sends the audio to your configured Tutor provider for transcription. Edit the transcript and choose **Save thought locally** to add it to that problem’s notebook. Tap **Control + Option + R** to start or finish a recording from another app, or change the binding in desktop Settings. If transcription fails, open **Recover spoken thoughts** to retry from the original problem or discard the locally retained recording.
 
 ## Run locally
 

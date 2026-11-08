@@ -11,9 +11,9 @@ export interface CompanionSnapshot {
   revision: number;
   savedAt: string;
   integration: { connected: boolean; paired: boolean; browserEnabled?: boolean; browserSupported?: boolean; status: string };
-  preferences: { theme: "light" | "ink" | "system"; reducedMotion: boolean; snoozedUntil: string | null; shortcut?: string; ribbon?: import("../../../packages/ribbon/options").RibbonOptions };
+  preferences: { theme: "light" | "ink" | "system"; reducedMotion: boolean; snoozedUntil: string | null; shortcut?: string; thoughtShortcut?: string | null; ribbon?: import("../../../packages/ribbon/options").RibbonOptions };
   codeforces: { checking: boolean; checkedAt: string | null; error: string | null };
-  presentation?: { expanded: boolean; shortcutPress?: number; verdict?: {id:string;title:string;message:string}|null; activeFileUri?: string | null; recognition?: RecognitionView; panelRequest?: { id: number; panel: "home" | "memory" | "today" | "tutor";conversationId?:string } };
+  presentation?: { expanded: boolean; shortcutPress?: number; thoughtShortcutPress?: number; thoughtShortcutAvailable?: boolean; verdict?: {id:string;title:string;message:string}|null; activeFileUri?: string | null; recognition?: RecognitionView; panelRequest?: { id: number; panel: "home" | "memory" | "today" | "tutor";conversationId?:string } };
 }
 export interface FormaBridge {
   getSnapshot(): Promise<CompanionSnapshot>;

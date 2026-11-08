@@ -6,15 +6,29 @@ import type { CompanionCommand } from "../../packages/contracts/src";
 import { initialCompanionState } from "../../packages/core/src/companion";
 import { emptyData } from "../../src/lib/model";
 
+interface RecordedClip { requestId: string; mime: string; bytes: number[] }
+interface FailedTake {
+  id: string;
+  problemKey: string;
+  title: string;
+  recordedAt: string;
+  audio: RecordedClip;
+}
+
 interface ThoughtVoiceFixture {
   microphoneRequests: { requestId: string; problemKey: string; sessionId?: string }[];
   audioRequests: number;
   stoppedTracks: number;
-  transcriptions: { requestId: string; mime: string; bytes: number[] }[];
+  transcriptions: RecordedClip[];
+  retries: { takeId: string; requestId: string }[];
+  discards: string[];
+  listRequests: number;
   cancellations: string[];
   notebookCommands: CompanionCommand[];
   releaseTranscript(text: string): Promise<void>;
-  switchProblem(): void;
+  failTranscript(): Promise<string>;
+  switchProblem(problem?: "first" | "second"): void;
+  deliverShortcut(count: number): Promise<void>;
 }
 
 declare global {
@@ -54,31 +68,72 @@ async function openRibbon(page: Page) {
     state: { ...initialCompanionState(), identity: "contest:4:A", problemId: "voice-first" },
     revision: 1,
     savedAt: stamp,
-    preferences: { theme: "ink", reducedMotion: true, snoozedUntil: null },
+    preferences: { theme: "ink", reducedMotion: true, snoozedUntil: null, thoughtShortcut: "Control+Option+R" },
     integration: { connected: true, paired: true, status: "Fixture connected" },
     codeforces: { checking: false, checkedAt: null, error: null },
-    presentation: { expanded: false },
+    presentation: { expanded: false, thoughtShortcutPress: 7, thoughtShortcutAvailable: true },
   };
 
   await page.addInitScript(({ snapshot }) => {
     const listeners = new Set<(value: CompanionSnapshot) => void>();
-    let pendingTranscript: ((result: { text: string }) => void) | undefined;
+    let pendingTranscript: {
+      audio: RecordedClip;
+      resolve: (result: { text: string }) => void;
+      reject: (error: Error) => void;
+    } | undefined;
+    const presentation = (): NonNullable<CompanionSnapshot["presentation"]> =>
+      snapshot.presentation ?? { expanded: false };
+    function broadcast() {
+      for (const listener of listeners) listener(structuredClone(snapshot));
+    }
+    function afterPaint() {
+      return new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done())));
+    }
+    // The mocked host's audio survives a fresh renderer document. The UI receives metadata only.
+    const takeStorageKey = "fixture-thought-takes";
+    const retainedTakes = () => JSON.parse(sessionStorage.getItem(takeStorageKey) ?? "[]") as FailedTake[];
+    const writeTakes = (takes: FailedTake[]) => sessionStorage.setItem(takeStorageKey, JSON.stringify(takes));
     const fixture: ThoughtVoiceFixture = {
       microphoneRequests: [],
       audioRequests: 0,
       stoppedTracks: 0,
       transcriptions: [],
+      retries: [],
+      discards: [],
+      listRequests: 0,
       cancellations: [],
       notebookCommands: [],
       async releaseTranscript(text) {
         if (!pendingTranscript) throw new Error("No transcription is pending");
-        pendingTranscript({ text });
+        pendingTranscript.resolve({ text });
         pendingTranscript = undefined;
-        await new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done())));
+        await afterPaint();
       },
-      switchProblem() {
-        snapshot.state = { ...snapshot.state, identity: "contest:5:A", problemId: "voice-second" };
-        for (const listener of listeners) listener(structuredClone(snapshot));
+      async failTranscript() {
+        if (!pendingTranscript) throw new Error("No transcription is pending");
+        const { audio, reject } = pendingTranscript;
+        pendingTranscript = undefined;
+        const capture = fixture.microphoneRequests.find(request => request.requestId === audio.requestId);
+        const problem = snapshot.data.problems.find(problem => problem.id === snapshot.state.problemId);
+        if (!capture || !problem) throw new Error("No attached problem for this recording");
+        const take = { id: crypto.randomUUID(), problemKey: capture.problemKey, title: problem.title, recordedAt: snapshot.savedAt, audio };
+        writeTakes([...retainedTakes(), take]);
+        reject(new Error("Fixture transcription failed."));
+        await afterPaint();
+        return take.id;
+      },
+      switchProblem(problem = "second") {
+        snapshot.state = {
+          ...snapshot.state,
+          identity: problem === "first" ? "contest:4:A" : "contest:5:A",
+          problemId: `voice-${problem}`,
+        };
+        broadcast();
+      },
+      async deliverShortcut(count) {
+        snapshot.presentation = { ...presentation(), thoughtShortcutPress: count };
+        broadcast();
+        await afterPaint();
       },
     };
     window.__thoughtVoiceFixture = fixture;
@@ -105,7 +160,15 @@ async function openRibbon(page: Page) {
       async ui(action, payload) {
         switch (action) {
           case "expand":
-            snapshot.presentation = { ...snapshot.presentation, expanded: payload === true };
+            snapshot.presentation = { ...presentation(), expanded: payload === true };
+            return null;
+          case "today":
+            snapshot.presentation = {
+              ...presentation(),
+              expanded: true,
+              panelRequest: { id: (presentation().panelRequest?.id ?? 0) + 1, panel: "today" },
+            };
+            broadcast();
             return null;
           case "thought-voice-status":
             return { providerName: "Gemini", available: true };
@@ -114,8 +177,27 @@ async function openRibbon(page: Page) {
             return { allowed: true };
           case "thought-transcribe": {
             const input = payload as { requestId: string; mime: string; bytes: Uint8Array };
-            fixture.transcriptions.push({ requestId: input.requestId, mime: input.mime, bytes: [...input.bytes] });
-            return new Promise((resolve) => { pendingTranscript = resolve; });
+            const audio = { requestId: input.requestId, mime: input.mime, bytes: [...input.bytes] };
+            fixture.transcriptions.push(audio);
+            return new Promise((resolve, reject) => { pendingTranscript = { audio, resolve, reject }; });
+          }
+          case "thought-takes":
+            fixture.listRequests++;
+            return retainedTakes().map(({ id, problemKey, title, recordedAt }) => ({ id, problemKey, title, recordedAt }));
+          case "thought-retry": {
+            const input = payload as ThoughtVoiceFixture["retries"][number];
+            fixture.retries.push(input);
+            const take = retainedTakes().find(take => take.id === input.takeId);
+            if (!take || take.problemKey !== snapshot.state.identity) throw new Error("Attach the recorded problem before retrying.");
+            if (take.audio.bytes.join(",") !== "3,1,4") throw new Error("The saved audio was lost.");
+            writeTakes(retainedTakes().filter(take => take.id !== input.takeId));
+            return { text: "Recovered the original reasoning." };
+          }
+          case "thought-discard": {
+            const { takeId } = payload as { takeId: string };
+            fixture.discards.push(takeId);
+            writeTakes(retainedTakes().filter(take => take.id !== takeId));
+            return null;
           }
           case "thought-voice-cancel":
             // Let the pending response arrive after cancel to check the renderer's race guard.
@@ -230,3 +312,108 @@ for (const interruption of ["cancellation", "an attached problem change"] as con
     expect(await page.evaluate(() => window.__thoughtVoiceFixture.notebookCommands)).toEqual([]);
   });
 }
+
+test("the recording shortcut ignores starting and replayed counts and toggles once per new press", async ({ page }) => {
+  await openRibbon(page);
+  const shortcut = (count: number) => page.evaluate(count => window.__thoughtVoiceFixture.deliverShortcut(count), count);
+  const finish = page.getByRole("button", { name: "Finish recording and transcribe", exact: true });
+
+  await shortcut(7);
+  expect(await page.evaluate(() => window.__thoughtVoiceFixture.audioRequests)).toBe(0);
+  await expect(page.getByLabel("Your thought", { exact: true })).toHaveCount(0);
+  await shortcut(8);
+  await expect(finish).toBeVisible();
+
+  await shortcut(7); // A delayed snapshot must not let the next copy replay count 8.
+  await shortcut(8);
+  await expect(finish).toBeVisible();
+  expect(await page.evaluate(() => window.__thoughtVoiceFixture.transcriptions)).toEqual([]);
+
+  await shortcut(9);
+  await expect.poll(() => page.evaluate(() => window.__thoughtVoiceFixture.transcriptions.length)).toBe(1);
+  await shortcut(9);
+  await page.evaluate(() => window.__thoughtVoiceFixture.releaseTranscript("Practice the invariant again."));
+  await expect(page.getByLabel("Your thought", { exact: true })).toHaveValue("Practice the invariant again.");
+  expect(await page.evaluate(() => {
+    const fixture = window.__thoughtVoiceFixture;
+    return {
+      recordings: fixture.audioRequests,
+      stoppedTracks: fixture.stoppedTracks,
+      transcriptions: fixture.transcriptions.length,
+      commands: fixture.notebookCommands,
+    };
+  })).toEqual({ recordings: 1, stoppedTracks: 1, transcriptions: 1, commands: [] });
+});
+
+async function failRecording(page: Page) {
+  await openRibbon(page);
+  await recordThought(page);
+  const takeId = await page.evaluate(() => window.__thoughtVoiceFixture.failTranscript());
+  await expect(page.getByRole("alert")).toContainText("Fixture transcription failed.");
+  return takeId;
+}
+
+async function reopenFailedRecordings(page: Page) {
+  await page.reload();
+  await page.getByRole("button", { name: /^Open companion/ }).click();
+  await page.getByRole("button", { name: /Recover spoken thoughts/ }).click();
+  const failed = page.getByRole("region", { name: "Failed recordings", exact: true });
+  await expect(failed.getByText("Parity practice", { exact: true })).toBeVisible();
+  return failed;
+}
+
+test("retained audio can be retried after reopening and the reviewed transcript saves to the original problem", async ({ page }) => {
+  const takeId = await failRecording(page);
+  const failed = await reopenFailedRecordings(page);
+  const retry = failed.getByRole("button", { name: "Retry", exact: true });
+  const draft = page.getByLabel("Your thought", { exact: true });
+
+  await page.evaluate(() => window.__thoughtVoiceFixture.switchProblem());
+  await expect(retry).toBeDisabled();
+  await expect(failed.getByText("Attach this problem to retry this recording.")).toBeVisible();
+  await expect(draft).toHaveValue("");
+  expect(await page.evaluate(() => window.__thoughtVoiceFixture.retries)).toEqual([]);
+
+  await page.evaluate(() => window.__thoughtVoiceFixture.switchProblem("first"));
+  await retry.click();
+  await expect(draft).toHaveValue("Recovered the original reasoning.");
+  await expect(retry).toHaveCount(0);
+  expect(await page.evaluate(() => {
+    const { retries, audioRequests, notebookCommands } = window.__thoughtVoiceFixture;
+    return { retries, audioRequests, notebookCommands };
+  })).toEqual({
+    retries: [{ takeId, requestId: expect.any(String) }],
+    audioRequests: 0,
+    notebookCommands: [],
+  });
+
+  await draft.fill("Reviewed the original reasoning and checked the parity case.");
+  await page.getByRole("button", { name: "Save thought locally", exact: true }).click();
+  await expect(page.getByText("Thought saved locally.", { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => window.__thoughtVoiceFixture.notebookCommands)).toEqual([
+    expect.objectContaining({
+      type: "thought",
+      expectedProblemKey: "contest:4:A",
+      payload: { text: "Reviewed the original reasoning and checked the parity case." },
+    }),
+  ]);
+});
+
+test("discard removes failed audio and it stays absent after reopening", async ({ page }) => {
+  const takeId = await failRecording(page);
+  const failed = await reopenFailedRecordings(page);
+  await page.evaluate(() => window.__thoughtVoiceFixture.switchProblem());
+  await expect(failed.getByRole("button", { name: "Retry", exact: true })).toBeDisabled();
+  await failed.getByRole("button", { name: "Discard", exact: true }).click();
+  await expect(failed.getByText("Parity practice", { exact: true })).toHaveCount(0);
+  expect(await page.evaluate(() => {
+    const { discards, retries, notebookCommands } = window.__thoughtVoiceFixture;
+    return { discards, retries, notebookCommands };
+  })).toEqual({ discards: [takeId], retries: [], notebookCommands: [] });
+
+  await page.reload();
+  await page.getByRole("button", { name: /^Open companion/ }).click();
+  await expect(page.getByRole("button", { name: "Back to practice", exact: true })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => window.__thoughtVoiceFixture.listRequests)).toBeGreaterThan(0);
+  await expect(page.getByRole("button", { name: /Recover spoken thoughts/ })).toHaveCount(0);
+});

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ThoughtHostVoice, TutorHostVoice, type ThoughtVoiceContext } from '../apps/desktop/main/tutor-host-voice';
+import type { ThoughtTake, ThoughtTakes } from '../apps/desktop/main/thought-take-store';
 import { tutorExternalUrl } from '../packages/tutor/links';
 
 test('host voice: cancellation during asynchronous setup rejects the late result and preserves a newer lease',async()=>{
@@ -22,12 +23,27 @@ const thoughtId = '02015ae8-5b25-47bb-bc05-00093eb3c915';
 const nextThoughtId = 'd2af5286-7481-4000-9213-9d3db1527653';
 const thoughtTarget = { requestId: thoughtId, problemKey: 'contest:4:A', sessionId: 'practice-1' };
 const thoughtAudio = { requestId: thoughtId, mime: 'audio/webm;codecs=opus', bytes: new Uint8Array([1, 2, 3]) };
+const thoughtContext: ThoughtVoiceContext = {
+  problemKey: thoughtTarget.problemKey, problemId: 'problem-4-a', title: 'Watermelon',
+  sessionId: thoughtTarget.sessionId, profileKey: 'practicehandle', recoveryEpoch: 'notebook-a', contestMode: false,
+};
+
+function memoryTakes(): ThoughtTakes {
+  const takes = new Map<string, ThoughtTake>();
+  return {
+    list: () => Array.from(takes.values(), ({ id, problemKey, title, recordedAt }) => ({ id, problemKey, title, recordedAt })),
+    keep: take => { takes.set(take.id, take); },
+    read: id => takes.get(id) ?? null,
+    remove: id => { takes.delete(id); },
+  };
+}
 
 test('spoken thoughts require a matching, unexpired recording grant and dispatch the audio only once', async () => {
   let time = 100;
   let providerCalls = 0;
   const voice = new ThoughtHostVoice({
-    readContext: async () => ({ problemKey: 'contest:4:A', sessionId: 'practice-1', contestMode: false }),
+    readContext: async () => thoughtContext,
+    takes: memoryTakes(),
     requireProvider() {},
     async requestMicrophone() {},
     async transcribe(bytes, mime) {
@@ -54,15 +70,16 @@ test('spoken thoughts require a matching, unexpired recording grant and dispatch
 });
 
 test('spoken thoughts check the captured problem and session before sending and after the provider returns', async () => {
-  let context: ThoughtVoiceContext = { problemKey: 'contest:4:A', sessionId: 'practice-1', contestMode: false };
+  let context = { ...thoughtContext };
   let providerCalls = 0;
   const voice = new ThoughtHostVoice({
     readContext: async () => context,
+    takes: memoryTakes(),
     requireProvider() {},
     async requestMicrophone() {},
     async transcribe() {
       providerCalls++;
-      context = { problemKey: 'contest:5:A', contestMode: false };
+      context = { ...context, problemKey: 'contest:5:A', problemId: 'problem-5-a', sessionId: undefined };
       return 'Belongs to the previous problem.';
     },
   });
@@ -85,7 +102,8 @@ test('spoken thoughts ignore late permission results and stale cancellation for 
   const pendingPermission = new Promise<void>(resolve => { release = resolve; });
   let permissionRequests = 0;
   const voice = new ThoughtHostVoice({
-    readContext: async () => ({ problemKey: 'contest:4:A', sessionId: 'practice-1', contestMode: false }),
+    readContext: async () => thoughtContext,
+    takes: memoryTakes(),
     requireProvider() {},
     async requestMicrophone() {
       if (++permissionRequests === 1) {
@@ -106,6 +124,100 @@ test('spoken thoughts ignore late permission results and stale cancellation for 
   voice.cancelRequest({ requestId: thoughtId });
   assert.equal(voice.microphoneAllowed, true);
   assert.deepEqual(await voice.transcribe({ ...thoughtAudio, requestId: nextThoughtId }), { text: 'Second recording' });
+});
+
+test('failed thought audio retries only from its original notebook, problem and profile and is cleared on verified success', async () => {
+  let context = { ...thoughtContext };
+  let result: 'failure' | 'change' | 'success' = 'failure';
+  let providerCalls = 0;
+  const voice = new ThoughtHostVoice({
+    readContext: async () => context,
+    takes: memoryTakes(),
+    requireProvider() {},
+    async requestMicrophone() {},
+    async transcribe(bytes, mime) {
+      providerCalls++;
+      assert.deepEqual(bytes, thoughtAudio.bytes);
+      assert.equal(mime, thoughtAudio.mime);
+      if (result === 'failure') throw new Error('Connection unavailable.');
+      if (result === 'change') context = { ...context, sessionId: 'session-changed-mid-retry' };
+      return 'Move the pointer one position.';
+    },
+  });
+  const retry = { takeId: thoughtId, requestId: nextThoughtId };
+
+  await voice.start(thoughtTarget);
+  await assert.rejects(voice.transcribe(thoughtAudio), /Connection unavailable.*Recording kept on this device/);
+  const [saved] = voice.listTakes();
+  assert.deepEqual(saved, { id: thoughtId, problemKey: 'contest:4:A', title: 'Watermelon', recordedAt: saved.recordedAt });
+
+  context = { ...thoughtContext, profileKey: 'other-handle' };
+  await assert.rejects(voice.retryTake(retry), /original problem and Codeforces profile/);
+  context = { ...thoughtContext, problemId: 'same-key-different-record' };
+  await assert.rejects(voice.retryTake(retry), /original problem and Codeforces profile/);
+  context = { ...thoughtContext, recoveryEpoch: 'after-restore' };
+  await assert.rejects(voice.retryTake(retry), /before a restore/);
+  assert.equal(providerCalls, 1);
+
+  context = { ...thoughtContext, sessionId: 'practice-2' };
+  result = 'change';
+  await assert.rejects(voice.retryTake(retry), /problem or session changed/);
+  assert.equal(voice.listTakes().length, 1);
+  result = 'success';
+  assert.deepEqual(await voice.retryTake(retry), { text: 'Move the pointer one position.' });
+  assert.deepEqual(voice.listTakes(), []);
+  await assert.rejects(voice.retryTake(retry), /no longer available/);
+  assert.equal(providerCalls, 3);
+});
+
+test('cancelled first attempts keep no take, cancelled retries preserve existing audio and discard works out of context', async () => {
+  const takes = memoryTakes();
+  let context = { ...thoughtContext };
+  const voice = new ThoughtHostVoice({
+    readContext: async () => context,
+    takes,
+    requireProvider() {},
+    async requestMicrophone() {},
+    async transcribe(_bytes, _mime, signal) {
+      voice.cancelRequest({ requestId: takes.list().length ? nextThoughtId : thoughtId });
+      assert.equal(signal.aborted, true);
+      throw new Error('Provider was stopped.');
+    },
+  });
+
+  await voice.start(thoughtTarget);
+  await assert.rejects(voice.transcribe(thoughtAudio), /stopped/);
+  assert.deepEqual(voice.listTakes(), []);
+  takes.keep({ id: thoughtId, problemKey: 'contest:4:A', title: 'Watermelon', recordedAt: new Date().toISOString(), problemId: 'problem-4-a', profileKey: 'practicehandle', recoveryEpoch: 'notebook-a', bytes: thoughtAudio.bytes, mime: thoughtAudio.mime });
+  await assert.rejects(voice.retryTake({ takeId: thoughtId, requestId: nextThoughtId }), /Provider was stopped/);
+  assert.equal(voice.listTakes().length, 1);
+  context = { ...thoughtContext, recoveryEpoch: 'after-restore' };
+  voice.discardTake({ takeId: thoughtId });
+  assert.deepEqual(voice.listTakes(), []);
+});
+
+test('a first thought transcription works without protected storage and reports when failure cannot retain the recording', async () => {
+  let fail = false;
+  let storageChecks = 0;
+  const voice = new ThoughtHostVoice({
+    readContext: async () => thoughtContext,
+    takes: { ...memoryTakes(), keep() { storageChecks++; throw new Error('Protected recording storage is unavailable.'); } },
+    requireProvider() {},
+    async requestMicrophone() {},
+    async transcribe() {
+      if (fail) throw new Error('Connection unavailable.');
+      return 'Successful transcription';
+    },
+  });
+
+  await voice.start(thoughtTarget);
+  assert.deepEqual(await voice.transcribe(thoughtAudio), { text: 'Successful transcription' });
+  assert.equal(storageChecks, 0);
+  fail = true;
+  await voice.start(thoughtTarget);
+  await assert.rejects(voice.transcribe(thoughtAudio), /Connection unavailable.*Recording was not kept.*Protected recording storage is unavailable/);
+  assert.deepEqual(voice.listTakes(), []);
+  assert.equal(storageChecks, 1);
 });
 
 test('tutor links: public HTTPS only, without renderer navigation or credential-bearing URLs',()=>{
