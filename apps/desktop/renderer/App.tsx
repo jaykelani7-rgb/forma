@@ -1,13 +1,15 @@
 import { useEffect, useEffectEvent, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { ArrowLeft, ArrowRight, ArrowUpRight, BookOpen, Check, ChevronRight, CircleHelp, Clock3, Code2, Ellipsis, Feather, FileCode2, Link2, LoaderCircle, Mic, Moon, Pause, Play, Plus, Settings2, ShieldCheck, Sun, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, ArrowUpRight, BookOpen, Check, ChevronRight, CircleHelp, Clock3, Code2, Ellipsis, Feather, FileCode2, Link2, LoaderCircle, Mic, Moon, Pause, Play, Plus, Search, Settings2, ShieldCheck, Sun, X } from "lucide-react";
 import { TutorPanel, type TutorActivity } from "./TutorPanel";
 import { useThoughtVoice } from "./thought-voice";
 import { ThoughtTakeRecovery } from "./ThoughtTakeRecovery";
 import { ThoughtShortcutSettings } from "./ThoughtShortcutSettings";
+import { PaletteShortcutSettings } from "./PaletteShortcutSettings";
+import { CommandPaletteFlow, type PaletteCommand } from "./CommandPaletteFlow";
 import { ProblemDesk } from "./ProblemDesk";
 import { DeskHintFlow } from "./DeskHintFlow";
 import { DesktopRibbonMark, type RibbonFeedback } from "./DesktopRibbonMark";
-import { DEFAULT_THOUGHT_SHORTCUT } from "../main/preferences";
+import { DEFAULT_PALETTE_SHORTCUT, DEFAULT_THOUGHT_SHORTCUT } from "../main/preferences";
 import { SetupPanel } from "./SetupPanel";
 import { BackupPanel } from "./BackupPanel";
 import { RibbonStudio } from "../../../packages/ribbon/RibbonStudio";
@@ -45,6 +47,7 @@ export function App() {
   const rehearsalReturn = useRef<Panel>("home");
   const [panel, setPanel] = useState<Panel>("home");
   const [expanded, setExpanded] = useState(previewMode);
+  const [palette, setPalette] = useState<{ restoreCompact: boolean } | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
@@ -75,12 +78,13 @@ export function App() {
   const busyRef = useRef(false);
   const panelRequestId = useRef<number | null>(null);
   const lastThoughtShortcutPress = useRef<number | undefined>(undefined);
+  const lastPaletteShortcutPress = useRef<number | undefined>(undefined);
   const pendingCommand = useRef<{ signature: string; command: CompanionCommand } | null>(null);
   const [draftTargets, setDraftTargets] = useState<Partial<Record<"thought" | "reflect" | "recall", CaptureTarget>>>({});
   const visible = usePageVisible();
   const search = new URLSearchParams(location.search);
   const gallery = previewMode && search.get("gallery") === "1";
-  useEffect(() => { let cancelled = false; let unsubscribe: (() => void) | undefined; const receive = (next: CompanionSnapshot) => { setDeskHintKey(current => current === JSON.stringify([next.state.problemId, next.data.session?.id ?? null]) ? current : null); setSnapshot(next); setExpanded(next.presentation?.expanded ?? previewMode); const request = next.presentation?.panelRequest; if (request && request.id !== panelRequestId.current) { panelRequestId.current = request.id; setDeskHintKey(null); setPanel(request.panel); if(request.panel==="tutor")setTutorRequest({id:request.id,conversationId:request.conversationId}); } }; connectBridge().then(async (api) => { const initial = await api.getSnapshot(); if (cancelled) return; setBridge(api); receive(initial); setHandle(initial.state.handle ?? ""); setShortcut(initial.preferences.shortcut ?? "Control+Option+F"); unsubscribe = api.subscribe(receive); }).catch((reason) => { if (!cancelled) setError(errorMessage(reason)); }); return () => { cancelled = true; unsubscribe?.(); }; }, []);
+  useEffect(() => { let cancelled = false; let unsubscribe: (() => void) | undefined; const receive = (next: CompanionSnapshot) => { setDeskHintKey(current => current === JSON.stringify([next.state.problemId, next.data.session?.id ?? null]) ? current : null); setSnapshot(next); const nextExpanded = next.presentation?.expanded ?? previewMode; setExpanded(nextExpanded); if (!nextExpanded) setPalette(null); const request = next.presentation?.panelRequest; if (request && request.id !== panelRequestId.current) { panelRequestId.current = request.id; setPalette(null); setDeskHintKey(null); setPanel(request.panel); if(request.panel==="tutor")setTutorRequest({id:request.id,conversationId:request.conversationId}); } }; connectBridge().then(async (api) => { const initial = await api.getSnapshot(); if (cancelled) return; setBridge(api); receive(initial); setHandle(initial.state.handle ?? ""); setShortcut(initial.preferences.shortcut ?? "Control+Option+F"); unsubscribe = api.subscribe(receive); }).catch((reason) => { if (!cancelled) setError(errorMessage(reason)); }); return () => { cancelled = true; unsubscribe?.(); }; }, []);
   useEffect(() => { if (!bridge || previewMode) return; let last: boolean | null = null; const updateHitbox = (event: PointerEvent) => { const interactive = !!(event.target instanceof Element && event.target.closest("button,input,textarea,select,a,[data-interactive],.card,.drag-handle")); if (interactive === last) return; last = interactive; void bridge.ui("hitbox", interactive).catch(() => { /* The menu bar remains available for recovery. */ }); }; document.addEventListener("pointermove", updateHitbox); return () => document.removeEventListener("pointermove", updateHitbox); }, [bridge]);
   useEffect(() => { const motion = matchMedia("(prefers-reduced-motion: reduce)"); const dark = matchMedia("(prefers-color-scheme: dark)"); const onMotion = () => setMotionPreference(motion.matches); const onDark = () => setDarkPreference(dark.matches); motion.addEventListener("change", onMotion); dark.addEventListener("change", onDark); return () => { motion.removeEventListener("change", onMotion); dark.removeEventListener("change", onDark); }; }, []);
   useEffect(() => { if (!visible || !snapshot?.data.session?.runningSince) return; const timer = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(timer); }, [visible, snapshot?.data.session?.runningSince]);
@@ -95,7 +99,14 @@ export function App() {
   useEffect(() => { focusTarget.current?.scrollTo({ top: 0 }); if (panel !== "home" && !focusTarget.current?.contains(document.activeElement)) focusTarget.current?.focus(); }, [panel]);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || event.defaultPrevented) return;
+      if (event.defaultPrevented || event.isComposing) return;
+      if (event.key.toLowerCase() === "k" && (event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey) {
+        if (!snapshot || gallery || panel === "rehearsal") return;
+        event.preventDefault();
+        if (!event.repeat && !palette) openPalette();
+        return;
+      }
+      if (event.key !== "Escape" || palette) return;
       if (showDeskHint) closeDeskHint();
       else if (panel === "tutor" && returnFromTutorToDesk) openPanel("desk");
       else if (panel !== "home") { setDeskHintKey(null); setPanel("home"); }
@@ -132,6 +143,8 @@ export function App() {
   const thoughtLimit = 10_000;
   const thoughtShortcut = snapshot?.preferences.thoughtShortcut === undefined
     ? DEFAULT_THOUGHT_SHORTCUT : snapshot.preferences.thoughtShortcut;
+  const paletteShortcut = snapshot?.preferences.paletteShortcut === undefined
+    ? DEFAULT_PALETTE_SHORTCUT : snapshot.preferences.paletteShortcut;
   const thoughtTarget = snapshot ? freezeCaptureTarget(snapshot) : undefined;
   const savedThoughtTarget = draftTargets.thought;
   const differentDraft = !!thought.trim() && !!savedThoughtTarget && (
@@ -188,7 +201,7 @@ export function App() {
     catch (reason) { setError(errorMessage(reason)); }
     finally { busyRef.current = false; setBusy(false); }
   }
-  async function toggleExpanded(value: boolean) { if (!value) setDeskHintKey(null); setExpanded(value); if (bridge) { try { await bridge.ui("expand", value); } catch (reason) { setError(errorMessage(reason)); setExpanded(true); } } }
+  async function toggleExpanded(value: boolean) { if (!value) { setDeskHintKey(null); setPalette(null); } setExpanded(value); if (bridge) { try { await bridge.ui("expand", value); } catch (reason) { setError(errorMessage(reason)); setExpanded(true); } } }
   function openPanel(value: Panel, target?: CaptureTarget) { if (value !== "desk") setDeskHintKey(null); if (value !== "tutor") setReturnFromTutorToDesk(false); if (snapshot && (value === "thought" || value === "reflect" || value === "recall")) { const hasDraft = value === "thought" ? !!thought.trim() : value === "reflect" ? !!takeaway.trim() || !!outcome : !!recallResponse.trim(); if (!hasDraft || !draftTargets[value]) setDraftTargets(current => ({ ...current, [value]: target ?? freezeCaptureTarget(snapshot) })); } setError(""); setNotice(""); setMore(false); setPanel(value); if (value === "today") void ui("today"); else if(value === "tutor")void ui("tutor-show"); else void toggleExpanded(true); }
   async function chooseToday(item: NonNullable<CompanionSnapshot["today"]>["items"][number]) {
     const coding=item.activity === "coding";
@@ -266,6 +279,59 @@ export function App() {
     if (await command("resume", {}, "Session resumed.")) setThreadEditorProblem(null);
   }
 
+  function openPalette(restoreCompact = !expanded, hostExpanded = false) {
+    if (!snapshot || gallery || panel === "rehearsal") return;
+    setPalette(current => current ?? { restoreCompact });
+    if (!hostExpanded && !expanded) void toggleExpanded(true);
+  }
+
+  function closePalette(restoreCompact = true) {
+    setPalette(null);
+    if (restoreCompact && palette?.restoreCompact) void toggleExpanded(false);
+  }
+
+  function openPaletteDesk(withHint = false) {
+    closePalette(false);
+    openPanel("desk");
+    if (withHint) {
+      setThreadEditorProblem(null);
+      setDeskHintKey(hintScope);
+    }
+  }
+
+  const onPaletteShortcut = useEffectEvent(() => {
+    openPalette(snapshot?.presentation?.paletteShortcutWasExpanded === false, true);
+  });
+  const paletteShortcutEvent = snapshot?.presentation?.paletteShortcutPress;
+  useEffect(() => {
+    if (paletteShortcutEvent === undefined) return;
+    const previous = lastPaletteShortcutPress.current;
+    if (previous !== undefined && paletteShortcutEvent <= previous) return;
+    lastPaletteShortcutPress.current = paletteShortcutEvent;
+    if (previous !== undefined) onPaletteShortcut();
+  }, [paletteShortcutEvent]);
+
+  const paletteCommands: PaletteCommand[] = [];
+  if (palette && problem && !busy && !thoughtVoiceBusy) {
+    if (session && !session.running && !reflectionPending) paletteCommands.push({
+      id: "action:resume", title: `Resume ${problem.title}`,
+      detail: latestThread?.text ?? `${duration(session.elapsedMs)} tracked`,
+      meta: "Paused session", keywords: "continue paused session practice yesterday s problem",
+      run: () => { closePalette(false); void resumePractice(); },
+    });
+    paletteCommands.push({
+      id: "action:desk", title: "Open problem desk", detail: problem.title, keywords: "current workspace thread notes",
+      run: () => openPaletteDesk(),
+    });
+    if (canDictate) paletteCommands.push({
+      id: "action:record", title: "Record a thought", detail: problem.title, keywords: "speak voice dictate microphone note",
+      run: () => { closePalette(false); speakThought(); },
+    }, {
+      id: "action:hint", title: "I’m stuck", detail: "Review a request for one hint", keywords: "tutor help one hint current problem",
+      run: () => openPaletteDesk(true),
+    });
+  }
+
   function saveDeskEntry(item: DeskEntry) {
     if (!problem || thoughtVoiceBusy) return Promise.resolve(false);
     return command("desk-add", { ...item, problemId: problem.id }, item.kind === "thread" ? "Thread saved locally." : "Pinned locally.");
@@ -273,8 +339,12 @@ export function App() {
 
   const onThoughtShortcut = useEffectEvent(() => {
     if (!bridge || !window.forma || busy) return;
-    if (thoughtVoice.phase === "recording" || thoughtVoice.phase === "recorded") thoughtVoice.finish();
+    if (thoughtVoice.phase === "recording" || thoughtVoice.phase === "recorded") {
+      closePalette(false);
+      thoughtVoice.finish();
+    }
     else if (thoughtVoice.phase === "idle") {
+      closePalette(false);
       if (expanded && panel === "desk" && editThread) speakThread();
       else speakThought();
     }
@@ -340,12 +410,12 @@ export function App() {
     <div className={`companion-window ${panel==="tutor"&&expanded?"is-tutor":""} ${!expanded ? "is-collapsed" : ""} ${(recognition || verdictNotice) && !snoozed ? "has-recognition" : ""}`}>
       {!expanded && (recognitionBubble || verdictBubble)}
       <section className={`card ${panel==="today"?"card--glance":panel==="tutor"?"card--tutor":""}`} hidden={!expanded} style={expanded?undefined:{display:"none"}} aria-label="Forma Companion" aria-busy={busy}>
-        <header className="card-header"><div className="brand"><RibbonMark size={27}/><span>forma<span className="brand-detail">ribbon</span></span></div><div className="header-actions">{panel !== "home" && <IconButton icon={ArrowLeft} label={panel === "tutor" && returnFromTutorToDesk ? "Back to problem desk" : "Back to practice"} onClick={() => openPanel(panel === "tutor" && returnFromTutorToDesk ? "desk" : "home")}/>}<IconButton icon={Settings2} label="Companion settings" active={panel === "settings"} onClick={() => openPanel(panel === "settings" ? "home" : "settings")}/><IconButton icon={X} label="Collapse to ribbon" onClick={() => void toggleExpanded(false)}/></div></header>
+        <header className="card-header"><div className="brand"><RibbonMark size={27}/><span>forma<span className="brand-detail">ribbon</span></span></div><div className="header-actions">{panel !== "home" && <IconButton icon={ArrowLeft} label={panel === "tutor" && returnFromTutorToDesk ? "Back to problem desk" : "Back to practice"} onClick={() => openPanel(panel === "tutor" && returnFromTutorToDesk ? "desk" : "home")}/>}{snapshot && panel !== "rehearsal" && <IconButton icon={Search} label="Open command palette" onClick={() => openPalette()}/>}<IconButton icon={Settings2} label="Companion settings" active={panel === "settings"} onClick={() => openPanel(panel === "settings" ? "home" : "settings")}/><IconButton icon={X} label="Collapse to ribbon" onClick={() => void toggleExpanded(false)}/></div></header>
         <div className="card-body" ref={focusTarget} tabIndex={-1}>
           {panel === "home" && (recognitionBubble || verdictBubble)}
           {(panel === "thought" || panel === "reflect" || panel === "recall") && draftTargets[panel] && <p className="field-help">Draft for {draftTargets[panel]!.title}{draftTargets[panel]!.problemKey !== snapshot?.state.identity ? " · return to this problem to save; your draft is kept here." : ""}</p>}
           {!snapshot ? <div className="empty-state"><RibbonMark size={72}/><h1>{error ? "A small connection snag." : "Making a little space."}</h1><p>{error || "Opening your local notebook…"}</p></div> : <>
-          {bridge&&snapshot&&<TutorPanel bridge={bridge} snapshot={snapshot} active={expanded&&panel==="tutor"} conversationRequest={tutorRequest} onActivity={setTutorActivity}/>}
+          {bridge&&snapshot&&<TutorPanel bridge={bridge} snapshot={snapshot} active={expanded&&panel==="tutor"} covered={!!palette} conversationRequest={tutorRequest} onActivity={setTutorActivity}/>}
           {panel === "rehearsal" && <RibbonRehearsal shortcut={previewMode ? undefined : snapshot.preferences.shortcut} shortcutPress={snapshot.presentation?.shortcutPress} onExit={() => openPanel(rehearsalReturn.current)}/>}
           {(panel === "home" || panel === "today") && !session && !snapshot.data.attempts.length && <button className="settings-link" onClick={rehearse}>Try a sample session <ArrowRight size={14}/></button>}
           {(panel === "home" || panel === "today") && thoughtVoice.recovery.takes.length > 0 &&
@@ -401,6 +471,7 @@ export function App() {
               }
             } : undefined}
             hint={showDeskHint && bridge && <DeskHintFlow key={hintScope} bridge={bridge} problemId={problem.id}
+              covered={!!palette}
               hypothesis={deskItems.findLast(item => item.kind === "hypothesis")?.text}
               onClose={closeDeskHint}
               onOpenTutor={() => { setReturnFromTutorToDesk(true); openPanel("tutor"); }}
@@ -435,7 +506,13 @@ export function App() {
                 shortcut={thoughtShortcut} available={!!snapshot.presentation?.thoughtShortcutAvailable} busy={busy}
                 onSave={value => void ui("thought-shortcut", value).then(result => {
                   if (result !== undefined) setNotice(value ? "Recording shortcut saved." : "Recording shortcut turned off.");
-                })}/>}<div className="settings-section last">{snoozed && <button className="settings-link" onClick={() => void ui("snooze", false)} disabled={busy}><Sun size={14}/>Resume suggestions</button>}<button className="settings-link" onClick={() => void ui("snooze", 60)} disabled={busy}><Moon size={14}/>Snooze suggestions for an hour</button><button className="settings-link" onClick={() => void ui("hide")} disabled={busy}><X size={14}/>Hide ribbon · recover from the menu bar</button><p className="settings-footnote">Tutor is optional. Only explicitly included context goes to your configured provider. No automatic learning credit. Recover the ribbon from the menu-bar icon at any time.</p></div></>}
+                })}/>}
+              {window.forma && <PaletteShortcutSettings key={paletteShortcut ?? "off"}
+                shortcut={paletteShortcut} available={!!snapshot.presentation?.paletteShortcutAvailable} busy={busy}
+                onSave={value => void ui("palette-shortcut", value).then(result => {
+                  if (result !== undefined) setNotice(value ? "Command palette shortcut saved." : "Global command palette shortcut turned off.");
+                })}/>}
+              <div className="settings-section last">{snoozed && <button className="settings-link" onClick={() => void ui("snooze", false)} disabled={busy}><Sun size={14}/>Resume suggestions</button>}<button className="settings-link" onClick={() => void ui("snooze", 60)} disabled={busy}><Moon size={14}/>Snooze suggestions for an hour</button><button className="settings-link" onClick={() => void ui("hide")} disabled={busy}><X size={14}/>Hide ribbon · recover from the menu bar</button><p className="settings-footnote">Tutor is optional. Only explicitly included context goes to your configured provider. No automatic learning credit. Recover the ribbon from the menu-bar icon at any time.</p></div></>}
           </>}
           {error && snapshot && <div className="feedback feedback--error" role="alert"><CircleHelp size={15}/><span>{error}</span><button aria-label="Dismiss error" onClick={() => setError("")}><X size={12}/></button></div>}
           {notice && <div className="feedback" role="status"><Check size={14}/><span>{notice}</span></div>}
@@ -463,6 +540,12 @@ export function App() {
         <span className="drag-handle" aria-label="Drag to move companion" title="Drag to move companion"><span/><span/><span/></span>
       </div>
     </div>
+    {palette && expanded && snapshot && <CommandPaletteFlow
+      snapshot={snapshot} commands={paletteCommands}
+      shortcutLabel={snapshot.presentation?.paletteShortcutAvailable ? paletteShortcut ?? undefined : undefined}
+      onClose={() => closePalette()} onOpenDesk={() => openPaletteDesk()}
+      onOpenProblem={url => { closePalette(); void ui("open-external", url); }}
+    />}
     {previewMode && <div className="preview-footer"><span>SMALL PRESENCE. LASTING LEARNING.</span><a href={`?preview=1&gallery=1${theme === "ink" ? "&theme=ink" : ""}`}>View ribbon states <ArrowUpRight size={11}/></a></div>}
   </main>;
 }

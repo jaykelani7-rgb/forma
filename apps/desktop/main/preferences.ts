@@ -1,5 +1,6 @@
 import { defaultRibbon, readRibbonOptions, type RibbonOptions } from "../../../packages/ribbon/options";
 export const DEFAULT_THOUGHT_SHORTCUT = "Control+Option+R";
+export const DEFAULT_PALETTE_SHORTCUT = "Control+Option+K";
 
 export interface CompanionPreferences {
   theme: "light" | "ink" | "system";
@@ -7,6 +8,7 @@ export interface CompanionPreferences {
   snoozedUntil: string | null;
   shortcut: string;
   thoughtShortcut: string | null;
+  paletteShortcut: string | null;
   ribbon: RibbonOptions;
   position?: { x: number; y: number };
 }
@@ -18,9 +20,10 @@ export const defaultPreferences = (): CompanionPreferences => ({
   snoozedUntil: null,
   shortcut: "Control+Option+F",
   thoughtShortcut: DEFAULT_THOUGHT_SHORTCUT,
+  paletteShortcut: DEFAULT_PALETTE_SHORTCUT,
 });
 
-export function validateThoughtShortcut(value: unknown): string | null {
+export function validateModifiedShortcut(value: unknown, example: string): string | null {
   if (value === null) return null;
   const modifiers = /^(cmd|command|ctrl|control|commandorcontrol|cmdorctrl|alt|option|super|meta)$/i;
   if (typeof value === "string" && value.length <= 100 && /^[A-Za-z0-9+]+$/.test(value)) {
@@ -29,7 +32,7 @@ export function validateThoughtShortcut(value: unknown): string | null {
     if (parts.every(Boolean) && key && !modifiers.test(key) && !/^shift$/i.test(key) &&
         parts.slice(0, -1).some(part => modifiers.test(part))) return value;
   }
-  throw new Error("Enter a shortcut with a modifier and a key, such as Control+Option+R.");
+  throw new Error(`Enter a shortcut with a modifier and a key, such as ${example}.`);
 }
 
 export function validatePreferences(value: unknown): CompanionPreferences {
@@ -40,8 +43,10 @@ export function validatePreferences(value: unknown): CompanionPreferences {
     !(p.snoozedUntil === null || (typeof p.snoozedUntil === 'string' && Number.isFinite(Date.parse(p.snoozedUntil)))) ||
     typeof p.shortcut !== 'string' || p.shortcut.length > 100 ||
     !/^[A-Za-z0-9+]+$/.test(p.shortcut)) throw new Error("Invalid companion preferences.");
-  const thoughtShortcut = validateThoughtShortcut(p.thoughtShortcut === undefined
-    ? DEFAULT_THOUGHT_SHORTCUT : p.thoughtShortcut);
+  const thoughtShortcut = validateModifiedShortcut(p.thoughtShortcut === undefined
+    ? DEFAULT_THOUGHT_SHORTCUT : p.thoughtShortcut, DEFAULT_THOUGHT_SHORTCUT);
+  const paletteShortcut = validateModifiedShortcut(p.paletteShortcut === undefined
+    ? DEFAULT_PALETTE_SHORTCUT : p.paletteShortcut, DEFAULT_PALETTE_SHORTCUT);
   let position: CompanionPreferences['position'];
   if (p.position !== undefined) {
     const at = p.position as { x?: unknown; y?: unknown };
@@ -49,7 +54,7 @@ export function validatePreferences(value: unknown): CompanionPreferences {
       throw new Error("Invalid window position.");
     position = { x: Math.round(at.x), y: Math.round(at.y) };
   }
-  return { ribbon: p.ribbon === undefined ? {...defaultRibbon} : readRibbonOptions(p.ribbon), theme: p.theme as CompanionPreferences['theme'], reducedMotion: p.reducedMotion, snoozedUntil: p.snoozedUntil as string | null, shortcut: p.shortcut, thoughtShortcut, ...(position ? {position} : {}) };
+  return { ribbon: p.ribbon === undefined ? {...defaultRibbon} : readRibbonOptions(p.ribbon), theme: p.theme as CompanionPreferences['theme'], reducedMotion: p.reducedMotion, snoozedUntil: p.snoozedUntil as string | null, shortcut: p.shortcut, thoughtShortcut, paletteShortcut, ...(position ? {position} : {}) };
 }
 
 export function clampPosition(position: {x:number;y:number}, size: {width:number;height:number}, area: {x:number;y:number;width:number;height:number}) {

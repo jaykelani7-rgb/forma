@@ -28,6 +28,33 @@ try{
  assert.equal((await page.evaluate(()=>window.forma.getSnapshot())).preferences.thoughtShortcut,null);
  assert.equal(await application.evaluate(({globalShortcut},key)=>globalShortcut.isRegistered(key),recordingKey),false);
  await page.evaluate(key=>window.forma.ui('thought-shortcut',key),recordingKey);
+ const paletteKey='Control+Option+Shift+F10';
+ await page.evaluate(key=>window.forma.ui('palette-shortcut',key),paletteKey);
+ const palette=await page.evaluate(()=>window.forma.getSnapshot());
+ assert.equal(palette.preferences.paletteShortcut,paletteKey);
+ assert.equal(palette.presentation.paletteShortcutAvailable,true);
+ assert.equal(await application.evaluate(({globalShortcut},key)=>globalShortcut.isRegistered(key),paletteKey),true);
+ async function shortcutError(action,key){
+   return page.evaluate(async ({action,key})=>{
+     try{await window.forma.ui(action,key);return '';}catch(error){return error.message;}
+   },{action,key});
+ }
+ assert.match(await shortcutError('palette-shortcut','K'),/modifier and a key/);
+ assert.match(await shortcutError('palette-shortcut',shortcuts.preferences.shortcut),/Open companion/);
+ assert.match(await shortcutError('palette-shortcut','Ctrl+Alt+Shift+F11'),/shortcut is in use/);
+ assert.match(await shortcutError('thought-shortcut',paletteKey),/Command palette/);
+ assert.match(await shortcutError('shortcut',paletteKey),/Command palette/);
+ const afterConflicts=await page.evaluate(()=>window.forma.getSnapshot());
+ assert.equal(afterConflicts.preferences.paletteShortcut,paletteKey);
+ assert.equal(afterConflicts.preferences.thoughtShortcut,recordingKey);
+ assert.equal(afterConflicts.presentation.paletteShortcutAvailable,true);
+ assert.equal(afterConflicts.presentation.thoughtShortcutAvailable,true);
+ await page.evaluate(()=>window.forma.ui('palette-shortcut',null));
+ const disabledPalette=await page.evaluate(()=>window.forma.getSnapshot());
+ assert.equal(disabledPalette.preferences.paletteShortcut,null);
+ assert.equal(disabledPalette.presentation.paletteShortcutAvailable,false);
+ assert.equal(await application.evaluate(({globalShortcut},key)=>globalShortcut.isRegistered(key),paletteKey),false);
+ await page.evaluate(key=>window.forma.ui('palette-shortcut',key),paletteKey);
  await page.getByRole('button',{name:'Speak a thought',exact:true}).click();
  await page.getByRole('alert').filter({hasText:'Set up Gemini in Tutor settings'}).waitFor();
  await page.getByRole('textbox',{name:'Your thought',exact:true}).waitFor();
@@ -105,6 +132,11 @@ try{
    return current.preferences.thoughtShortcut===key&&current.presentation.thoughtShortcutAvailable;
  },recordingKey);
  report.recordingShortcut={registered:true,rejectsUnmodifiedKey:true,disableAndRestore:true,persistedOnRestart:true};
+ await page.waitForFunction(async key=>{
+   const current=await window.forma.getSnapshot();
+   return current.preferences.paletteShortcut===key&&current.presentation.paletteShortcutAvailable;
+ },paletteKey);
+ report.paletteShortcut={registered:true,rejectsConflicts:true,disableAndRestore:true,persistedOnRestart:true};
  const reopened=await page.evaluate(id=>window.forma.ui('tutor-open',{conversationId:id}),shared.id);assert.equal(reopened.id,shared.id);assert.equal((await page.evaluate(()=>window.forma.getSnapshot())).state.identity,'contest:5:A');report.restart={conversationRetained:true,practiceRetained:true};
  await page.evaluate(id=>window.forma.ui('tutor-delete',id),shared.id);assert.equal((await page.evaluate(()=>window.forma.ui('tutor-view'))).conversations.some(c=>c.id===shared.id),false);report.deletion={conversationDeleted:true,notebookAttemptsUnchanged:(await page.evaluate(()=>window.forma.getSnapshot())).data.attempts.length===0};
  assert.deepEqual(errors,[]);report.pageErrors=errors;

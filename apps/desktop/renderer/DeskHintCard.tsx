@@ -12,6 +12,7 @@ interface DeskHintCardProps {
   error: string;
   loading: boolean;
   locked: boolean;
+  covered?: boolean;
   running: boolean;
   turn: TutorTurn | null;
   onIncludeHypothesisChange: (include: boolean) => void;
@@ -58,7 +59,7 @@ function StatementReview({ statement }: { statement: StatementSnapshot }) {
 }
 
 export function DeskHintCard({
-  review, question, hypothesis, includeHypothesis, error, loading, locked, running, turn,
+  review, question, hypothesis, includeHypothesis, error, loading, locked, covered = false, running, turn,
   onIncludeHypothesisChange, onSend, onStop, onClose, onOpenTutor, onLeaveThread, onKeep, onOpenLink,
   onExpose, onRefresh,
 }: DeskHintCardProps) {
@@ -67,7 +68,7 @@ export function DeskHintCard({
   const expose = useEffectEvent(onExpose);
   const response = turn?.assistantText ?? "";
   const hasResponse = !!response.trim();
-  const visibleRequest = turn && hasResponse && !turn.exposed && !review?.contestMode ? turn.requestId : null;
+  const visibleRequest = !covered && turn && hasResponse && !turn.exposed && !review?.contestMode ? turn.requestId : null;
   useEffect(() => { heading.current?.focus(); }, []);
   useEffect(() => {
     const element = answer.current;

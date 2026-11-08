@@ -19,7 +19,7 @@ import { RecognitionHub } from "./recognition";
 import { startBrowserTransport } from "./browser-transport";
 import { DatabaseClient } from "./database-client";
 import { startTransport } from "./transport";
-import { clampPosition, validateThoughtShortcut, type CompanionPreferences } from "./preferences";
+import { clampPosition, DEFAULT_PALETTE_SHORTCUT, DEFAULT_THOUGHT_SHORTCUT, validateModifiedShortcut, type CompanionPreferences } from "./preferences";
 import type { LocalSnapshot } from "./store";
 import { createCodeforcesAdapter } from "../../../src/lib/codeforces-api";
 import { parseVerifiedCodeforcesPage } from "../../../packages/integrations/codeforces";
@@ -40,6 +40,9 @@ let parkedAt: Electron.Rectangle | null = null;
 let shortcutPress = 0;
 let thoughtShortcutPress = 0;
 let lastThoughtShortcutEvent = -Infinity;
+let paletteShortcutPress = 0;
+let paletteShortcutWasExpanded = false;
+let lastPaletteShortcutEvent = -Infinity;
 const ribbonWindow = { width: 216, height: 78 };
 let window: BrowserWindow;
 let tray: Tray;
@@ -250,7 +253,12 @@ const snapshot=async()=>{
   const local=await database.call<LocalSnapshot>('snapshot');
   const slot=attention.view(local.state,recognition?.presentation()??null,!!preferences.snoozedUntil&&Date.parse(preferences.snoozedUntil)>Date.now(),Date.now());
   const tutorAssistance=local.data.session?.phase==='reflection'?await database.call('tutor-assistance',{problemId:local.data.session.problemId,sessionId:local.data.session.id}):null;
-  return {...local,tutorAssistance,today:companionToday(local.data),preferences,presentation:{expanded,shortcutPress,thoughtShortcutPress,thoughtShortcutAvailable:!!preferences.thoughtShortcut && globalShortcut.isRegistered(preferences.thoughtShortcut) && preferences.thoughtShortcut !== preferences.shortcut,panelRequest,activeFileUri:recognition?.activeFileUri()??null,recognition:slot.recognition,verdict:slot.verdict},integration:{connected,paired:!!credential,browserEnabled:!!browserCredential,browserSupported:process.platform==='darwin',status:connected?'VS Code connected':credential?'Waiting for VS Code':'Pair VS Code when you’re ready'},codeforces:platformStatus(local.state)};
+  return {...local,tutorAssistance,today:companionToday(local.data),preferences,presentation:{
+    expanded, shortcutPress, thoughtShortcutPress, paletteShortcutPress, paletteShortcutWasExpanded,
+    thoughtShortcutAvailable: shortcutAvailable("thoughtShortcut"),
+    paletteShortcutAvailable: shortcutAvailable("paletteShortcut"),
+    panelRequest, activeFileUri:recognition?.activeFileUri()??null, recognition:slot.recognition, verdict:slot.verdict,
+  },integration:{connected,paired:!!credential,browserEnabled:!!browserCredential,browserSupported:process.platform==='darwin',status:connected?'VS Code connected':credential?'Waiting for VS Code':'Pair VS Code when you’re ready'},codeforces:platformStatus(local.state)};
 };
 async function broadcast() {
   if(!window||window.isDestroyed())return;
@@ -309,9 +317,6 @@ async function saveFile(kind:'notebook'|'companion'){
   writeFileSync(choice.filePath,json,{mode:0o600});return {saved:true};
 }
 async function setPreferences(change:Partial<CompanionPreferences>){preferences=await database.call('patchPreferences',change);await broadcast();return preferences;}
-function registerShortcut(shortcut:string){
-  if(!globalShortcut.register(shortcut,()=>{shortcutPress++;show();}))throw new Error('That shortcut is in use. Choose another shortcut.');
-}
 function triggerThoughtShortcut() {
   const now = performance.now();
   const quietFor = now - lastThoughtShortcutEvent;
@@ -322,26 +327,65 @@ function triggerThoughtShortcut() {
   expand(true);
 }
 
-function registerThoughtShortcut(shortcut: string) {
-  if (!globalShortcut.register(shortcut, triggerThoughtShortcut)) {
-    throw new Error("That recording shortcut is in use. Choose another key combination.");
+function triggerPaletteShortcut() {
+  const now = performance.now();
+  const quietFor = now - lastPaletteShortcutEvent;
+  lastPaletteShortcutEvent = now;
+  if (quietFor < 400 || quitting || recoveryFence.busy) return;
+  paletteShortcutWasExpanded = expanded;
+  paletteShortcutPress++;
+  if (!expanded) {
+    expand(true, true);
+    return;
   }
+  window.setIgnoreMouseEvents(false);
+  window.show();
+  void broadcast();
 }
 
-async function changeThoughtShortcut(payload: unknown) {
-  const value = validateThoughtShortcut(payload);
-  const previous = preferences.thoughtShortcut;
-  if (value === preferences.shortcut) throw new Error("Choose a different key combination from Open companion.");
-  if (value === previous && (value === null || globalShortcut.isRegistered(value))) return preferences;
-  if (value !== null) registerThoughtShortcut(value);
+const shortcutActions = {
+  shortcut: { label: "Open companion", run: () => { shortcutPress++; show(); } },
+  thoughtShortcut: { label: "Speak a thought", run: triggerThoughtShortcut },
+  paletteShortcut: { label: "Command palette", run: triggerPaletteShortcut },
+};
+type ShortcutAction = keyof typeof shortcutActions;
+const shortcutOrder: ShortcutAction[] = ["shortcut", "thoughtShortcut", "paletteShortcut"];
+const registeredShortcuts: Partial<Record<ShortcutAction, string>> = {};
+let changingShortcut = false;
+
+function registerShortcut(action: ShortcutAction, value: string) {
+  if (!globalShortcut.register(value, () => {
+    if (registeredShortcuts[action] === value) shortcutActions[action].run();
+  })) throw new Error("That shortcut is in use. Choose another key combination.");
+}
+
+function shortcutAvailable(action: ShortcutAction) {
+  const registered = registeredShortcuts[action];
+  return !!registered && registered === preferences[action] && globalShortcut.isRegistered(registered);
+}
+
+async function changeShortcut(action: ShortcutAction, value: string | null) {
+  if (changingShortcut) throw new Error("Another shortcut is being saved. Try again in a moment.");
+  if (value === preferences[action] && (value === null || shortcutAvailable(action))) return preferences;
+  const conflict = shortcutOrder.find(other => other !== action && value !== null
+    && preferences[other]?.toLowerCase() === value.toLowerCase());
+  if (conflict) throw new Error(`Choose a different key combination from ${shortcutActions[conflict].label}.`);
+  const previous = registeredShortcuts[action];
+  if (value !== null) registerShortcut(action, value);
+  changingShortcut = true;
   try {
-    const saved = await setPreferences({ thoughtShortcut: value });
-    if (previous && previous !== value && previous !== preferences.shortcut) globalShortcut.unregister(previous);
-    return saved;
+    preferences = await database.call("patchPreferences", { [action]: value });
+    if (value === null) delete registeredShortcuts[action];
+    else registeredShortcuts[action] = value;
   } catch (error) {
     if (value !== null) globalShortcut.unregister(value);
     throw error;
+  } finally {
+    changingShortcut = false;
   }
+  if (previous && previous !== value) globalShortcut.unregister(previous);
+  await broadcast();
+  return preferences;
 }
 
 
@@ -477,13 +521,11 @@ async function ui(action:string,payload:unknown){
     case 'theme':if(!['light','ink','system'].includes(String(payload)))throw new Error('Choose Light, Ink, or System.');return setPreferences({theme:payload as CompanionPreferences['theme']});
     case 'reduced-motion':if(typeof payload!=='boolean')throw new Error('Invalid motion preference.');return setPreferences({reducedMotion:payload});
     case 'snooze':return setPreferences({snoozedUntil:payload===false?null:new Date(Date.now()+60*60*1000).toISOString()});
-    case 'thought-shortcut':return changeThoughtShortcut(payload);
+    case 'thought-shortcut':return changeShortcut('thoughtShortcut',validateModifiedShortcut(payload,DEFAULT_THOUGHT_SHORTCUT));
+    case 'palette-shortcut':return changeShortcut('paletteShortcut',validateModifiedShortcut(payload,DEFAULT_PALETTE_SHORTCUT));
     case 'shortcut':{
       if(typeof payload!=='string'||payload.length>100||!/^[A-Za-z0-9+]+$/.test(payload))throw new Error('Invalid shortcut.');
-      const old=preferences.shortcut;
-      if(payload===old)return preferences;
-      registerShortcut(payload);
-      try{await setPreferences({shortcut:payload});globalShortcut.unregister(old);return preferences;}catch(error){globalShortcut.unregister(payload);throw error;}
+      return changeShortcut('shortcut',payload);
     }
     default:throw new Error('Unsupported companion action.');
   }
@@ -532,9 +574,13 @@ async function main(){
   icon.setTemplateImage(true);tray=new Tray(icon);tray.setToolTip('Forma Companion');
   tray.setContextMenu(Menu.buildFromTemplate([{label:'Open Forma Ribbon',click:show},{label:'Compact ribbon',click:()=>expand(false)},{label:'Hide companion',click:()=>window.hide()},{label:'Snooze for an hour',click:()=>void setPreferences({snoozedUntil:new Date(Date.now()+3600000).toISOString()})},{type:'separator'},{label:'Export notebook…',click:()=>void saveFile('notebook')},{label:'Unsigned development build',enabled:false},{label:'Quit Forma Companion',click:()=>app.quit()}]));
   tray.on('click',show);
-  try{registerShortcut(preferences.shortcut);}catch{ /* Tray recovery stays available when the shortcut is occupied. */ }
-  if (preferences.thoughtShortcut && preferences.thoughtShortcut !== preferences.shortcut) {
-    try { registerThoughtShortcut(preferences.thoughtShortcut); } catch { /* Settings reports unavailable shortcuts. */ }
+  for (const action of shortcutOrder) {
+    const shortcut = preferences[action];
+    if (shortcut === null) continue;
+    try {
+      registerShortcut(action, shortcut);
+      registeredShortcuts[action] = shortcut;
+    } catch { /* Tray recovery stays available and settings reports unavailable shortcuts. */ }
   }
   void broadcast();
   transport=await startTransport({...(developmentData?{endpoint:join(userData,'runtime','companion.sock')}:{}),credential:()=>credential,command:(command,epoch)=>{if(!epoch)throw new Error('Update the Forma VS Code extension before delivering saved captures.');return applyCommand(command,'vscode',epoch);},recoveryEpoch:()=>database.call<string>('recovery-epoch'),tutorCode:shareTutorCode,recognition:request=>{recoveryFence.lease();return recognition.request(request);},action:async action=>{recoveryFence.lease();if(action==='open'||action==='memory'){panelRequest={id:(panelRequest?.id??0)+1,panel:action==='memory'?'memory':'home'};show();}return (await database.call<LocalSnapshot>('snapshot')).revision;},context:async()=>{const local=await database.call<LocalSnapshot>('snapshot');return {identity:local.state.identity,sessionId:local.data.session?.id??null,hostEpoch,recoveryEpoch:await database.call<string>('recovery-epoch')};},connected:value=>{connected=value;void broadcast();}});

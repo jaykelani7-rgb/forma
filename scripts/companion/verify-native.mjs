@@ -67,6 +67,23 @@ try {
   await page.getByRole('img',{name:'Boundary example',exact:true}).waitFor();
   await page.getByRole('button',{name:'Remove screenshot',exact:true}).click();
   await page.getByText('Boundary example',{exact:true}).first().waitFor({state:'hidden'});
+  await page.keyboard.press(process.platform==='darwin'?'Meta+k':'Control+k');
+  const palette=page.getByRole('dialog',{name:'Command palette'});
+  const paletteSearch=palette.getByRole('combobox',{name:'Search commands and notebook'});
+  await paletteSearch.waitFor();
+  await page.waitForFunction(()=>document.activeElement?.getAttribute('aria-label')==='Search commands and notebook');
+  await palette.getByRole('option',{name:/Resume Watermelon/}).filter({hasText:thread}).waitFor();
+  await page.screenshot({path:join(output,'native-command-palette-light.png')});
+  await paletteSearch.fill('both bounds');
+  await palette.getByRole('option',{name:/Saved thread/}).waitFor();
+  await paletteSearch.press('Enter');
+  await palette.getByRole('heading',{name:'Saved thread',exact:true}).waitFor();
+  await palette.getByText(thread,{exact:true}).waitFor();
+  assert.equal((await page.evaluate(()=>window.forma.getSnapshot())).data.session.runningSince,null);
+  await page.keyboard.press('Escape');
+  assert.equal(await paletteSearch.inputValue(),'both bounds');
+  await page.keyboard.press('Escape');
+  await palette.waitFor({state:'hidden'});
   await page.getByRole('button', {name:'Resume session',exact:true}).click();
   await page.getByRole('button', {name:'Pause from ribbon',exact:true}).waitFor();
 
@@ -214,7 +231,7 @@ try {
   const traySvgEmpty=await application.evaluate(({nativeImage})=>nativeImage.createFromBuffer(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22"><circle cx="11" cy="11" r="9"/></svg>')).isEmpty());
   const trayPngEmpty=await application.evaluate(({nativeImage},path)=>nativeImage.createFromPath(path).isEmpty(),resolve('.companion-build/assets/ribbon-tray.png'));
   assert.equal(trayPngEmpty,false);
-  const report={today:{suggestionRendered:true,compactHeight:todayWindow.height,readingCreatedNoSession:true},recognition,verifiedAt:new Date().toISOString(),platform:process.platform,architecture:process.arch,softwareRendering:software,notebook:folder,traySvgEmpty,trayPngEmpty,pairing:{acknowledged:pairedAck.ok,revocationRejected:!revokedAck.ok},cardP95Ms,...timings,idle:{durationMs:idleMs,cpuPercentOfOneCore:cpuSeconds/(idleMs/1000)*100,totalWorkingSetMiB:idleEnd.reduce((s,p)=>s+p.kib,0)/1024,processes:idleEnd},pageErrors:errors};
+  const report={today:{suggestionRendered:true,compactHeight:todayWindow.height,readingCreatedNoSession:true},commandPalette:{keyboardOpened:true,pausedThreadShown:true,exactThreadPreview:true,preservedSession:true},recognition,verifiedAt:new Date().toISOString(),platform:process.platform,architecture:process.arch,softwareRendering:software,notebook:folder,traySvgEmpty,trayPngEmpty,pairing:{acknowledged:pairedAck.ok,revocationRejected:!revokedAck.ok},cardP95Ms,...timings,idle:{durationMs:idleMs,cpuPercentOfOneCore:cpuSeconds/(idleMs/1000)*100,totalWorkingSetMiB:idleEnd.reduce((s,p)=>s+p.kib,0)/1024,processes:idleEnd},pageErrors:errors};
   assert.deepEqual(errors,[]);
   await writeFile(join(output,'native-results.json'),JSON.stringify(report,null,2));
   console.log(JSON.stringify(report,null,2));

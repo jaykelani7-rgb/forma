@@ -14,7 +14,7 @@ type Draft={missingReferences?:TutorDraftView['missingReferences'];text:string;a
 const emptyDraft=(context?:TutorContextView|null):Draft=>({text:'',action:'discuss',statementId:context?.statement?.id??null,codeId:context?.pendingCode?.id??null,statement:context?.statement??null,code:context?.pendingCode??null,seenStatementId:context?.statement?.id??null,seenCodeId:context?.pendingCode?.id??null,noteIds:[]});
 const captured=(value:string)=>new Date(value).toLocaleString();
 const message=(e:unknown)=>e instanceof Error?e.message:'Tutor could not complete that action. Your local conversation is kept.';
-export function TutorPanel({bridge,snapshot,active,conversationRequest,onActivity}:{bridge:FormaBridge;snapshot:CompanionSnapshot;active:boolean;conversationRequest?:{id:number;conversationId?:string;settings?:boolean};onActivity:(state:TutorActivity)=>void}){
+export function TutorPanel({bridge,snapshot,active,covered=false,conversationRequest,onActivity}:{bridge:FormaBridge;snapshot:CompanionSnapshot;active:boolean;covered?:boolean;conversationRequest?:{id:number;conversationId?:string;settings?:boolean};onActivity:(state:TutorActivity)=>void}){
  const [view,setView]=useState<TutorView|null>(null),[conversation,setConversation]=useState<TutorConversation|null>(null),[context,setContext]=useState<TutorContextView|null>(null),[turns,setTurns]=useState<TutorTurn[]>([]);
  const [drafts,setDrafts]=useState<Record<string,Draft>>({}),[error,setError]=useState(''),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false),[setup,setSetup]=useState(false);
  const [saveStates,setSaveStates]=useState<Record<string,{state:DraftSaveState;error?:string}>>({});
@@ -67,12 +67,12 @@ export function TutorPanel({bridge,snapshot,active,conversationRequest,onActivit
  const activity:TutorActivity=!active?'idle':recording?'listening':voicePhase==='transcribing'?'transcribing':speaking?'speaking':processing?'thinking':running?(running.assistantText?'responding':'thinking'):error?'error':turns.at(-1)?.status==='interrupted'&&!drafts[conversation?.id??'']?.text?'interrupted':'idle';
  useEffect(()=>{onActivity(activity);},[activity,onActivity]);
  useEffect(()=>{
-   if(!active||!pageVisible||document.hidden)return;
+   if(!active||covered||!pageVisible||document.hidden)return;
    const visible=turns.filter(turn=>turn.assistantText.trim()&&!turn.exposed);
    const observer=new IntersectionObserver(entries=>{for(const entry of entries){if(!entry.isIntersecting)continue;const id=(entry.target as HTMLElement).dataset.tutorTurnId;const turn=visible.find(row=>row.id===id);if(!turn)continue;const key=`${turn.id}:${turn.requestId}`;if(!activeRef.current||document.hidden||selected.current!==turn.conversationId||exposurePending.current.has(key))continue;exposurePending.current.add(key);void call<TutorTurn|null>('tutor-exposed',{turnId:turn.id,requestId:turn.requestId}).then(accepted=>{if(accepted&&selected.current===turn.conversationId)setTurns(old=>old.map(row=>row.id===turn.id&&row.requestId===turn.requestId?{...row,exposed:true}:row));}).catch(()=>{exposurePending.current.delete(key);});}}, {threshold:0.01});
    messageRegion.current?.querySelectorAll('[data-tutor-turn-id]').forEach(element=>observer.observe(element));
    return()=>observer.disconnect();
- },[active,pageVisible,turns,call]);
+ },[active,covered,pageVisible,turns,call]);
  const draft=conversation?drafts[conversation.id]:undefined;
  const contentRevision=tutorContentRevision(turns);
  const newStatement=!!(draft&&context?.statement&&draft.seenStatementId!==context.statement.id),newCode=!!(draft&&context?.pendingCode&&draft.seenCodeId!==context.pendingCode.id);

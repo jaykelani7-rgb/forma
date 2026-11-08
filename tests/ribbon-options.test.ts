@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  DEFAULT_PALETTE_SHORTCUT,
   defaultPreferences,
   validatePreferences,
 } from "../apps/desktop/main/preferences";
@@ -13,6 +14,9 @@ test("old device preferences gain Ribbon defaults and malformed new fields are r
     shortcut: "Control+Option+F",
   };
   assert.deepEqual(validatePreferences(old).ribbon, defaultRibbon);
+  assert.equal(validatePreferences(old).paletteShortcut, DEFAULT_PALETTE_SHORTCUT);
+  assert.equal(validatePreferences({ ...old, paletteShortcut: null }).paletteShortcut, null);
+  assert.throws(() => validatePreferences({ ...old, paletteShortcut: "K" }), /modifier and a key/);
   assert.deepEqual(
     validatePreferences({
       ...old,

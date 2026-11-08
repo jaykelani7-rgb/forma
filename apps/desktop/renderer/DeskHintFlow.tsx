@@ -12,11 +12,12 @@ const message = (reason: unknown) => reason instanceof Error ? reason.message : 
 type Attempt = { input: TutorSendInput; running: boolean };
 
 export function DeskHintFlow({
-  bridge, problemId, hypothesis, onClose, onOpenTutor, onLeaveThread, onKeep, onOpenLink,
+  bridge, problemId, hypothesis, covered = false, onClose, onOpenTutor, onLeaveThread, onKeep, onOpenLink,
 }: {
   bridge: FormaBridge;
   problemId: string;
   hypothesis?: string;
+  covered?: boolean;
   onClose: () => void;
   onOpenTutor: () => void;
   onLeaveThread: () => void;
@@ -166,7 +167,7 @@ export function DeskHintFlow({
   }
 
   function acknowledge() {
-    if (!turn?.assistantText.trim() || turn.exposed || document.hidden) return Promise.resolve();
+    if (covered || !turn?.assistantText.trim() || turn.exposed || document.hidden) return Promise.resolve();
     if (exposure.current?.requestId === turn.requestId) return exposure.current.pending;
     const requestId = turn.requestId;
     const pending = bridge.ui("tutor-exposed", { turnId: turn.id, requestId })
@@ -203,7 +204,7 @@ export function DeskHintFlow({
 
   return <DeskHintCard review={review} question={question} hypothesis={excerpt} includeHypothesis={included}
     onIncludeHypothesisChange={next => { if (!attempt.current) setIncluded(next); }}
-    error={error} loading={loading} running={running} turn={turn} locked={locked}
+    error={error} loading={loading} running={running} turn={turn} locked={locked} covered={covered}
     onSend={() => void send()} onStop={() => void stop()} onClose={onClose} onOpenTutor={onOpenTutor}
     onLeaveThread={onLeaveThread} onKeep={text => void keep(text)} onOpenLink={onOpenLink}
     onExpose={expose} onRefresh={() => void refresh()}/>;
