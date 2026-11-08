@@ -63,6 +63,17 @@
   min-width: 0;
 }
 
+.desk-hint-slot {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.desk-hint-slot .desk-hint-trigger {
+  justify-self: start;
+  color: var(--desk-accent);
+}
+
 .desk-eyebrow-row,
 .desk-thread-label,
 .desk-elapsed {

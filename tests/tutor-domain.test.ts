@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { CompanionStore } from '../apps/desktop/main/store';
 import { buildProviderMessages, hintLevelForAction, policyInstructions } from '../packages/tutor/policy';
 import { parseSharedCode, parseStatementInput, providerContext, tutorHash, validateStatement } from '../packages/tutor/context';
-import type { SharedCode, StatementInput, TutorAction, TutorTurn } from '../packages/tutor/types';
+import type { SharedCode, StatementInput, TutorAction, TutorProviderStatus, TutorSendInput, TutorTurn } from '../packages/tutor/types';
 
 const now=Date.now(),url='https://codeforces.com/contest/4/problem/A';
 const statement:StatementInput={identity:'contest:4:A',url,title:'Watermelon',description:'Split a positive integer into two positive even integers.',input:'A positive integer w, 1 <= w <= 100.',output:'Print YES if a split exists, otherwise NO.',constraints:'1 <= w <= 100',samples:[{input:'8',output:'YES'}],explanation:'4 + 4 is a valid split.',complete:true,source:'manual'};
@@ -27,6 +27,81 @@ function show(store:CompanionStore,turn:TutorTurn,text='Consider the smallest al
   store.tutor.exposed({turnId:turn.id,requestId:turn.requestId});
   return store.tutor.finalize({turnId:turn.id,requestId:turn.requestId,status:'completed'},now+100)!;
 }
+
+const deskProvider:TutorProviderStatus={
+  provider:'openai',name:'OpenAI',configured:true,model:'configured-test-model',
+  capabilities:{text:true,transcription:false,speech:false},transcriptionModel:'',speechModel:'',message:'',
+};
+function reviewDeskHint(store:CompanionStore) {
+  return store.tutor.deskHintReview({problemId:store.snapshot().state.problemId},deskProvider,now);
+}
+function deskSendInput(review:ReturnType<typeof reviewDeskHint>):TutorSendInput {
+  assert.ok(review.conversationId&&review.statement);
+  return {turnId:'desk-turn',requestId:'desk-request',conversationId:review.conversationId,action:'small-hint',
+    text:'One hint for my current idea.',statementId:review.statement.id,codeId:null,noteIds:[],deskHint:review.target};
+}
+test('Desk hint requires current consent for the statement, active session and configured provider',()=>{
+  const store=new CompanionStore(':memory:');
+  try{
+    store.command({id:'desk-attach',type:'attach',payload:{url}},'desktop',now);
+    assert.equal(reviewDeskHint(store).conversationId,null);
+    assert.equal(store.tutor.view(now).conversations.length,0);
+    store.tutor.statement(statement,now);
+    const request=deskSendInput(reviewDeskHint(store));
+    assert.throws(()=>store.tutor.prepare(request,'a-different-model',now),/provider changed/);
+    assert.throws(()=>store.tutor.prepare(request,deskProvider.model,'gemini',now),/provider changed/);
+    assert.throws(()=>store.tutor.prepare({...request,action:'full-explanation'},deskProvider.model,now),/one small hint/);
+    assert.throws(()=>store.tutor.prepare({...request,codeId:'unreviewed-code'},deskProvider.model,now),/reviewed statement and question/);
+    store.command({id:'desk-switch',type:'attach',payload:{url:'https://codeforces.com/contest/4/problem/B'}},'desktop',now);
+    assert.throws(()=>store.tutor.prepare(request,deskProvider.model,now),/active problem changed/);
+    store.command({id:'desk-return',type:'attach',payload:{url}},'desktop',now);
+    store.tutor.statement({...statement,description:'Review this newer capture.'},now);
+    assert.throws(()=>store.tutor.prepare(request,deskProvider.model,now),/statement changed/);
+    const beforeStart=deskSendInput(reviewDeskHint(store));
+    store.command({id:'desk-start',type:'start',payload:{}},'desktop',now);
+    assert.throws(()=>store.tutor.prepare(beforeStart,deskProvider.model,now),/session changed/);
+    const beforeRestore=deskSendInput(reviewDeskHint(store));
+    store.tutor.rotateRecoveryEpoch();
+    assert.throws(()=>store.tutor.prepare(beforeRestore,deskProvider.model,now),/notebook was restored/);
+    const beforeContest=deskSendInput(reviewDeskHint(store));
+    store.tutor.setSettings({contestMode:true},now);
+    assert.equal(reviewDeskHint(store).conversationId,null);
+    assert.throws(()=>store.tutor.prepare(beforeContest,deskProvider.model,now),/Contest mode disables/);
+    assert.deepEqual(store.tutor.turns(request.conversationId),[]);
+  }finally{store.close();}
+});
+
+test('Desk hints use an isolated provider payload and preserve Tutor drafts and replay receipts',()=>{
+  const f=fixture();
+  try{
+    const ordinary=show(f.store,send(f,'prior-tutor-turn','small-hint',{text:'Earlier private question.'}),'Earlier private reply.');
+    const draft=f.store.tutor.draft(f.conversation.id,now);
+    const {conversationId,epoch,revision,action,statementId,codeId,noteIds}=draft;
+    f.store.tutor.saveDraft({conversationId,epoch,expectedRevision:revision,action,statementId,codeId,noteIds,text:'Unsent Tutor draft.'},now);
+    const input=deskSendInput(reviewDeskHint(f.store));
+    const first=f.store.tutor.prepare(input,deskProvider.model,now);
+    assert.equal(first.standalone,true);
+    assert.equal(first.hintLevel,1);
+    assert.deepEqual(f.store.tutor.prepare(input,deskProvider.model,now),first);
+    const messages=buildProviderMessages(first,[ordinary]);
+    assert.equal(messages.length,2);
+    const payload=messages[1].content;
+    assert.ok(payload.includes(statement.description)&&payload.includes(input.text));
+    assert.doesNotMatch(payload,/Earlier private|Unsent Tutor draft|evidence|explicitlyIncludedNotes|workspace-one/);
+    f.store.tutor.finalize({turnId:first.id,requestId:first.requestId,status:'interrupted'},now);
+    const retry={...input,requestId:'desk-retry'};
+    assert.throws(()=>f.store.tutor.prepare({...retry,deskHint:undefined},deskProvider.model,now),/from the Problem Desk/);
+    const completed=show(f.store,f.store.tutor.prepare(retry,deskProvider.model,now),'A standalone hint.');
+    const later=send(f,'later-tutor-turn');
+    const normalMessages=JSON.stringify(buildProviderMessages(later,[ordinary,completed]));
+    assert.match(normalMessages,/Earlier private reply/);
+    assert.doesNotMatch(normalMessages,/standalone hint|One hint for my current idea/);
+    assert.equal(f.store.tutor.draft(f.conversation.id,now).text,'Unsent Tutor draft.');
+    const backup=JSON.parse(f.store.backups.export({scope:'companion',includeTutor:true},now));
+    assert.equal(backup.tutor.turns.find((turn:TutorTurn)=>turn.id===first.id).standalone,true);
+    assert.equal(backup.tutor.requests.find((turn:TutorTurn)=>turn.id===first.id).standalone,true);
+  }finally{f.store.close();}
+});
 
 test('schema two migrates non-destructively to tutor tables on the original SQLite writer',()=>{
   const folder=mkdtempSync(join(tmpdir(),'forma-tutor-migration-')),path=join(folder,'notebook.sqlite');

@@ -24,12 +24,14 @@ Responses are advice, not notebook mutations. Do not claim a takeaway was saved 
 export interface TutorProviderMessage {role:'system'|'user'|'assistant';content:string}
 export function buildProviderMessages(turn:TutorTurn,history:TutorTurn[]):TutorProviderMessage[] {
   tutorText(turn.userText,TUTOR_BUDGET.user,1);
-  const context=JSON.stringify(providerContext(turn.context));
+  const selected=providerContext(turn.context);
+  const context=JSON.stringify(turn.standalone ? {problem:selected.problem,statement:selected.statement} : selected);
   if(context.length+turn.userText.length>TUTOR_BUDGET.total-TUTOR_BUDGET.history)throw new Error('The chosen context exceeds the request budget. Remove code or prior notes.');
   const messages:TutorProviderMessage[]=[{role:'system',content:policyInstructions(turn.action,turn.hintLevel)}];
   const latest:TutorTurn[]=[];let characters=0;
   // Only completed turns from the exact frozen target are eligible; source context stays per-turn.
-  for(const candidate of history.filter(item=>item.id!==turn.id&&item.conversationId===turn.conversationId&&item.context.identity===turn.context.identity&&item.status==='completed').slice().reverse()){
+  const eligible=turn.standalone ? [] : history.filter(item=>!item.standalone&&item.id!==turn.id&&item.conversationId===turn.conversationId&&item.context.identity===turn.context.identity&&item.status==='completed');
+  for(const candidate of eligible.reverse()){
     const size=candidate.userText.length+candidate.assistantText.length;
     if(latest.length>=TUTOR_BUDGET.historyTurns||characters+size>TUTOR_BUDGET.history)break;
     latest.unshift(candidate);characters+=size;

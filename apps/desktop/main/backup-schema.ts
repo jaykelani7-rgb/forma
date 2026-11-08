@@ -54,10 +54,14 @@ function context(v:unknown):TutorContext {
   return result;
 }
 function turn(v:unknown):TutorTurn {
-  const o=tutorObject(v);tutorFields(o,['id','requestId','conversationId','action','userText','assistantText','context','status','createdAt','completedAt','error','hintLevel','exposed','usage','model','provider','responseModel']);
+  const o=tutorObject(v);tutorFields(o,['id','requestId','conversationId','action','userText','assistantText','context','status','createdAt','completedAt','error','hintLevel','exposed','usage','model','provider','responseModel','standalone']);
   if(!['queued','streaming','completed','interrupted','failed'].includes(String(o.status))||o.provider!==undefined&&!['gemini','openai'].includes(String(o.provider)))throw new Error('Invalid Tutor turn status or provider.');
   let usage:TutorTurn['usage']=null;if(o.usage!==null){const u=tutorObject(o.usage);tutorFields(u,['inputTokens','outputTokens','totalTokens']);usage={inputTokens:integer(u.inputTokens,0,100_000_000),outputTokens:integer(u.outputTokens,0,100_000_000),totalTokens:integer(u.totalTokens,0,100_000_000)};if(usage.totalTokens<usage.inputTokens+usage.outputTokens)throw new Error('Invalid usage totals.');}
   const t:TutorTurn={id:tutorId(o.id),requestId:tutorId(o.requestId),conversationId:tutorId(o.conversationId),action:parseTutorAction(o.action),userText:tutorText(o.userText,TUTOR_BUDGET.user,1),assistantText:tutorText(o.assistantText,TUTOR_BUDGET.response),context:context(o.context),status:o.status as TutorTurn['status'],createdAt:tutorTime(o.createdAt),completedAt:o.completedAt===null?null:tutorTime(o.completedAt),error:o.error===null?null:tutorText(o.error,500),hintLevel:integer(o.hintLevel,0,1000),exposed:bool(o.exposed),usage,model:tutorText(o.model,120,1),provider:(o.provider??'openai') as 'openai'|'gemini',...(o.responseModel===undefined?{}:{responseModel:tutorText(o.responseModel,120,1)})};
+  if(o.standalone!==undefined){
+    if(o.standalone!==true||t.action!=='small-hint'||t.hintLevel!==1||!t.context.statement?.complete||t.context.code||t.context.notes.length)throw new Error('Invalid Desk hint context.');
+    t.standalone=true;
+  }
   if(t.context.conversationId!==t.conversationId)throw new Error('Invalid turn conversation reference.');return t;
 }
 function settings(v:unknown):TutorSettings {const o=tutorObject(v);tutorFields(o,['contestMode','retentionDays','voiceOutput']);return {contestMode:bool(o.contestMode),retentionDays:integer(o.retentionDays,1,3650),voiceOutput:bool(o.voiceOutput)};}

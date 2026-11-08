@@ -76,6 +76,28 @@ try{
  await page.evaluate(()=>window.forma.ui('tutor-configure',{provider:'gemini',forgetKey:true}));assert.equal((await page.evaluate(()=>window.forma.ui('tutor-view'))).provider.configured,false);report.credentials={osEncrypted:true,excludedFromRendererSnapshots:true,removedWithoutModelCall:true};
  const noKey=await page.evaluate(async id=>{try{await window.forma.ui('tutor-send',{turnId:'no-key-turn',requestId:'no-key-request',conversationId:id,action:'discuss',text:'Please discuss my approach.',statementId:null,codeId:null,noteIds:[]});return false;}catch{return true;}},shared.id);assert.equal(noKey,true);
  assert.equal((await page.evaluate(id=>window.forma.ui('tutor-turns',id),shared.id)).length,0);
+ await page.getByRole('button',{name:'Back to practice',exact:true}).click();
+ await page.evaluate(()=>window.forma.command({id:'desk-hint-return',type:'attach',payload:{url:'https://codeforces.com/contest/4/problem/A'}}));
+ await page.getByRole('button',{name:'Open problem desk',exact:true}).click();
+ await page.getByRole('button',{name:'I’m stuck',exact:true}).click();
+ await page.getByText('Set up a Tutor provider with text support to ask for a hint.',{exact:true}).waitFor();
+ assert.equal(await page.getByRole('button',{name:'Send hint request',exact:true}).count(),0);
+ const problemId=(await page.evaluate(()=>window.forma.getSnapshot())).state.problemId;
+ const review=await page.evaluate(problemId=>window.forma.ui('desk-hint-review',{problemId}),problemId);
+ assert.equal(review.statement.id,recaptureA.id);
+ assert.equal(review.target.sessionId,null);
+ assert.equal(review.conversationId,null);
+ await page.getByRole('button',{name:'Close hint',exact:true}).click();
+ await page.evaluate(()=>window.forma.ui('tutor-settings',{contestMode:true}));
+ await page.getByRole('button',{name:'I’m stuck',exact:true}).click();
+ await page.getByRole('button',{name:'Leave a private thread',exact:true}).click();
+ await page.getByRole('textbox',{name:'What would you try next?',exact:true}).waitFor();
+ assert.equal((await page.evaluate(()=>window.forma.getSnapshot())).state.desk?.length??0,0);
+ await page.evaluate(async()=>{
+   await window.forma.ui('tutor-settings',{contestMode:false});
+   await window.forma.command({id:'desk-hint-restore-problem',type:'attach',payload:{url:'https://codeforces.com/contest/5/problem/A'}});
+ });
+ report.deskHint={capturedStatementReviewed:true,providerRequired:true,privateThreadInContest:true};
  report.native={setupHonest:true,unsentDraftFrozen:true,statementSnapshotSaved:true,pairedSelectionPreview:true,sharingCreatedNoProviderTurn:true,practiceSelectionUnchanged:true,contestMode:true,microphoneNotRequested:true};
  await application.close();application=await electron.launch({executablePath,args:['.companion-build'],env});page=await application.firstWindow();page.on('pageerror',e=>errors.push(e.message));await page.waitForFunction(()=>!!window.forma);
  await page.waitForFunction(async key=>{

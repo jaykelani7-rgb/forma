@@ -5,6 +5,7 @@ import { useThoughtVoice } from "./thought-voice";
 import { ThoughtTakeRecovery } from "./ThoughtTakeRecovery";
 import { ThoughtShortcutSettings } from "./ThoughtShortcutSettings";
 import { ProblemDesk } from "./ProblemDesk";
+import { DeskHintFlow } from "./DeskHintFlow";
 import { DesktopRibbonMark, type RibbonFeedback } from "./DesktopRibbonMark";
 import { DEFAULT_THOUGHT_SHORTCUT } from "../main/preferences";
 import { SetupPanel } from "./SetupPanel";
@@ -52,6 +53,9 @@ export function App() {
   const [thought, setThought] = useState("");
   const [threadDrafts, setThreadDrafts] = useState<Record<string, string>>({});
   const [threadEditorProblem, setThreadEditorProblem] = useState<string | null>(null);
+  const [deskHintKey, setDeskHintKey] = useState<string | null>(null);
+  const [returnFromTutorToDesk, setReturnFromTutorToDesk] = useState(false);
+  const hintButton = useRef<HTMLButtonElement>(null);
   const [ribbonFeedback, setRibbonFeedback] = useState<(RibbonFeedback & { problemId: string | null }) | null>(null);
   const [takeaway, setTakeaway] = useState("");
   const [outcome, setOutcome] = useState<Outcome | null>(null);
@@ -76,7 +80,7 @@ export function App() {
   const visible = usePageVisible();
   const search = new URLSearchParams(location.search);
   const gallery = previewMode && search.get("gallery") === "1";
-  useEffect(() => { let cancelled = false; let unsubscribe: (() => void) | undefined; const receive = (next: CompanionSnapshot) => { setSnapshot(next); setExpanded(next.presentation?.expanded ?? previewMode); const request = next.presentation?.panelRequest; if (request && request.id !== panelRequestId.current) { panelRequestId.current = request.id; setPanel(request.panel); if(request.panel==="tutor")setTutorRequest({id:request.id,conversationId:request.conversationId}); } }; connectBridge().then(async (api) => { const initial = await api.getSnapshot(); if (cancelled) return; setBridge(api); receive(initial); setHandle(initial.state.handle ?? ""); setShortcut(initial.preferences.shortcut ?? "Control+Option+F"); unsubscribe = api.subscribe(receive); }).catch((reason) => { if (!cancelled) setError(errorMessage(reason)); }); return () => { cancelled = true; unsubscribe?.(); }; }, []);
+  useEffect(() => { let cancelled = false; let unsubscribe: (() => void) | undefined; const receive = (next: CompanionSnapshot) => { setDeskHintKey(current => current === JSON.stringify([next.state.problemId, next.data.session?.id ?? null]) ? current : null); setSnapshot(next); setExpanded(next.presentation?.expanded ?? previewMode); const request = next.presentation?.panelRequest; if (request && request.id !== panelRequestId.current) { panelRequestId.current = request.id; setDeskHintKey(null); setPanel(request.panel); if(request.panel==="tutor")setTutorRequest({id:request.id,conversationId:request.conversationId}); } }; connectBridge().then(async (api) => { const initial = await api.getSnapshot(); if (cancelled) return; setBridge(api); receive(initial); setHandle(initial.state.handle ?? ""); setShortcut(initial.preferences.shortcut ?? "Control+Option+F"); unsubscribe = api.subscribe(receive); }).catch((reason) => { if (!cancelled) setError(errorMessage(reason)); }); return () => { cancelled = true; unsubscribe?.(); }; }, []);
   useEffect(() => { if (!bridge || previewMode) return; let last: boolean | null = null; const updateHitbox = (event: PointerEvent) => { const interactive = !!(event.target instanceof Element && event.target.closest("button,input,textarea,select,a,[data-interactive],.card,.drag-handle")); if (interactive === last) return; last = interactive; void bridge.ui("hitbox", interactive).catch(() => { /* The menu bar remains available for recovery. */ }); }; document.addEventListener("pointermove", updateHitbox); return () => document.removeEventListener("pointermove", updateHitbox); }, [bridge]);
   useEffect(() => { const motion = matchMedia("(prefers-reduced-motion: reduce)"); const dark = matchMedia("(prefers-color-scheme: dark)"); const onMotion = () => setMotionPreference(motion.matches); const onDark = () => setDarkPreference(dark.matches); motion.addEventListener("change", onMotion); dark.addEventListener("change", onDark); return () => { motion.removeEventListener("change", onMotion); dark.removeEventListener("change", onDark); }; }, []);
   useEffect(() => { if (!visible || !snapshot?.data.session?.runningSince) return; const timer = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(timer); }, [visible, snapshot?.data.session?.runningSince]);
@@ -89,7 +93,17 @@ export function App() {
     return () => clearTimeout(timer);
   }, [visible, snapshot?.preferences.snoozedUntil, now]);
   useEffect(() => { focusTarget.current?.scrollTo({ top: 0 }); if (panel !== "home" && !focusTarget.current?.contains(document.activeElement)) focusTarget.current?.focus(); }, [panel]);
-  useEffect(() => { const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") { if (panel !== "home") setPanel("home"); else void toggleExpanded(false); } }; window.addEventListener("keydown", onKey); return () => window.removeEventListener("keydown", onKey); });
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      if (showDeskHint) closeDeskHint();
+      else if (panel === "tutor" && returnFromTutorToDesk) openPanel("desk");
+      else if (panel !== "home") { setDeskHintKey(null); setPanel("home"); }
+      else void toggleExpanded(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
   useEffect(() => () => { if (reactionTimer.current) clearTimeout(reactionTimer.current); }, []);
 
   const theme = previewMode && search.get("theme") === "ink" ? "ink" : snapshot?.preferences.theme === "system" ? (darkPreference ? "ink" : "light") : snapshot?.preferences.theme ?? "light";
@@ -106,6 +120,8 @@ export function App() {
   const session = view?.session;
   const deskItems = snapshot?.state.desk?.filter(item => item.problemId === problem?.id) ?? [];
   const latestThread = deskItems.findLast(item => item.kind === "thread");
+  const hintScope = problem ? JSON.stringify([problem.id, session?.id ?? null]) : null;
+  const showDeskHint = expanded && panel === "desk" && hintScope !== null && hintScope === deskHintKey;
   const editThread = !!problem && threadEditorProblem === problem.id;
   const thoughtVoice = useThoughtVoice(
     window.forma ? bridge : null, expanded && (panel === "thought" || (panel === "desk" && editThread)),
@@ -172,8 +188,8 @@ export function App() {
     catch (reason) { setError(errorMessage(reason)); }
     finally { busyRef.current = false; setBusy(false); }
   }
-  async function toggleExpanded(value: boolean) { setExpanded(value); if (bridge) { try { await bridge.ui("expand", value); } catch (reason) { setError(errorMessage(reason)); setExpanded(true); } } }
-  function openPanel(value: Panel, target?: CaptureTarget) { if (snapshot && (value === "thought" || value === "reflect" || value === "recall")) { const hasDraft = value === "thought" ? !!thought.trim() : value === "reflect" ? !!takeaway.trim() || !!outcome : !!recallResponse.trim(); if (!hasDraft || !draftTargets[value]) setDraftTargets(current => ({ ...current, [value]: target ?? freezeCaptureTarget(snapshot) })); } setError(""); setNotice(""); setMore(false); setPanel(value); if (value === "today") void ui("today"); else if(value === "tutor")void ui("tutor-show"); else void toggleExpanded(true); }
+  async function toggleExpanded(value: boolean) { if (!value) setDeskHintKey(null); setExpanded(value); if (bridge) { try { await bridge.ui("expand", value); } catch (reason) { setError(errorMessage(reason)); setExpanded(true); } } }
+  function openPanel(value: Panel, target?: CaptureTarget) { if (value !== "desk") setDeskHintKey(null); if (value !== "tutor") setReturnFromTutorToDesk(false); if (snapshot && (value === "thought" || value === "reflect" || value === "recall")) { const hasDraft = value === "thought" ? !!thought.trim() : value === "reflect" ? !!takeaway.trim() || !!outcome : !!recallResponse.trim(); if (!hasDraft || !draftTargets[value]) setDraftTargets(current => ({ ...current, [value]: target ?? freezeCaptureTarget(snapshot) })); } setError(""); setNotice(""); setMore(false); setPanel(value); if (value === "today") void ui("today"); else if(value === "tutor")void ui("tutor-show"); else void toggleExpanded(true); }
   async function chooseToday(item: NonNullable<CompanionSnapshot["today"]>["items"][number]) {
     const coding=item.activity === "coding";
     if(!await command("plan-select", {itemId:item.id,start:coding&&!item.resume}, undefined, "home"))return;
@@ -207,6 +223,18 @@ export function App() {
 
   function changeThreadDraft(text: string) {
     if (problem) setThreadDrafts(current => ({ ...current, [problem.id]: text }));
+  }
+
+  function closeDeskHint() {
+    setDeskHintKey(null);
+    hintButton.current?.focus();
+  }
+
+  function openThreadFromHint(text?: string) {
+    if (!problem) return;
+    if (text?.trim()) addThreadTranscript(text.trim());
+    setDeskHintKey(null);
+    setThreadEditorProblem(problem.id);
   }
 
   function addThreadTranscript(text: string) {
@@ -312,7 +340,7 @@ export function App() {
     <div className={`companion-window ${panel==="tutor"&&expanded?"is-tutor":""} ${!expanded ? "is-collapsed" : ""} ${(recognition || verdictNotice) && !snoozed ? "has-recognition" : ""}`}>
       {!expanded && (recognitionBubble || verdictBubble)}
       <section className={`card ${panel==="today"?"card--glance":panel==="tutor"?"card--tutor":""}`} hidden={!expanded} style={expanded?undefined:{display:"none"}} aria-label="Forma Companion" aria-busy={busy}>
-        <header className="card-header"><div className="brand"><RibbonMark size={27}/><span>forma<span className="brand-detail">ribbon</span></span></div><div className="header-actions">{panel !== "home" && <IconButton icon={ArrowLeft} label="Back to practice" onClick={() => openPanel("home")}/>}<IconButton icon={Settings2} label="Companion settings" active={panel === "settings"} onClick={() => openPanel(panel === "settings" ? "home" : "settings")}/><IconButton icon={X} label="Collapse to ribbon" onClick={() => void toggleExpanded(false)}/></div></header>
+        <header className="card-header"><div className="brand"><RibbonMark size={27}/><span>forma<span className="brand-detail">ribbon</span></span></div><div className="header-actions">{panel !== "home" && <IconButton icon={ArrowLeft} label={panel === "tutor" && returnFromTutorToDesk ? "Back to problem desk" : "Back to practice"} onClick={() => openPanel(panel === "tutor" && returnFromTutorToDesk ? "desk" : "home")}/>}<IconButton icon={Settings2} label="Companion settings" active={panel === "settings"} onClick={() => openPanel(panel === "settings" ? "home" : "settings")}/><IconButton icon={X} label="Collapse to ribbon" onClick={() => void toggleExpanded(false)}/></div></header>
         <div className="card-body" ref={focusTarget} tabIndex={-1}>
           {panel === "home" && (recognitionBubble || verdictBubble)}
           {(panel === "thought" || panel === "reflect" || panel === "recall") && draftTargets[panel] && <p className="field-help">Draft for {draftTargets[panel]!.title}{draftTargets[panel]!.problemKey !== snapshot?.state.identity ? " · return to this problem to save; your draft is kept here." : ""}</p>}
@@ -364,6 +392,22 @@ export function App() {
             onOpenProblem={() => void ui("open-external", problem.url)}
             onOpenSolution={deskBinding ? () => void ui("open-solution", deskBinding.id) : undefined}
             voiceControls={renderVoiceControls(true)}
+            hintButtonRef={hintButton}
+            onToggleHint={window.forma && bridge ? () => {
+              if (showDeskHint) closeDeskHint();
+              else {
+                setThreadEditorProblem(null);
+                setDeskHintKey(hintScope);
+              }
+            } : undefined}
+            hint={showDeskHint && bridge && <DeskHintFlow key={hintScope} bridge={bridge} problemId={problem.id}
+              hypothesis={deskItems.findLast(item => item.kind === "hypothesis")?.text}
+              onClose={closeDeskHint}
+              onOpenTutor={() => { setReturnFromTutorToDesk(true); openPanel("tutor"); }}
+              onLeaveThread={() => openThreadFromHint()}
+              onKeep={openThreadFromHint}
+              onOpenLink={url => void ui("open-external", url)}
+            />}
           />}
           {panel === "desk" && !problem && <PanelHeading eyebrow="PROBLEM DESK" title="Attach a problem to begin." description="Your desk follows the problem you’re practicing."/>}
           {panel === "thought" && <>

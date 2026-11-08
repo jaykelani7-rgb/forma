@@ -8,6 +8,8 @@ In Journal, combine search with outcome, source, and date filters. Open an entry
 
 Pause from the desktop Ribbon to **Leave a thread** about what you would try next. On return, **Pick up the thread** brings back your note and tracked time, with links to the problem and its linked solution. The problem desk keeps hypotheses, failing inputs, screenshots, and code you explicitly add with **Pin Selection to Forma Desk** in the paired VS Code extension. Desk items stay local and travel with full companion backups.
 
+Choose **I’m stuck** in the Problem Desk to review a request for one small hint. The selected Tutor provider receives the captured problem statement, your request, and your latest hypothesis only if you include it. **Keep as next step** opens an editable thread that you can save yourself. In contest mode the card offers a private thread.
+
 ## Run locally
 
 Forma Companion's local desktop milestone is also available: `npm run companion:dev`. It adds the floating Ribbon timer, SQLite-backed practice/reflections and a paired VS Code extension while keeping this website independently usable. Desktop account sync is pending; see [companion setup and current scope](docs/companion/README.md).

@@ -27,16 +27,23 @@ export interface TutorTurn {
   id:string;requestId:string;conversationId:string;action:TutorAction;userText:string;assistantText:string;
   context:TutorContext;status:TutorTurnStatus;createdAt:string;completedAt:string|null;error:string|null;
   hintLevel:number;exposed:boolean;usage:TutorUsage|null;model:string;provider?:TutorProviderId;responseModel?:string;
+  standalone?:true;
 }
 export interface TutorSettings {contestMode:boolean;retentionDays:number;voiceOutput:boolean}
 export interface TutorStoredView { conversations:TutorConversation[];settings:TutorSettings;pendingCode:SharedCode|null;lastConversationId?:string|null }
 export interface TutorContextView {conversation:TutorConversation;statement:StatementSnapshot|null;pendingCode:SharedCode|null;notes:{id:string;text:string}[];sessionId:string|null;evidence:TutorContext['evidence'];availabilityRevision?:number}
 export interface TutorProviderStatus {provider:TutorProviderId;name:string;capabilities:TutorCapabilities;configured:boolean;model:string;transcriptionModel:string;speechModel:string;message:string}
 export interface TutorView extends TutorStoredView {provider:TutorProviderStatus;activeRequestId:string|null}
+export interface DeskHintTarget {problemId:string;sessionId:string|null;recoveryEpoch:string;provider:TutorProviderId;model:string}
+export interface DeskHintReview {
+  provider:TutorProviderStatus;contestMode:boolean;activeRequestId:string|null;
+  statement:StatementSnapshot|null;conversationId:string|null;target:DeskHintTarget;
+}
 export interface TutorSendInput {
   turnId:string;requestId:string;conversationId:string;action:TutorAction;text:string;
   statementId:string|null;codeId:string|null;noteIds:string[];
   draft?:{epoch:string;revision:number};
+  deskHint?:DeskHintTarget;
 }
 export type TutorEvent={kind:'delta'|'updated';conversationId:string;turnId:string;requestId:string;text?:string}|{kind:'context';identity:string;conversationId?:string;source:'statement'|'code'|'removed'}|{kind:'configuration';provider:TutorProviderId}|{kind:'flush-drafts';requestId:string}|{kind:'recovery'};
 export interface TutorProposal {id:string;conversationId:string;turnId:string;problemId:string;identity:string;sessionId:string|null;kind:'thought'|'takeaway';text:string;createdAt:string;saved:boolean}

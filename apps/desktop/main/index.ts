@@ -11,7 +11,7 @@ import { TutorService } from "./tutor-service";
 import { ThoughtHostVoice, TutorHostVoice, type ThoughtVoiceContext } from "./tutor-host-voice";
 import { ThoughtTakeStore } from "./thought-take-store";
 import { tutorExternalUrl } from "../../../packages/tutor/links";
-import type { SharedCode, StatementSnapshot, TutorConversation, TutorEvent, TutorSendInput, TutorStoredView, TutorTurn } from "../../../packages/tutor/types";
+import type { DeskHintReview, SharedCode, StatementSnapshot, TutorConversation, TutorEvent, TutorSendInput, TutorStoredView, TutorTurn } from "../../../packages/tutor/types";
 import { AttentionPolicy } from "./attention";
 import { companionToday } from "../../../packages/core/src/companion-today";
 import { localDate } from "../../../src/lib/model";
@@ -398,6 +398,12 @@ async function ui(action:string,payload:unknown){
   recoveryFence.lease();
   if(action.startsWith('tutor-'))return tutorUi(action,payload);
   switch(action){
+    case 'desk-hint-review': {
+      const current=recoveryFence.lease(),provider=tutorProvider.status();
+      const review=await database.call<Omit<DeskHintReview,'provider'|'activeRequestId'>>(action,payload,provider);
+      current();
+      return {...review,provider,activeRequestId:tutorService.activeRequestId} satisfies DeskHintReview;
+    }
     case 'thought-voice-status': {
       const context = await database.call<ThoughtVoiceContext>("thought-voice-context");
       const provider = tutorProvider.status();

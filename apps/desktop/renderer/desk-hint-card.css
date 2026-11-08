@@ -1,0 +1,223 @@
+.desk-hint {
+  --hint-surface: #fff9ee;
+  --hint-rule: #dfc8ad;
+  --hint-accent: #953d25;
+  display: grid;
+  min-width: 0;
+  gap: 12px;
+  padding: 13px 14px 14px;
+  border: 1px solid var(--hint-rule);
+  border-radius: 4px 12px 12px 12px;
+  background: var(--hint-surface);
+  color: var(--ink);
+}
+
+.theme-ink .desk-hint {
+  --hint-surface: #29221e;
+  --hint-rule: #654b3d;
+  --hint-accent: #ffad88;
+}
+
+.desk-hint-header,
+.desk-hint-heading,
+.desk-hint-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.desk-hint-header,
+.desk-hint-progress {
+  justify-content: space-between;
+}
+
+.desk-hint-heading > div {
+  min-width: 0;
+}
+
+.desk-hint-mark {
+  display: grid;
+  place-items: center;
+  flex: 0 0 29px;
+  height: 29px;
+  border: 1px solid var(--hint-rule);
+  border-radius: 7px 7px 7px 2px;
+  color: var(--hint-accent);
+}
+
+.desk-hint .eyebrow {
+  color: var(--hint-accent);
+  letter-spacing: 1.15px;
+}
+
+.desk-hint h2 {
+  margin: 2px 0 0;
+  outline: none;
+  font: 400 25px/1.04 "Instrument Serif", Georgia, serif;
+}
+
+.desk-hint-close {
+  align-self: start;
+  flex-shrink: 0;
+}
+
+.desk-hint-review,
+.desk-hint-fallback,
+.desk-hint-statement-body {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.desk-hint :is(.desk-hint-help, .desk-hint-status, .desk-hint-error, .desk-hint-fallback > p) {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.desk-hint-help,
+.desk-hint-status,
+.desk-hint-fallback > p {
+  color: var(--muted);
+}
+
+.desk-hint-error {
+  color: var(--error);
+}
+
+.desk-hint-statement {
+  border-block: 1px solid var(--hint-rule);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.desk-hint-statement summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.desk-hint-statement summary::-webkit-details-marker {
+  display: none;
+}
+
+.desk-hint-statement[open] summary svg {
+  transform: rotate(180deg);
+}
+
+.desk-hint-statement-body {
+  max-height: 206px;
+  padding: 0 4px 8px 0;
+  overflow: auto;
+  scrollbar-width: thin;
+}
+
+.desk-hint-statement-body :is(h3, p, pre),
+.desk-hint-question p,
+.desk-hint-hypothesis p {
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.desk-hint-statement-body h3 {
+  margin-bottom: 2px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--hint-accent);
+}
+
+.desk-hint-statement-body pre {
+  margin-bottom: 4px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  background: var(--paper-inset);
+}
+
+.desk-hint-question p,
+.desk-hint-hypothesis p {
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.desk-hint-question p {
+  margin-top: 4px;
+}
+
+.desk-hint-hypothesis label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 29px;
+  font-size: 10px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.desk-hint-hypothesis input {
+  flex-shrink: 0;
+  margin: 0;
+  accent-color: var(--hint-accent);
+}
+
+.desk-hint-hypothesis p {
+  max-height: 9em;
+  overflow: auto;
+  padding: 6px 9px;
+  border-inline-start: 2px solid var(--hint-rule);
+  color: var(--muted);
+}
+
+.desk-hint-actions {
+  flex-wrap: wrap;
+}
+
+.desk-hint-quiet {
+  display: inline-flex;
+  width: fit-content;
+  min-height: 30px;
+  padding: 4px 0;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: transparent;
+  color: var(--hint-accent);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.desk-hint-quiet:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.desk-hint-submit.button {
+  min-height: 36px;
+  padding: 8px 10px;
+}
+
+.desk-hint-answer {
+  min-width: 0;
+  padding: 9px 11px;
+  border-inline-start: 2px solid var(--hint-rule);
+  background: var(--paper-raised);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.desk-hint-answer .tutor-answer > :first-child {
+  margin-top: 4px;
+}
+
+.desk-hint-answer .tutor-answer > :last-child {
+  margin-bottom: 0;
+}
+
+.desk-hint-answer pre {
+  max-width: 100%;
+  overflow: auto;
+}

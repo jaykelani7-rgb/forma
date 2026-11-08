@@ -1,7 +1,7 @@
 /* eslint-disable @next/next/no-img-element -- Electron previews local data URLs without a Next.js server. */
-import { useId, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useId, useRef, useState, type FormEvent, type ReactNode, type RefObject } from "react";
 import {
-  ArrowUpRight, ChevronDown, Clock3, Code2, Feather, FileCode2, ImagePlus, Pencil, Play, Plus, Trash2,
+  ArrowUpRight, ChevronDown, Clock3, Code2, Feather, FileCode2, ImagePlus, Lightbulb, Pencil, Play, Plus, Trash2,
 } from "lucide-react";
 import { DESK_IMAGE_LIMIT, DESK_THREAD_LIMIT, validateDeskEntry, type DeskEntry } from "../../../packages/contracts/src";
 import { RibbonMark } from "../../../packages/ribbon/RibbonMark";
@@ -28,6 +28,9 @@ interface ProblemDeskProps {
   onOpenProblem: () => void;
   onOpenSolution?: () => void;
   voiceControls?: ReactNode;
+  hint?: ReactNode;
+  onToggleHint?: () => void;
+  hintButtonRef?: RefObject<HTMLButtonElement | null>;
 }
 
 const TEXT_LIMIT = 10_000;
@@ -127,7 +130,7 @@ function SavedItem({ item, busy, onRemove }: {
 export function ProblemDesk({
   problemTitle, elapsed, paused = false, busy = false, items, editThread = false,
   threadDraft, onThreadDraftChange, onEditThreadChange, onSave, onRemove,
-  onResume, onOpenProblem, onOpenSolution, voiceControls,
+  onResume, onOpenProblem, onOpenSolution, voiceControls, hint, onToggleHint, hintButtonRef,
 }: ProblemDeskProps) {
   const threadId = useId();
   const artifactId = useId();
@@ -219,7 +222,7 @@ export function ProblemDesk({
           <form className="desk-editor" onSubmit={event => void saveThread(event)}>
             <label htmlFor={threadId}>What would you try next?</label>
             <textarea id={threadId} value={threadDraft} rows={3} maxLength={DESK_THREAD_LIMIT}
-              placeholder="I’d test what happens when…" disabled={busy}
+              placeholder="I’d test what happens when…" disabled={busy} autoFocus
               onChange={event => onThreadDraftChange(event.target.value)}/>
             {threadDraft.length > DESK_THREAD_LIMIT && <p className="inline-error" role="alert">Shorten your thread to 1,000 characters before saving.</p>}
             {voiceControls}
@@ -241,6 +244,14 @@ export function ProblemDesk({
           </ul>
         </details>}
       </section>
+
+      {onToggleHint && <div className="desk-hint-slot">
+        <button ref={hintButtonRef} type="button" className="desk-tool desk-hint-trigger"
+          aria-expanded={!!hint} disabled={busy} onClick={onToggleHint}>
+          <Lightbulb size={15} aria-hidden="true"/> I’m stuck
+        </button>
+        {hint}
+      </div>}
 
       <div className="desk-return">
         {onResume && <button type="button" className="button" disabled={busy} onClick={onResume}>

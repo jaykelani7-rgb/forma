@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { canonicalProblemIdentity } from '../../../packages/core/src/codeforces-identity';
 import { availableTutorNotes, freezeTutorContext, parseSharedCode, TUTOR_BUDGET, tutorFields, tutorHash, tutorId, tutorObject, tutorText, validateStatement } from '../../../packages/tutor/context';
 import { buildProviderMessages, hintLevelForAction, parseTutorAction } from '../../../packages/tutor/policy';
-import type { SharedCode, StatementSnapshot, TutorAction, TutorContextView, TutorConversation, TutorProposal, TutorSendInput, TutorSettings, TutorStoredView, TutorTurn, TutorUsage, TutorDraft, TutorDraftView, TutorDraftSaveInput, TutorDraftSaveResult } from '../../../packages/tutor/types';
+import type { DeskHintReview, DeskHintTarget, SharedCode, StatementSnapshot, TutorAction, TutorContextView, TutorConversation, TutorProposal, TutorProviderStatus, TutorSendInput, TutorSettings, TutorStoredView, TutorTurn, TutorUsage, TutorDraft, TutorDraftView, TutorDraftSaveInput, TutorDraftSaveResult } from '../../../packages/tutor/types';
 import type { LocalSnapshot } from './store';
 
 interface TutorOwner {snapshot():LocalSnapshot;approveTutorLearning(proposal:TutorProposal,now:number):void}
@@ -11,6 +11,18 @@ const DEFAULT_SETTINGS:TutorSettings={contestMode:false,retentionDays:90,voiceOu
 const MAX_LOCAL_BYTES=32*1024*1024;
 const decode=<T>(value:unknown):T=>JSON.parse(String(value)) as T;
 const decodeTurn=(value:unknown):TutorTurn=>{const turn=decode<TutorTurn>(value);return {...turn,provider:turn.provider??'openai'};};
+function deskHintTarget(input:unknown):DeskHintTarget {
+  const value=tutorObject(input);
+  tutorFields(value,['problemId','sessionId','recoveryEpoch','provider','model']);
+  if(value.provider!=='gemini'&&value.provider!=='openai')throw new Error('Review the current Tutor provider before sending a hint.');
+  return {
+    problemId:tutorText(value.problemId,200,1),
+    sessionId:value.sessionId===null?null:tutorId(value.sessionId),
+    recoveryEpoch:tutorId(value.recoveryEpoch),
+    provider:value.provider,
+    model:tutorText(value.model,120,1),
+  };
+}
 
 /** Uses only the existing worker's DatabaseSync. No network, credentials or raw audio enter this store. */
 export class TutorStore {
@@ -105,9 +117,9 @@ export class TutorStore {
     if(!row)throw new Error('This local conversation is no longer available.');
     return decode<TutorConversation>(row.body);
   }
-  open(input:unknown={},now=Date.now()):TutorConversation {
+  open(input:unknown={},now=Date.now(),remember=true):TutorConversation {
     const value=tutorObject(input);tutorFields(value,['conversationId','problemId','workspaceId']);
-    if(value.conversationId!==undefined){const found=this.conversation(value.conversationId);this.remember(found.id);return found;}
+    if(value.conversationId!==undefined){const found=this.conversation(value.conversationId);if(remember)this.remember(found.id);return found;}
     const snapshot=this.owner.snapshot();
     const problem=snapshot.data.problems.find(problem=>problem.id===(value.problemId??snapshot.state.problemId));
     const identity=problem&&canonicalProblemIdentity(problem);
@@ -119,12 +131,12 @@ export class TutorStore {
     const remembered=rememberedRow?decode<TutorConversation>(rememberedRow.body):null;
     const workspaceId=tutorId(value.workspaceId??binding?.workspaceId??(remembered?.problemId===problem.id&&remembered.identity===identity?remembered.workspaceId:'personal'));
     const existing=this.db.prepare('SELECT body FROM tutor_conversations WHERE identity=? ORDER BY updated_at DESC').all(identity).map(row=>decode<TutorConversation>(row.body)).find(conversation=>conversation.problemId===problem.id&&conversation.workspaceId===workspaceId);
-    if(existing){this.remember(existing.id);return existing;}
+    if(existing){if(remember)this.remember(existing.id);return existing;}
     if(Number(this.db.prepare('SELECT COUNT(*) n FROM tutor_conversations').get()!.n)>=200)throw new Error('There are 200 local conversations. Export and delete an older one before opening another.');
     const stamp=new Date(now).toISOString();
     const conversation:TutorConversation={id:randomUUID(),identity,problemId:problem.id,title:problem.title,workspaceId,createdAt:stamp,updatedAt:stamp};
     this.db.prepare('INSERT INTO tutor_conversations VALUES(?,?,?,?)').run(conversation.id,identity,stamp,JSON.stringify(conversation));
-    this.remember(conversation.id);return conversation;
+    if(remember)this.remember(conversation.id);return conversation;
   }
   private remember(id:string){this.db.prepare('UPDATE tutor_draft_state SET last_conversation_id=? WHERE id=1').run(id);}
   /** Rotate after replacement so callbacks from the prior database state cannot write. */
@@ -178,6 +190,25 @@ export class TutorStore {
     const statement=this.statement({identity:conversation.identity});
     const frozen=freezeTutorContext(snapshot,conversation,{statement,code:null,noteIds:[]});
     return {conversation,statement,pendingCode:pending?.identity===conversation.identity&&pending.workspaceId===conversation.workspaceId?pending:null,notes:availableTutorNotes(snapshot,conversation.problemId),sessionId:frozen.sessionId,evidence:frozen.evidence};
+  }
+  private activeDeskProblem(snapshot:LocalSnapshot,problemId:string) {
+    const problem=snapshot.data.problems.find(row=>row.id===problemId);
+    const identity=problem&&canonicalProblemIdentity(problem);
+    if(!identity||snapshot.state.problemId!==problemId||snapshot.state.identity!==identity)
+      throw new Error('The active problem changed. Reopen the hint from its Problem Desk.');
+    return {identity,sessionId:snapshot.data.session?.problemId===problemId?snapshot.data.session.id:null};
+  }
+  deskHintReview(input:unknown,provider:TutorProviderStatus,now=Date.now()):Omit<DeskHintReview,'provider'|'activeRequestId'> {
+    const value=tutorObject(input);
+    tutorFields(value,['problemId']);
+    const problemId=tutorText(value.problemId,200,1);
+    const {identity,sessionId}=this.activeDeskProblem(this.owner.snapshot(),problemId);
+    const target={problemId,sessionId,recoveryEpoch:this.draftEpoch(),provider:provider.provider,model:provider.model};
+    const {contestMode}=this.settings();
+    const statement=contestMode?null:this.statement({identity});
+    const conversationId=statement?.complete&&provider.configured&&provider.capabilities.text
+      ?this.open({problemId},now,false).id:null;
+    return {contestMode,statement,conversationId,target};
   }
   private draftEpoch():string {return String(this.db.prepare('SELECT epoch FROM tutor_draft_state WHERE id=1').get()!.epoch);}
   private writeDraft(draft:TutorDraft) {
@@ -233,19 +264,34 @@ export class TutorStore {
     const now=typeof providerOrNow==='number'?providerOrNow:timestamp;
     const provider=typeof providerOrNow==='number'?'openai':providerOrNow;
     if(provider!=='gemini'&&provider!=='openai')throw new Error('Choose a supported tutor provider.');
-    const value=tutorObject(input);tutorFields(value,['turnId','requestId','conversationId','action','text','statementId','codeId','noteIds','draft']);
+    const value=tutorObject(input);tutorFields(value,['turnId','requestId','conversationId','action','text','statementId','codeId','noteIds','draft','deskHint']);
     const request:TutorSendInput={turnId:tutorId(value.turnId),requestId:tutorId(value.requestId),conversationId:tutorId(value.conversationId),action:parseTutorAction(value.action),text:tutorText(value.text,TUTOR_BUDGET.user,1),statementId:value.statementId===null?null:tutorId(value.statementId),codeId:value.codeId===null?null:tutorId(value.codeId),noteIds:Array.isArray(value.noteIds)?value.noteIds.map(tutorId):[]};
     if(!request.text.trim()||!Array.isArray(value.noteIds))throw new Error('Write a question and explicitly select its context.');
     let submittedDraft:{epoch:string;revision:number}|undefined;
     if(value.draft!==undefined){const d=tutorObject(value.draft);tutorFields(d,['epoch','revision']);if(!Number.isSafeInteger(d.revision)||Number(d.revision)<0)throw new Error('Invalid draft revision.');submittedDraft={epoch:tutorId(d.epoch),revision:Number(d.revision)};}
+    const deskHint=value.deskHint===undefined?null:deskHintTarget(value.deskHint);
+    if(deskHint&&(request.action!=='small-hint'||!request.statementId||request.codeId||request.noteIds.length||submittedDraft))
+      throw new Error('A Desk hint uses one small hint with only its reviewed statement and question.');
     const selectedModel=tutorText(model,120,1);
     return this.transaction(()=>{
       if(submittedDraft&&submittedDraft.epoch!==this.draftEpoch())throw new Error('This draft belongs to an earlier restore. Reopen the conversation before sending.');
       if(this.settings().contestMode)throw new Error('Contest mode disables problem-specific tutor assistance. Tracking and notes remain available.');
       const conversation=this.conversation(request.conversationId);
+      const deskSnapshot=deskHint?this.owner.snapshot():null;
+      if(deskHint&&deskSnapshot){
+        if(deskHint.recoveryEpoch!==this.draftEpoch())throw new Error('The notebook was restored. Review the hint again.');
+        if(deskHint.provider!==provider||deskHint.model!==selectedModel)throw new Error('The Tutor provider changed. Review the hint again.');
+        const {identity,sessionId}=this.activeDeskProblem(deskSnapshot,deskHint.problemId);
+        if(sessionId!==deskHint.sessionId||conversation.problemId!==deskHint.problemId||conversation.identity!==identity)
+          throw new Error('The practice session changed. Review the hint again.');
+        const statement=this.statement({identity});
+        if(!statement?.complete||statement.id!==request.statementId)throw new Error('The problem statement changed. Review the hint again.');
+      }
       const previousRow=this.db.prepare('SELECT body FROM tutor_turns WHERE id=?').get(request.turnId);
       if(previousRow){
         const previous=decodeTurn(previousRow.body);
+        if(!!previous.standalone!==!!deskHint)throw new Error('Review this Desk hint from the Problem Desk before retrying.');
+        if(deskHint&&previous.context.sessionId!==deskHint.sessionId)throw new Error('The practice session changed. Review a new hint.');
         const old={conversationId:previous.conversationId,action:previous.action,text:previous.userText,statementId:previous.context.statement?.id??null,codeId:previous.context.code?.id??null,noteIds:previous.context.notes.map(note=>note.id).sort()};
         const incoming={conversationId:request.conversationId,action:request.action,text:request.text,statementId:request.statementId,codeId:request.codeId,noteIds:[...request.noteIds].sort()};
         if(JSON.stringify(old)!==JSON.stringify(incoming))throw new Error('This user turn already has a different frozen question or context. Create a new turn.');
@@ -266,8 +312,8 @@ export class TutorStore {
       if(request.codeId){const row=this.db.prepare('SELECT body FROM tutor_codes WHERE id=?').get(request.codeId);if(!row)throw new Error('The selected source snapshot changed. Review the new code before sending.');code=decode<SharedCode>(row.body);}
       if(request.action!=='discuss'&&!statement?.complete)throw new Error('Include a complete statement before requesting problem-specific hints, code review, or an explanation. A URL or title is not the statement.');
       if(request.action==='check-code'&&!code)throw new Error('Explicitly share and include selected code before asking for a code check.');
-      const context=freezeTutorContext(this.owner.snapshot(),conversation,{statement,code,noteIds:request.noteIds},now);
-      const turn:TutorTurn={id:request.turnId,requestId:request.requestId,conversationId:conversation.id,action:request.action,userText:request.text,assistantText:'',context,status:'queued',createdAt:new Date(now).toISOString(),completedAt:null,error:null,hintLevel:hintLevelForAction(request.action,this.turns(conversation.id)),exposed:false,usage:null,model:selectedModel,provider};
+      const context=freezeTutorContext(deskSnapshot??this.owner.snapshot(),conversation,{statement,code,noteIds:request.noteIds},now);
+      const turn:TutorTurn={id:request.turnId,requestId:request.requestId,conversationId:conversation.id,action:request.action,userText:request.text,assistantText:'',context,status:'queued',createdAt:new Date(now).toISOString(),completedAt:null,error:null,hintLevel:hintLevelForAction(request.action,this.turns(conversation.id)),exposed:false,usage:null,model:selectedModel,provider,...(deskHint?{standalone:true as const}:{})};
       buildProviderMessages(turn,this.turns(conversation.id));
       if(submittedDraft){
         const saved=this.draft(request.conversationId,now);

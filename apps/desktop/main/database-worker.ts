@@ -3,6 +3,7 @@ import { CompanionStore } from "./store";
 import { applySubmissionEvidence } from "../../../packages/core/src/companion";
 import { reconcileFollowups } from "../../../packages/core/src/verdict-followup";
 import { ClockContinuity } from "./clock-continuity";
+import type { TutorProviderStatus } from "../../../packages/tutor/types";
 const store = new CompanionStore(workerData.path);
 store.pauseForLifecycle('restart');
 const continuity=new ClockContinuity(Date.now(),performance.now());
@@ -37,6 +38,7 @@ parentPort!.on('message', (request: {id:number;method:string;args:unknown[]}) =>
         break;
       }
       case 'tutor-view': value=store.tutor.view(now); break;
+      case 'desk-hint-review': value=store.tutor.deskHintReview(a[0],a[1] as TutorProviderStatus,now); break;
       case 'tutor-open': value=store.tutor.open(a[0],now); break;
       case 'tutor-context': value=store.tutor.context(a[0]); break;
       case 'tutor-draft': value=store.tutor.draft(a[0],now); break;
