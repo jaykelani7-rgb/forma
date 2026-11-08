@@ -4,6 +4,8 @@ A daily competitive-programming notebook with the **Ribbon** design in Ink and L
 
 Ribbon appearance can be customized in Settings with a live preview, a small fold or timer strip, optional left/right edge resting during focus, and Gentle/Still motion. Appearance is saved per device. **Rehearse a session** opens a disposable copy of the demo notebook to try the shortcut/open action, timer, pause and reflection bookmark. Replay or leave it at any point. Web and desktop practice records are kept separate from this rehearsal.
 
+In Journal, combine search with outcome, source, and date filters. Open an entry to read its reflection and compare other attempts at the same problem. On desktop, **Speak a thought** on the Ribbon opens a recording for the attached problem. Finishing sends the audio to your configured Tutor provider for transcription. Edit the transcript and choose **Save thought locally** to add it to that problem’s notebook.
+
 ## Run locally
 
 Forma Companion's local desktop milestone is also available: `npm run companion:dev`. It adds the floating Ribbon timer, SQLite-backed practice/reflections and a paired VS Code extension while keeping this website independently usable. Desktop account sync is pending; see [companion setup and current scope](docs/companion/README.md).

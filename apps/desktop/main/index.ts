@@ -7,7 +7,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { TutorConfiguration } from "./tutor-config";
 import { ConfiguredTutorProvider, speechReadyText, TutorProviderError } from "./tutor-provider";
 import { TutorService } from "./tutor-service";
-import { TutorHostVoice } from "./tutor-host-voice";
+import { ThoughtHostVoice, TutorHostVoice, type ThoughtVoiceContext } from "./tutor-host-voice";
 import { tutorExternalUrl } from "../../../packages/tutor/links";
 import type { SharedCode, StatementSnapshot, TutorConversation, TutorEvent, TutorSendInput, TutorStoredView, TutorTurn } from "../../../packages/tutor/types";
 import { AttentionPolicy } from "./attention";
@@ -64,6 +64,18 @@ let tutorService:TutorService;
 let microphoneLeaseUntil=0;
 const hostVoice=new TutorHostVoice();
 const recoveryFence=new RecoveryFence();
+const thoughtVoice = new ThoughtHostVoice({
+  async readContext() {
+    if (!expanded || !window.isVisible()) throw new Error("Open the thought panel to record.");
+    const current = recoveryFence.lease();
+    const context = await database.call<ThoughtVoiceContext>("thought-voice-context");
+    current();
+    return context;
+  },
+  requireProvider: () => voiceReady("transcription"),
+  requestMicrophone: () => requestMicrophoneAccess("thought"),
+  transcribe: (bytes, mime, signal) => tutorProvider.transcribe(bytes, mime, signal),
+});
 const loginStartup=createLoginStartup({platform:process.platform,isPackaged:app.isPackaged,getLoginItemSettings:()=>app.getLoginItemSettings(),setLoginItemSettings:settings=>app.setLoginItemSettings(settings)});
 let browserVerifiedAt:string|null=null;
 let pendingRestore:{token:string;json:string;expiresAt:number}|null=null;
@@ -112,7 +124,16 @@ async function confirmRestore(payload:unknown){
   return {backupPath,summary:'The selected records were replaced. Timers are paused; Tutor requests and drafts were not sent.'};
   }finally{restoring=false;}
 }
-function cancelVoice(){microphoneLeaseUntil=0;hostVoice.cancel();}
+function cancelTutorVoice(){microphoneLeaseUntil=0;hostVoice.cancel();}
+function cancelVoice(){cancelTutorVoice();thoughtVoice.cancel();}
+function microphoneAllowed() {
+  return window.isVisible() && (Date.now() < microphoneLeaseUntil || thoughtVoice.microphoneAllowed);
+}
+async function requestMicrophoneAccess(input: "thought" | "question") {
+  if (process.platform === "darwin" && !await systemPreferences.askForMediaAccess("microphone")) {
+    throw new Error(`Microphone access was denied. Enable it in macOS Privacy settings, or type your ${input}.`);
+  }
+}
 function emitTutor(event:TutorEvent){if(window&&!window.isDestroyed())window.webContents.send('forma:tutor-event',event);}
 async function captureTutorStatement(input:unknown){
   const current=recoveryFence.lease();
@@ -180,11 +201,11 @@ async function tutorUi(action:string,payload:unknown){
       try{
         const settings=(await database.call<TutorStoredView>('tutor-view')).settings;request.assertCurrent();
         if(settings.contestMode)throw new Error('Contest mode disables voice assistance.');voiceReady('transcription');
-        if(process.platform==='darwin'&&!await systemPreferences.askForMediaAccess('microphone'))throw new Error('Microphone access was denied. Enable it in macOS Privacy settings, or type your question.');
+        await requestMicrophoneAccess("question");
         request.assertCurrent();voiceReady('transcription');microphoneLeaseUntil=Date.now()+15000;return {allowed:true};
       }catch(error){request.finish();throw error;}
     }
-    case 'tutor-voice-cancel':cancelVoice();return null;
+    case 'tutor-voice-cancel':cancelTutorVoice();return null;
     case 'tutor-transcribe':{
       if(!payload||typeof payload!=='object'||Object.keys(payload).some(k=>!['conversationId','bytes','mime'].includes(k)))throw new Error('Invalid voice recording.');
       const {conversationId,bytes,mime}=payload as {conversationId:string;bytes:Uint8Array;mime:string};if(typeof conversationId!=='string'||!(bytes instanceof Uint8Array)||bytes.byteLength===0||bytes.byteLength>8*1024*1024||typeof mime!=='string')throw new Error('Choose a conversation and a nonempty recording smaller than 8 MB.');
@@ -245,6 +266,7 @@ async function broadcast() {
 }
 function constrain(){if(!window||window.isDestroyed())return;const b=window.getBounds();const a=screen.getDisplayMatching(b).workArea;window.setPosition(...Object.values(clampPosition(b,b,a)) as [number,number]);}
 function expand(value:boolean,focus=false,glance=false){
+  if (!value) cancelVoice();
   const b=parkedAt ?? window.getBounds();parkedAt=null;expanded=value;
   const width=value?380:ribbonWindow.width, height=value?(glance?520:700):ribbonWindow.height;
   const a=screen.getDisplayMatching(b).workArea;
@@ -333,6 +355,19 @@ async function ui(action:string,payload:unknown){
   recoveryFence.lease();
   if(action.startsWith('tutor-'))return tutorUi(action,payload);
   switch(action){
+    case 'thought-voice-status': {
+      const context = await database.call<ThoughtVoiceContext>("thought-voice-context");
+      const provider = tutorProvider.status();
+      const reason = !context.problemKey ? "Attach a problem before recording a thought."
+        : context.contestMode ? "Voice transcription is off in contest mode. You can type your thought."
+        : !provider.configured ? `Set up ${provider.name} in Tutor settings to transcribe a recording.`
+        : !provider.capabilities.transcription ? `${provider.name} transcription is unavailable with the selected model. You can type your thought.`
+        : undefined;
+      return { providerName: provider.name, available: !reason, ...(reason ? { reason } : {}) };
+    }
+    case 'thought-microphone':cancelTutorVoice();return thoughtVoice.start(payload);
+    case 'thought-transcribe':return thoughtVoice.transcribe(payload);
+    case 'thought-voice-cancel':thoughtVoice.cancelRequest(payload);return null;
     case 'setup-status':return setupStatus();
     case 'launch-at-login':return loginStartup.set(payload as boolean);
     case 'backup-export':{
@@ -409,8 +444,8 @@ async function main(){
   window.setVisibleOnAllWorkspaces(true,{visibleOnFullScreen:true});
   window.webContents.setWindowOpenHandler(()=>({action:'deny'}));
   window.webContents.on('will-navigate',event=>event.preventDefault());
-  window.webContents.session.setPermissionRequestHandler((contents,permission,callback,details)=>callback(contents===window.webContents&&permission==='media'&&Date.now()<microphoneLeaseUntil&&'mediaTypes' in details&&details.mediaTypes?.length===1&&details.mediaTypes[0]==='audio'));
-  window.webContents.session.setPermissionCheckHandler((contents,permission,_origin,details)=>contents===window.webContents&&permission==='media'&&Date.now()<microphoneLeaseUntil&&details.mediaType==='audio');
+  window.webContents.session.setPermissionRequestHandler((contents,permission,callback,details)=>callback(contents===window.webContents&&permission==='media'&&microphoneAllowed()&&'mediaTypes' in details&&details.mediaTypes?.length===1&&details.mediaTypes[0]==='audio'));
+  window.webContents.session.setPermissionCheckHandler((contents,permission,_origin,details)=>contents===window.webContents&&permission==='media'&&microphoneAllowed()&&details.mediaType==='audio');
   ipcMain.handle('forma:snapshot',event=>{verifySender(event);return snapshot();});
   ipcMain.handle('forma:command',(event,command)=>{verifySender(event);return applyCommand(command);});
   ipcMain.handle('forma:ui',(event,action,payload)=>{verifySender(event);return ui(action,payload);});
@@ -430,8 +465,8 @@ async function main(){
   try{registerShortcut(preferences.shortcut);}catch{ /* Tray recovery stays available when the shortcut is occupied. */ }
   transport=await startTransport({...(developmentData?{endpoint:join(userData,'runtime','companion.sock')}:{}),credential:()=>credential,command:(command,epoch)=>{if(!epoch)throw new Error('Update the Forma VS Code extension before delivering saved captures.');return applyCommand(command,'vscode',epoch);},recoveryEpoch:()=>database.call<string>('recovery-epoch'),tutorCode:shareTutorCode,recognition:request=>{recoveryFence.lease();return recognition.request(request);},action:async action=>{recoveryFence.lease();if(action==='open'||action==='memory'){panelRequest={id:(panelRequest?.id??0)+1,panel:action==='memory'?'memory':'home'};show();}return (await database.call<LocalSnapshot>('snapshot')).revision;},context:async()=>{const local=await database.call<LocalSnapshot>('snapshot');return {identity:local.state.identity,sessionId:local.data.session?.id??null,hostEpoch,recoveryEpoch:await database.call<string>('recovery-epoch')};},connected:value=>{connected=value;void broadcast();}});
   if(process.platform==='darwin')browserTransport=await startBrowserTransport({endpoint:join(userData,'runtime','browser.sock'),credential:()=>browserCredential,message:async m=>{recoveryFence.lease();if((m as {kind?:string})?.kind==='statement'){await captureTutorStatement((m as {statement:unknown}).statement);browserVerifiedAt=new Date().toISOString();return {ok:true,status:'saved'};}return recognition.browser(m);}});
-  powerMonitor.on('suspend',()=>void database.call('pause','suspend').then(broadcast));
-  powerMonitor.on('lock-screen',()=>void database.call('pause','screen-lock').then(broadcast));
+  powerMonitor.on('suspend',()=>{cancelVoice();void database.call('pause','suspend').then(broadcast);});
+  powerMonitor.on('lock-screen',()=>{cancelVoice();void database.call('pause','screen-lock').then(broadcast);});
   powerMonitor.on('resume',()=>{lastTick=Date.now();void broadcast();});
   nativeTheme.on('updated',()=>void broadcast());
   const timer=setInterval(async()=>{

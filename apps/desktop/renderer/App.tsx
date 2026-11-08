@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { ArrowLeft, ArrowRight, ArrowUpRight, BookOpen, Check, ChevronRight, CircleHelp, Clock3, Code2, Ellipsis, Feather, FileCode2, Link2, LoaderCircle, Moon, Pause, Play, Plus, Settings2, ShieldCheck, Sun, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, ArrowUpRight, BookOpen, Check, ChevronRight, CircleHelp, Clock3, Code2, Ellipsis, Feather, FileCode2, Link2, LoaderCircle, Mic, Moon, Pause, Play, Plus, Settings2, ShieldCheck, Sun, X } from "lucide-react";
 import { TutorPanel, type TutorActivity } from "./TutorPanel";
+import { useThoughtVoice } from "./thought-voice";
 import { SetupPanel } from "./SetupPanel";
 import { BackupPanel } from "./BackupPanel";
 import { RibbonStudio } from "../../../packages/ribbon/RibbonStudio";
@@ -94,6 +95,12 @@ export function App() {
   useEffect(() => { if (!recognitionId || recognitionStatus !== "recognised" || !bridge) return; const timer = setTimeout(() => { void bridge.ui("recognition-dismiss", recognitionId); }, 8000); return () => clearTimeout(timer); }, [recognitionId, recognitionStatus, bridge]);
   const problem = view?.problem;
   const session = view?.session;
+  const thoughtVoice = useThoughtVoice(
+    bridge, expanded && panel === "thought", snapshot?.state.identity, snapshot?.data.session?.id,
+  );
+  const thoughtVoiceBusy = thoughtVoice.phase !== "idle";
+  const canDictate = !!window.forma && !!problem && !!snapshot?.state.identity;
+  const thoughtLimit = 10_000;
   const binding = snapshot && activeSolutionBinding(snapshot.state.bindings, problem?.id, snapshot.presentation?.activeFileUri);
   const bindingFilename = binding ? decodeURIComponent(new URL(binding.fileUri).pathname.split("/").at(-1) ?? "Solution file") : null;
   const latestThought = snapshot?.state.thoughts.filter((item) => item.problemId === problem?.id).at(-1);
@@ -138,6 +145,18 @@ export function App() {
     else {setRecallActivity(item.activity as "explain"|"complexity");const next=await bridge?.getSnapshot();openPanel("recall",next?freezeCaptureTarget(next):undefined);}
   }
   async function openRecall() { setRecallActivity("explain"); if (!snapshot || !view) return; const due = view.due[0]; let target: CaptureTarget | undefined; if (due && due.id !== problem?.id) { if (session) { setNotice("Finish your current session before switching to a revisit."); return; } if (!await command("attach", { url: due.url, title: due.title })) return; const identity = normalizeCodeforcesIdentity(due.url); if (identity) target = { problemKey: identity.key, title: due.title }; } openPanel("recall", target); }
+  function speakThought() {
+    if (!snapshot || !canDictate || thoughtVoiceBusy) return;
+    const target = freezeCaptureTarget(snapshot);
+    if (!target) return;
+    openPanel("thought", target);
+    const draft = draftTargets.thought;
+    if (thought.trim() && draft && (draft.problemKey !== target.problemKey || (draft.sessionId && draft.sessionId !== target.sessionId))) {
+      setError("This draft belongs to an earlier practice context. Save it there or clear it before recording a new thought.");
+      return;
+    }
+    void thoughtVoice.start(target, text => setThought(current => [current.trimEnd(), text].filter(Boolean).join("\n\n")));
+  }
   async function saveThought() { if (await command("thought", { text: thought }, "Thought saved locally.", "home")) setThought(""); }
   async function saveReflection() { if (outcome && await command("reflect", { outcome, takeaway, notes: "" }, "Reflection saved locally. Your next revisit follows your notebook’s learning rules.", "home")) { setTakeaway(""); setOutcome(null); } }
   const footer = <footer className="card-footer"><span><span className="status-dot"/>{previewMode ? "In-memory preview" : "Local notebook"}</span><span>{busy ? <><LoaderCircle className="spin" size={11}/> Saving…</> : snapshot ? <><ShieldCheck size={11}/>{previewMode ? "Preview only" : "Saved locally"}</> : "Connecting…"}</span></footer>;
@@ -179,7 +198,47 @@ export function App() {
             {!!view?.due.length && !session?.running && !snoozed && <button className="recall-offer" onClick={() => void openRecall()}><span className="recall-icon"><BookOpen size={14}/></span><span><strong>A thought to revisit</strong><small>{view.due.length === 1 ? "One problem is ready when you are." : `${view.due.length} problems are ready when you are.`}</small></span><ArrowRight size={14}/></button>}
           </>}
           {panel === "attach" && <><PanelHeading eyebrow="MAKE THE CONNECTION" title={<>What are you<br/><em>working on?</em></>} description="Attach the exact Codeforces problem. Identification alone never records a solve."/><Form onSubmit={() => void command("attach", { url, ...(problemTitle.trim() ? { title: problemTitle.trim() } : {}) }, "Problem attached locally.", "home")}><label className="field-label" htmlFor="problem-url">Problem URL</label><div className="input-icon"><Link2 size={15}/><input id="problem-url" type="url" value={url} onChange={(event) => setUrl(event.target.value)} placeholder="codeforces.com/problemset/problem/…" required autoComplete="off" autoFocus/></div><label className="field-label" htmlFor="problem-title">Title <span>optional</span></label><input id="problem-title" value={problemTitle} onChange={(event) => setProblemTitle(event.target.value)} maxLength={200} placeholder="A name to remember it by"/><p className="field-help">Contest and Gym identities stay separate. Your solution file can be connected from the VS Code extension.</p><Button type="submit" disabled={busy || !url.trim()} icon={ArrowRight}>Attach problem</Button></Form></>}
-          {panel === "thought" && <><PanelHeading eyebrow="LEAVE YOURSELF A THREAD" title={<>Keep the thought.<br/><em>Find it later.</em></>} description="An observation, a question, or where to pick up next. In your own words."/><Form onSubmit={() => void saveThought()}><label className="field-label" htmlFor="thought">Your thought</label><textarea id="thought" value={thought} onChange={(event) => setThought(event.target.value)} placeholder="What I’m noticing is…" rows={5} maxLength={2000} required autoFocus/><div className="field-meta"><span>Private to your local notebook</span><span>{thought.length}/2,000</span></div><Button type="submit" disabled={busy || !thought.trim()} icon={Feather}>Save thought locally</Button></Form></>}
+          {panel === "thought" && <>
+            <PanelHeading eyebrow="LEAVE YOURSELF A THREAD"
+              title={<>Keep the thought.<br/><em>Find it later.</em></>}
+              description="An observation, a question, or where to pick up next. In your own words."/>
+            <Form onSubmit={() => { if (!thoughtVoiceBusy && thought.length <= thoughtLimit) void saveThought(); }}>
+              {canDictate && <div className="thought-voice">
+                {!thoughtVoiceBusy && <button type="button" className="settings-link" onClick={speakThought} disabled={busy}>
+                  <Mic size={15}/> {thoughtVoice.notice ? "Record more" : "Start voice recording"}
+                </button>}
+                {thoughtVoice.phase !== "idle" && <>
+                  <p className="thought-voice-status" role="status">
+                    {thoughtVoice.phase === "permission" ? "Preparing the microphone…"
+                      : thoughtVoice.phase === "recording" ? "Recording"
+                      : thoughtVoice.phase === "recorded" ? "Recording stopped at 60 seconds."
+                      : "Transcribing your thought…"}
+                  </p>
+                  {thoughtVoice.phase === "recording" && <span className="thought-voice-time" aria-hidden="true">{thoughtVoice.seconds}s</span>}
+                  {thoughtVoice.provider && <p className="field-help">Finishing sends the audio to {thoughtVoice.provider} for transcription. You can review the text before saving it locally.</p>}
+                  <div className="thought-voice-actions">
+                    {(thoughtVoice.phase === "recording" || thoughtVoice.phase === "recorded") &&
+                      <Button secondary onClick={thoughtVoice.finish} icon={Check}>
+                        {thoughtVoice.phase === "recorded" ? "Transcribe recording" : "Finish recording and transcribe"}
+                      </Button>}
+                    <button type="button" className="text-button" onClick={thoughtVoice.cancel}>Cancel recording</button>
+                  </div>
+                </>}
+                {thoughtVoice.error && <p className="inline-error" role="alert">{thoughtVoice.error}</p>}
+                {thoughtVoice.notice && <p className="field-help" role="status">{thoughtVoice.notice}</p>}
+              </div>}
+              <label className="field-label" htmlFor="thought">Your thought</label>
+              <textarea id="thought" value={thought} onChange={event => setThought(event.target.value)}
+                placeholder="What I’m noticing is…" rows={5} required autoFocus={!thoughtVoiceBusy}/>
+              <div className="field-meta">
+                <span>{thought.length > thoughtLimit ? "Shorten your thought before saving" : "Private to your local notebook"}</span>
+                <span>{thought.length.toLocaleString()} / {thoughtLimit.toLocaleString()}</span>
+              </div>
+              <Button type="submit" disabled={busy || thoughtVoiceBusy || !thought.trim() || thought.length > thoughtLimit} icon={Feather}>
+                Save thought locally
+              </Button>
+            </Form>
+          </>}
           {panel === "reflect" && <><PanelHeading eyebrow="THE PART THAT STAYS" title={<>How did<br/><em>you get here?</em></>} description={snapshot.state.platform === "accepted" ? "Codeforces recorded Accepted. You choose what the learning record says." : "Your reflection gives this session its meaning."}/><Form onSubmit={() => void saveReflection()}>{!!snapshot.tutorAssistance?.shown&&<p className="tutor-context-warning">Tutor assistance was shown in this attempt{snapshot.tutorAssistance.hintLevels.length?` · levels ${snapshot.tutorAssistance.hintLevels.join(", ")}`:""}. You still choose the learning outcome.</p>}<fieldset className="outcome-group"><legend className="field-label">How did this attempt go?</legend><div className="outcome-grid">{(Object.keys(outcomeLabels) as Outcome[]).map((value, index) => <button key={value} type="button" aria-pressed={outcome === value} className={outcome === value ? "selected" : ""} onClick={() => setOutcome(value)}><span className="outcome-marker" aria-hidden="true">{outcome === value ? <Check size={12}/> : String(index + 1).padStart(2, "0")}</span>{outcomeLabels[value]}</button>)}</div></fieldset><label className="field-label" htmlFor="takeaway">One thing to carry forward <span>optional</span></label><textarea id="takeaway" value={takeaway} onChange={(event) => setTakeaway(event.target.value)} rows={3} placeholder="Next time, I’ll remember…" maxLength={300}/><Button type="submit" disabled={busy || !outcome} icon={Check}>Save reflection locally</Button><button type="button" className="text-button centered" onClick={() => { setPanel("home"); setNotice("Your session is waiting for reflection. Come back when you like."); }}>I’ll reflect later</button></Form></>}
           {panel === "memory" && <><PanelHeading eyebrow="YOUR OWN WORDS" title={<>Pick up<br/><em>the thread.</em></>} description="Only opened because you asked. These are your saved observations."/>{latestThought && <div className="memory-note"><span className="eyebrow">LAST THOUGHT</span><p>{latestThought.text}</p><small>{new Date(latestThought.createdAt).toLocaleDateString(undefined, { day: "numeric", month: "short" })}</small></div>}{view?.memory?.latestTakeaway ? <div className="memory-note"><span className="eyebrow">LAST TAKEAWAY</span><p>{view.memory.latestTakeaway}</p></div> : <div className="memory-empty"><BookOpen size={22}/><p>No earlier reflection for this problem yet.<br/>Your next takeaway can start the thread.</p></div>}<Button secondary onClick={() => openPanel("home")} icon={ArrowRight}>Back to the problem</Button></>}
           {panel === "recall" && <><PanelHeading eyebrow="A SMALL RETURN" title={<>What do<br/><em>you remember?</em></>} description="Try explaining the approach or invariant before opening your earlier notes."/><div className="recall-problem"><BookOpen size={14}/><strong>{draftTargets.recall?.title ?? problem?.title ?? "Choose an attached problem"}</strong></div><Form onSubmit={() => void command("recall", { activity: recallActivity, outcome: recallOutcome, response: recallResponse, cue: "" }, "Recall saved locally. Your next revisit has been scheduled.", "home")}><label className="field-label" htmlFor="recall-response">Your explanation</label><textarea id="recall-response" rows={4} value={recallResponse} onChange={(event) => setRecallResponse(event.target.value)} maxLength={2000} placeholder="The key idea was…" required/><label className="field-label" htmlFor="recall-outcome">How did recall feel?</label><select id="recall-outcome" value={recallOutcome} onChange={(event) => setRecallOutcome(event.target.value as typeof recallOutcome)}><option value="independent">Recalled independently</option><option value="cue">Needed a cue</option><option value="unrecalled">Could not recall yet</option></select><Button disabled={busy || !recallResponse.trim()} type="submit" icon={Check}>Save this recall</Button><div className="split-actions"><button type="button" onClick={() => openPanel("memory")}><BookOpen size={13}/>Open my memory</button><button type="button" disabled={busy} onClick={() => void command("defer", { until: localDate(addDays(new Date(), 1)) }, "Revisit deferred until tomorrow.", "home")}><Clock3 size={13}/>Tomorrow</button></div></Form></>}
@@ -200,6 +259,10 @@ export function App() {
           aria-label={session.running ? "Pause from ribbon" : "Resume from ribbon"}
           onClick={() => void command(session.running ? "pause" : "resume", {})}>
           {session.running ? <Pause size={16}/> : <Play size={16}/>}
+        </button>}
+        {!folded && canDictate && (!expanded || panel !== "thought") && <button type="button" className="ribbon-mic"
+          aria-label="Speak a thought" title="Speak a thought" onClick={speakThought} disabled={busy}>
+          <Mic size={16}/>
         </button>}
         <span className="drag-handle" aria-label="Drag to move companion" title="Drag to move companion"><span/><span/><span/></span>
       </div>

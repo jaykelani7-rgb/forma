@@ -28,7 +28,7 @@
     "category": "public.app-category.education",
     "identity": null,
     "extendInfo": {
-      "NSMicrophoneUsageDescription": "Record a voice question only when you choose the microphone. Review its transcript before sending to Forma Tutor."
+      "NSMicrophoneUsageDescription": "Record a practice thought or Tutor question when you choose the microphone. Review the transcript before saving or sending."
     }
   },
   "win": {

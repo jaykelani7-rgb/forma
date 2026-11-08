@@ -14,7 +14,13 @@ const report={kind:'real-native-no-provider-credentials',folder,verifiedAt:new D
 try{
  let page=await application.firstWindow();const errors=[];page.on('pageerror',e=>errors.push(e.message));await page.waitForFunction(()=>!!window.forma);
  await page.evaluate(()=>window.forma.command({id:'tutor-native-problem',type:'attach',payload:{url:'https://codeforces.com/contest/4/problem/A',title:'Watermelon'}}));
- await page.evaluate(()=>window.forma.ui('expand',true));await page.getByRole('button',{name:'Ask Tutor',exact:true}).click();
+ await page.getByRole('button',{name:'Speak a thought',exact:true}).click();
+ await page.getByRole('alert').filter({hasText:'Set up Gemini in Tutor settings'}).waitFor();
+ await page.getByRole('textbox',{name:'Your thought',exact:true}).waitFor();
+ assert.equal((await page.evaluate(()=>window.forma.getSnapshot())).state.thoughts.length,0);
+ assert.equal((await page.evaluate(()=>window.forma.ui('tutor-view'))).conversations.length,0);
+ await page.getByRole('button',{name:'Back to practice',exact:true}).click();
+ await page.getByRole('button',{name:'Ask Tutor',exact:true}).click();
  await page.getByRole('textbox',{name:'Your question or editable voice transcript'}).waitFor();
  const view=await page.evaluate(()=>window.forma.ui('tutor-view'));assert.equal(view.provider.configured,false);assert.equal(view.provider.provider,'gemini');
  assert.equal(await page.getByRole('button',{name:'Send',exact:true}).isDisabled(),true);

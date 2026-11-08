@@ -322,3 +322,12 @@ input[type=checkbox]:focus-visible { outline: 2px solid var(--sage); outline-off
 .ribbon-native-dock[data-still="true"] .ribbon-mark {animation:none}
 .companion-window.is-collapsed:has(.ribbon-native-dock[data-tucked="true"]) {width:fit-content}
 .companion.is-reduced .rs-bookmark svg {animation:none}
+
+.ribbon-mic { width:34px }
+.thought-voice { margin-bottom:16px; padding:10px 12px; border:1px solid var(--rule); border-radius:10px; background:var(--paper-inset) }
+.thought-voice .settings-link { margin:0; width:100%; min-height:32px }
+.thought-voice-status { display:inline; font-size:12px; font-weight:600 }
+.thought-voice-time { margin-inline-start:8px; font-size:12px; color:var(--muted); font-variant-numeric:tabular-nums }
+.thought-voice-actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-top:8px }
+.thought-voice-actions .button { width:auto }
+.thought-voice .field-help:last-child,.thought-voice .inline-error:last-child { margin-bottom:0 }

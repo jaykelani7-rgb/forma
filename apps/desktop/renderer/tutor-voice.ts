@@ -24,3 +24,85 @@ export class TutorVoiceController {
     this.cleanups.clear();
   }
 }
+
+/** Capture bounded audio locally. The caller decides when and where to send it. */
+export async function captureVoice({
+  voice, token, current, authorize, onSeconds, onError, onStopped,
+}: {
+  voice: TutorVoiceController;
+  token: number;
+  current: () => boolean;
+  authorize: () => Promise<unknown>;
+  onSeconds: (seconds: number) => void;
+  onError: (message: string) => void;
+  onStopped: (clip: Blob, timeLimit: boolean) => void;
+}): Promise<(() => void) | undefined> {
+  if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined")
+    throw new Error("Voice recording is unavailable here.");
+  const mimeType = recordedAudioMime(value => MediaRecorder.isTypeSupported(value));
+  if (!mimeType) throw new Error("This device has no supported recording format.");
+
+  await authorize();
+  if (!current()) return;
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: { echoCancellation: true, noiseSuppression: true },
+    video: false,
+  });
+  const releaseTracks = voice.own(token, () => stream.getTracks().forEach(track => track.stop()));
+  if (!current()) {
+    releaseTracks();
+    return;
+  }
+
+  const recorder = new MediaRecorder(stream, { mimeType });
+  const chunks: Blob[] = [];
+  let bytes = 0;
+  let seconds = 0;
+  let timeLimit = false;
+  const stop = () => {
+    if (current() && recorder.state !== "inactive") recorder.stop();
+  };
+  const limit = setTimeout(() => {
+    timeLimit = true;
+    stop();
+  }, TUTOR_RECORDING_LIMITS.durationMs);
+  const ticker = setInterval(() => {
+    if (current()) onSeconds(++seconds);
+  }, 1000);
+  const release = voice.own(token, () => {
+    clearTimeout(limit);
+    clearInterval(ticker);
+    recorder.onstop = null;
+    recorder.onerror = null;
+    recorder.ondataavailable = null;
+    try {
+      if (recorder.state !== "inactive") recorder.stop();
+    } finally {
+      releaseTracks();
+    }
+  });
+
+  recorder.ondataavailable = ({ data }) => {
+    if (!current()) return;
+    bytes += data.size;
+    if (bytes > TUTOR_RECORDING_LIMITS.bytes) {
+      release();
+      onError("The recording is too large. Try a shorter recording.");
+    } else {
+      chunks.push(data);
+    }
+  };
+  recorder.onerror = () => {
+    release();
+    if (current()) onError("Microphone recording failed. You can still type instead.");
+  };
+  recorder.onstop = () => {
+    release();
+    if (!current()) return;
+    if (!bytes) onError("The recording was empty. Try again or type instead.");
+    else onStopped(new Blob(chunks, { type: recorder.mimeType }), timeLimit);
+  };
+  recorder.start(250);
+  onSeconds(0);
+  return stop;
+}

@@ -41,10 +41,11 @@ test("the compact ribbon controls the saved session and its reflection opens fro
   await page.getByRole("button", { name: "Save reflection" }).click();
   await page.getByRole("link", { name: "Open journal" }).click();
   await page.getByLabel("Search journal").fill("single-element");
-  const entry = page.locator(".ribbon-entries a");
+  const entry = page.getByRole("button", { name: /^View entry:/ });
   await expect(entry).toHaveCount(1);
   await expect(entry).toContainText("Ribbon notebook check");
   await entry.click();
+  await page.getByRole("link", { name: "Open original record" }).click();
   await expect(page).toHaveURL(/\/problems\/.+#record-practice-/);
   await expect(
     page.getByRole("link", { name: "Back to journal" }).first(),

@@ -6,7 +6,7 @@ import { TutorDraftAutosave, type DraftSaveState } from './tutor-draft-autosave'
 import { TutorVoiceController } from './tutor-voice';
 import { mergeTutorTurns, tutorNearBottom, tutorContentRevision } from './tutor-stream-view';
 import { TutorMarkdown } from './tutor-markdown';
-import { recordedAudioMime, speechAudioMime, TUTOR_RECORDING_LIMITS } from './tutor-voice';
+import { captureVoice, speechAudioMime } from './tutor-voice';
 
 const actions:Record<TutorAction,string>={discuss:'Discuss my approach','small-hint':'Small hint','stronger-hint':'Stronger hint','check-code':'Check selected code',explain:'Explain the idea','full-explanation':'Full explanation'};
 export type TutorActivity='idle'|'listening'|'transcribing'|'thinking'|'responding'|'speaking'|'interrupted'|'error';
@@ -114,30 +114,36 @@ export function TutorPanel({bridge,snapshot,active,conversationRequest,onActivit
  async function record(){
    if(recording||processing||!conversation||!activeRef.current||view?.settings.contestMode||!view?.provider.capabilities.transcription)return;
    stopPlayback();const token=voice.begin();const target=conversation.id;const current=()=>voice.current(token)&&activeRef.current&&!document.hidden&&selected.current===target;setError('');setVoicePhase('permission');
-   try{
-     if(!navigator.mediaDevices?.getUserMedia||typeof MediaRecorder==='undefined')throw new Error('Voice recording is unavailable here. Type your question instead.');
-     await call('tutor-microphone');if(!current())return;
-     const stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true},video:false});
-     const releaseTracks=voice.own(token,()=>stream.getTracks().forEach(track=>track.stop()));if(!current())return;
-     const mime=recordedAudioMime(value=>MediaRecorder.isTypeSupported(value));if(!mime)throw new Error('This device has no supported recording format. Type your question instead.');
-     const recorder=new MediaRecorder(stream,{mimeType:mime});const chunks:BlobPart[]=[];let total=0;
-     const limit=setTimeout(()=>{if(current()&&recorder.state!=='inactive')recorder.stop();},TUTOR_RECORDING_LIMITS.durationMs);
-     let seconds=0;setRecordSeconds(0);const ticker=setInterval(()=>{if(current())setRecordSeconds(++seconds);},1000);
-     const releaseRecorder=voice.own(token,()=>{clearTimeout(limit);clearInterval(ticker);recorder.onstop=null;recorder.onerror=null;recorder.ondataavailable=null;if(recorder.state!=='inactive')recorder.stop();releaseTracks();});
-     recorder.ondataavailable=event=>{if(!current())return;total+=event.data.size;if(total>TUTOR_RECORDING_LIMITS.bytes){setError('Recording is too large. Try a shorter question.');stopPlayback();}else chunks.push(event.data);};
-     recorder.onerror=()=>{if(current()){setError('Microphone recording failed. You can still type your question.');stopPlayback();}};
-     recorder.onstop=()=>{
-       releaseRecorder();if(!current())return;finishRecording.current=null;setVoicePhase('transcribing');
-       void(async()=>{try{
-         const audio=new Blob(chunks,{type:recorder.mimeType});if(!audio.size)throw new Error('The recording was empty. Record a short question or type it below.');
-         const bytes=new Uint8Array(await audio.arrayBuffer());if(!current())return;
-         const result=await call<{text:string}>('tutor-transcribe',{conversationId:target,bytes,mime:recorder.mimeType});if(!current())return;
-         edit({text:[draftsRef.current[target]?.text,result.text].filter(Boolean).join('\n')},target);
-         setNotice('Transcript added to your draft. Review it, then choose Send.');
-       }catch(e){if(current())setError(message(e));}finally{if(current())setVoicePhase('idle');}})();
-     };
-     finishRecording.current=()=>{if(current()&&recorder.state!=='inactive')recorder.stop();};
-     recorder.start(250);setVoicePhase('recording');
+   try {
+     const stop = await captureVoice({
+       voice, token, current,
+       authorize: () => call('tutor-microphone'),
+       onSeconds: setRecordSeconds,
+       onError: error => { setError(error); stopPlayback(); },
+       onStopped: audio => {
+         finishRecording.current = null;
+         setVoicePhase('transcribing');
+         void (async () => {
+           try {
+             const bytes = new Uint8Array(await audio.arrayBuffer());
+             if (!current()) return;
+             const result = await call<{ text: string }>('tutor-transcribe', {
+               conversationId: target, bytes, mime: audio.type,
+             });
+             if (!current()) return;
+             edit({text:[draftsRef.current[target]?.text,result.text].filter(Boolean).join('\n')},target);
+             setNotice('Transcript added to your draft. Review it, then choose Send.');
+           } catch (error) {
+             if (current()) setError(message(error));
+           } finally {
+             if (current()) setVoicePhase('idle');
+           }
+         })();
+       },
+     });
+     if (!stop || !current()) return;
+     finishRecording.current = stop;
+     setVoicePhase('recording');
    }catch(e){if(current()){stopPlayback();setError(`${message(e)} You can still type your question.`);}}
  }
  async function propose(turn:TutorTurn,kind:'thought'|'takeaway'){await run(async()=>{await call('tutor-exposed',{turnId:turn.id,requestId:turn.requestId});const p=await call<TutorProposal>('tutor-propose',{id:crypto.randomUUID(),turnId:turn.id,kind,text:turn.assistantText.slice(0,kind==='takeaway'?300:2000)});if(selected.current===turn.conversationId){setProposal(p);setProposalText(p.text);}});}

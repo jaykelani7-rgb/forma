@@ -21,6 +21,11 @@ parentPort!.on('message', (request: {id:number;method:string;args:unknown[]}) =>
       case 'snapshot': value=store.snapshot(); break;
       case 'health': value={healthy:store.db.prepare('PRAGMA quick_check').get()?.quick_check==='ok',savedAt:store.snapshot().savedAt}; break;
       case 'recovery-epoch': value=String(store.db.prepare('SELECT epoch FROM tutor_draft_state WHERE id=1').get()!.epoch); break;
+      case 'thought-voice-context': {
+        const {data,state}=store.snapshot();
+        value={problemKey:state.identity,sessionId:data.session?.id,contestMode:store.tutor.settings().contestMode};
+        break;
+      }
       case 'tutor-view': value=store.tutor.view(now); break;
       case 'tutor-open': value=store.tutor.open(a[0],now); break;
       case 'tutor-context': value=store.tutor.context(a[0]); break;

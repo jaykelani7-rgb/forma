@@ -1,0 +1,232 @@
+.filters {
+  display: grid;
+  gap: 14px;
+  margin: 22px 0 26px;
+}
+.filters .search {
+  margin: 0;
+  color: var(--muted);
+}
+.search input {
+  min-width: 0;
+  width: 100%;
+}
+.controls,
+.customDates {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+  align-items: end;
+  gap: 12px;
+}
+.customDates {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  max-width: 440px;
+}
+.controls > div,
+.customDates label {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+  color: var(--muted);
+  font-size: var(--text-meta);
+  font-weight: 500;
+}
+.controls select,
+.customDates input {
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  background-color: var(--surface);
+}
+.controls button {
+  min-height: 44px;
+  white-space: normal;
+  justify-content: center;
+}
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: clamp(16px, 2.5vw, 30px);
+  align-items: start;
+}
+.results {
+  min-width: 0;
+}
+.resultsTitle,
+.detailKicker {
+  color: var(--muted);
+  font-size: var(--text-meta);
+  font-weight: 500;
+}
+.entries {
+  list-style: none;
+  margin: 9px 0 16px;
+  padding: 0;
+}
+.entries li + li {
+  border-top: 1px solid var(--line);
+}
+.entry {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  width: 100%;
+  gap: 10px;
+  align-items: start;
+  padding: 12px;
+  text-align: left;
+  border-radius: 8px;
+  overflow-wrap: anywhere;
+}
+.entry:hover {
+  background: var(--soft);
+}
+.entry[aria-pressed="true"] {
+  background: var(--accent-soft);
+}
+.entry svg {
+  color: var(--accent);
+  margin-top: 5px;
+}
+.entryCopy {
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+}
+.entryCopy strong {
+  font:
+    400 1.45rem/1.15 "Instrument Serif",
+    Georgia,
+    serif;
+}
+.meta,
+.preview {
+  color: var(--muted);
+  font-size: var(--text-meta);
+}
+.preview {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+.outcome {
+  display: inline-block;
+  border: 1px solid var(--line);
+  border-radius: 99px;
+  padding: 2px 9px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: var(--text-meta);
+}
+.detail {
+  min-width: 0;
+  padding: clamp(16px, 2.5vw, 26px);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  overflow-wrap: anywhere;
+}
+.detail h2 {
+  margin: 6px 0 8px;
+  font:
+    400 clamp(2rem, 3.3vw, 3rem)/1.05 "Instrument Serif",
+    Georgia,
+    serif;
+}
+.detail .back {
+  display: none;
+}
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 9px;
+  list-style: none;
+  margin: 9px 0 0;
+  padding: 0;
+}
+.reflection,
+.history {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.detail h3 {
+  margin-bottom: 6px;
+  font-size: var(--text-body);
+  font-weight: 600;
+}
+.notes {
+  display: grid;
+  gap: 10px;
+  margin: 9px 0 0;
+}
+.notes dt {
+  color: var(--muted);
+  font-size: var(--text-meta);
+}
+.notes dd {
+  margin: 0;
+  white-space: pre-wrap;
+}
+.reflection a,
+.history button {
+  min-height: 44px;
+  margin-top: 4px;
+}
+.history ol {
+  list-style: none;
+  padding: 0;
+  margin: 6px 0 0;
+}
+.history li + li {
+  border-top: 1px solid var(--line);
+}
+.history li a {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 44px;
+  padding: 8px 0;
+}
+.history li a:hover strong {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.history li strong,
+.history li .meta {
+  display: block;
+}
+.history li strong {
+  font-weight: 500;
+}
+.history li svg {
+  color: var(--accent);
+}
+@media (min-width: 1001px) {
+  .detail {
+    position: sticky;
+    top: 20px;
+    max-height: calc(100dvh - 40px);
+    overflow: auto;
+  }
+}
+@media (max-width: 1000px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .detail .back {
+    display: inline-flex;
+    min-height: 44px;
+    margin-bottom: 8px;
+  }
+  .detail h2 {
+    scroll-margin-top: 88px;
+  }
+}
+@media (max-width: 620px) {
+  .controls {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
