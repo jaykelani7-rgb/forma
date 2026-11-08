@@ -204,8 +204,32 @@ export async function activate(context: vscode.ExtensionContext) {
     if (type === "reflect" && !target.sessionId) throw new Error("Reconnect to confirm the intended reflection session first.");
     const id = randomUUID();
     await enqueue({ id, type, payload, expectedProblemKey: target.key, ...(type !== "start" && target.sessionId ? { expectedSessionId: target.sessionId } : {}) }, target);
-    if (timerControl && queue.some(e => e.command.id === id)) throw new Error("The session change is waiting for acknowledgement. Reconnect and retry explicitly before continuing.");
-    if (type === "start" && !queue.some(e => e.command.id === id)) { bindings[target.fileUri].sessionId = `companion:${id}`; await saveBindings(); }
+    const pending = queue.find(entry => entry.command.id === id);
+    if (timerControl && pending) throw new Error("The session change is waiting for acknowledgement. Reconnect and retry explicitly before continuing.");
+    if (type === "start" && !pending) { bindings[target.fileUri].sessionId = `companion:${id}`; await saveBindings(); }
+    return pending;
+  }
+  async function pinSelection() {
+    requireLocal();
+    const editor = vscode.window.activeTextEditor;
+    if (!editor || editor.selection.isEmpty || editor.selections.length !== 1) throw new Error("Select one piece of code to pin to the Problem Desk.");
+    const { document, selection } = editor;
+    const fileUri = document.uri.toString(), version = document.version;
+    const binding = bindings[fileUri];
+    const size = document.offsetAt(selection.end) - document.offsetAt(selection.start);
+    if (size > 10000) throw new Error("Select up to 10,000 characters to pin to the Problem Desk.");
+    const target = await frozenTarget();
+    await credential();
+    if (!local() || !paired || target.fileUri !== fileUri || !binding || target.key !== binding.key || bindings[fileUri] !== binding ||
+        vscode.window.activeTextEditor !== editor || document.version !== version || editor.selections.length !== 1 || !editor.selection.isEqual(selection)) {
+      throw new Error("The selection or problem changed. Choose the code again.");
+    }
+    const code = document.getText(selection);
+    if (!code.trim()) throw new Error("Select code with some text to pin to the Problem Desk.");
+    const pending = await capture("desk-add", { kind: "code", text: code, fileUri }, target);
+    if (pending?.blocked) throw new Error(`Selection kept in pending captures. ${pending.blocked}`);
+    const message = pending ? "Selection queued locally. It will appear on the Problem Desk after delivery." : "Selection pinned to the Problem Desk.";
+    void vscode.window.setStatusBarMessage(message, 5000);
   }
   async function askSelectedCode() {
     const uri = await selected(), editor = vscode.window.activeTextEditor;
@@ -354,7 +378,7 @@ export async function activate(context: vscode.ExtensionContext) {
   }
   async function selectFolders() {
     requireLocal(); const folders = vscode.workspace.workspaceFolders?.filter(f => f.uri.scheme === "file") ?? [];
-    const choice = await vscode.window.showQuickPick(folders.map(folder => ({ label: folder.name, description: folder.uri.fsPath, picked: allowed.includes(folder.uri.fsPath), folder })), { canPickMany: true, title: "Forma · permitted practice folders", placeHolder: "Metadata stays local. Source contents are not read or uploaded.", ignoreFocusOut: true });
+    const choice = await vscode.window.showQuickPick(folders.map(folder => ({ label: folder.name, description: folder.uri.fsPath, picked: allowed.includes(folder.uri.fsPath), folder })), { canPickMany: true, title: "Forma · permitted practice folders", placeHolder: "Recognition uses local metadata. Forma reads code only when you invoke a code command.", ignoreFocusOut: true });
     if (!choice) return;
     await withdraw(); allowed = choice.map(item => item.folder.uri.fsPath); await context.workspaceState.update(FOLDERS, allowed); await watchActive();
   }
@@ -395,6 +419,7 @@ export async function activate(context: vscode.ExtensionContext) {
   });
   register("open", () => openCompanion());
   register("askSelectedCode", askSelectedCode);
+  register("pinSelection", pinSelection);
   register("memory", () => openCompanion("memory"));
   register("saveThought", async () => { const target = await frozenTarget(); const text = await vscode.window.showInputBox({ title: "Save Thought", prompt: "An observation for this problem", ignoreFocusOut: true, validateInput: value => value.trim() && value.length <= 10000 ? undefined : "Write up to 10,000 characters." }); if (text) await capture("thought", { text }, target); });
   register("start", () => capture("start")); register("pause", () => capture("pause")); register("resume", () => capture("resume"));

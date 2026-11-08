@@ -6,6 +6,8 @@ Ribbon appearance can be customized in Settings with a live preview, a small fol
 
 In Journal, combine search with outcome, source, and date filters. Open an entry to read its reflection and compare other attempts at the same problem. On desktop, **Speak a thought** on the Ribbon opens a recording for the attached problem. Finishing sends the audio to your configured Tutor provider for transcription. Edit the transcript and choose **Save thought locally** to add it to that problem’s notebook. Tap **Control + Option + R** to start or finish a recording from another app, or change the binding in desktop Settings. If transcription fails, open **Recover spoken thoughts** to retry from the original problem or discard the locally retained recording.
 
+Pause from the desktop Ribbon to **Leave a thread** about what you would try next. On return, **Pick up the thread** brings back your note and tracked time, with links to the problem and its linked solution. The problem desk keeps hypotheses, failing inputs, screenshots, and code you explicitly add with **Pin Selection to Forma Desk** in the paired VS Code extension. Desk items stay local and travel with full companion backups.
+
 ## Run locally
 
 Forma Companion's local desktop milestone is also available: `npm run companion:dev`. It adds the floating Ribbon timer, SQLite-backed practice/reflections and a paired VS Code extension while keeping this website independently usable. Desktop account sync is pending; see [companion setup and current scope](docs/companion/README.md).

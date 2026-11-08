@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CompanionStore } from '../apps/desktop/main/store';
+import { backupHash } from '../apps/desktop/main/backup-schema';
 import { decodeBackup } from '../src/lib/concurrency';
 import { clampPosition, defaultPreferences, validatePreferences } from '../apps/desktop/main/preferences';
 import { ClockContinuity } from '../apps/desktop/main/clock-continuity';
@@ -44,6 +45,52 @@ test('captured thoughts survive a crash and canonical export never invents untim
     assert.equal(companion.observations.length,2);
     assert.equal('credential' in companion,false);
   }finally{store.close();}
+});
+test("desk captures follow the original problem, survive restart and restore, and remain removable", () => {
+  const folder = mkdtempSync(join(tmpdir(), "forma-desk-"));
+  const path = join(folder, "notebook.sqlite");
+  let store = new CompanionStore(path);
+  const restored = new CompanionStore(":memory:");
+  try {
+    const fileUri = "file:///practice/a.cpp";
+    const attached = store.command({ ...attach, payload: { ...attach.payload, fileUri } }, "vscode", start);
+    const problemId = attached.state.problemId!;
+    const expectedProblemKey = attached.state.identity!;
+    const thread = { id: "thread", type: "desk-add", expectedProblemKey, payload: { problemId, kind: "thread", text: "Try parity next." } };
+    const saved = store.command(thread, "desktop", start);
+    assert.equal(store.command(thread, "desktop", start).revision, saved.revision);
+    const code = { id: "pin", type: "desk-add", expectedProblemKey, payload: { kind: "code", fileUri, text: "  return x % 2;" } };
+    assert.throws(() => store.command(code, "desktop", start), /Pin code from VS Code/);
+    assert.throws(() => store.command({ ...code, payload: { ...code.payload, fileUri: "file:///practice/other.cpp" } }, "vscode", start), /Link this solution/);
+    store.command(code, "vscode", start);
+    const attachment = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==";
+    const screenshot = { id: "image", type: "desk-add", expectedProblemKey, payload: { kind: "screenshot", text: "", problemId, attachment } };
+    assert.throws(() => store.command({ ...screenshot, payload: { ...screenshot.payload, attachment: "data:image/svg+xml;base64,PHN2Zz4=" } }, "desktop", start), /PNG or JPEG/);
+    store.command(screenshot, "desktop", start);
+    store.close();
+    store = new CompanionStore(path);
+    const reopened = store.snapshot();
+    assert.equal(reopened.data.session, null);
+    assert.deepEqual(reopened.state.thoughts, []);
+    assert.deepEqual(reopened.state.desk?.map(item => item.text), ["Try parity next.", "  return x % 2;", ""]);
+    const backup = store.backups.export({ scope: "companion", includeTutor: false }, start);
+    const recovery = restored.backups.export({ scope: "companion", includeTutor: true }, start);
+    restored.backups.restore(backup, { json: recovery, sha256: backupHash(recovery) }, start);
+    assert.deepEqual(restored.snapshot().state.desk, reopened.state.desk);
+
+    store.command({ id: "other-problem", type: "attach", payload: { url: "https://codeforces.com/contest/4/problem/B" } }, "desktop", start);
+    assert.throws(() => store.command({ ...thread, id: "stale-thread" }, "desktop", start), /active problem changed/);
+    const remove = { id: "remove", type: "desk-remove", expectedProblemKey, payload: { problemId, itemId: "image" } };
+    assert.throws(() => store.command(remove, "desktop", start), /active problem changed/);
+    store.command({ ...attach, id: "return" }, "desktop", start);
+    store.command(remove, "desktop", start);
+    assert.equal(store.exportCompanion().includes(attachment), false);
+    assert.equal(store.command(screenshot, "desktop", start).state.desk?.some(item => item.id === "image"), false);
+  } finally {
+    store.close();
+    restored.close();
+    rmSync(folder, { recursive: true, force: true });
+  }
 });
 test('recovery uses only checkpointed time and retains a real session for reflection',()=>{
   const store=new CompanionStore(':memory:');

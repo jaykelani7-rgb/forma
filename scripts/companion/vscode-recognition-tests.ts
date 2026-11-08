@@ -48,8 +48,19 @@ export async function run() {
     assert.equal(api.state().connection, 'File linked');
   }
   assert.deepEqual((await readdir(folder)).sort(), beforeFiles);
-  // Invoke the actual registered Tutor action, replacing only the picker choice in this Test host.
   const codeEditor = vscode.window.activeTextEditor!;
+  codeEditor.selection = new vscode.Selection(1, 0, 1, 0);
+  await vscode.commands.executeCommand("formaCompanion.pinSelection");
+  assert.match(api.tutorCommandError() ?? "", /Select one piece of code/);
+  const line = codeEditor.document.lineAt(1).text;
+  const deskSelection = new vscode.Selection(1, line.indexOf("return"), 1, line.indexOf(";") + 1);
+  codeEditor.selection = deskSelection;
+  await vscode.commands.executeCommand("formaCompanion.pinSelection");
+  assert.equal(api.tutorCommandError(), null);
+  assert.equal(api.state().queue.length, 0);
+  assert.equal(vscode.window.activeTextEditor, codeEditor);
+  assert.ok(codeEditor.selection.isEqual(deskSelection));
+  // Invoke the actual registered Tutor action, replacing only the picker choice in this Test host.
   codeEditor.selection = new vscode.Selection(1, 0, 1, codeEditor.document.lineAt(1).text.length);
   api.setTutorCodeChoice("selection");
   await vscode.commands.executeCommand("formaCompanion.askSelectedCode");

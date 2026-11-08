@@ -5,6 +5,10 @@ export const MAX_QUEUED_MESSAGES = 200;
 export type LearningOutcome = "independent" | "hint" | "editorial" | "unsolved";
 export type ReflectionDifficulty = "approach" | "coding" | "edges" | "complexity" | "debugging";
 export type Mistake = "statement" | "approach" | "invariant" | "edges" | "indexing" | "numeric" | "complexity" | "implementation" | "other";
+export const DESK_THREAD_LIMIT = 1000;
+export const DESK_IMAGE_LIMIT = 512 * 1024;
+export type DeskKind = "thread" | "hypothesis" | "counterexample" | "code" | "screenshot";
+export type DeskEntry = { kind: DeskKind; text: string; attachment?: string };
 export type CommandPayloads = {
   attach: { url: string; title?: string; fileUri?: string; workspaceId?: string; clientId?: string; source?: "manual" | "cph" | "browser"; adapterVersion?: string; activate?: boolean; replace?: boolean };
   "forget-binding": { fileUri: string; bindingId?: string; clientId?: string; workspaceId?: string };
@@ -16,6 +20,8 @@ export type CommandPayloads = {
   resume: Record<string, never>;
   finish: Record<string, never>;
   thought: { text: string };
+  "desk-add": DeskEntry & { problemId?: string; fileUri?: string };
+  "desk-remove": { itemId: string; problemId: string };
   reflect: { outcome: LearningOutcome; difficulty?: ReflectionDifficulty | null; takeaway?: string; notes?: string; mistakes?: Mistake[]; mistakeNote?: string; approach?: string };
   recall: { activity: "explain" | "complexity"; outcome: "independent" | "cue" | "unrecalled"; response: string; cue: string };
   defer: { until: string | null };
@@ -50,15 +56,36 @@ function fields(v: Record<string, unknown>, allowed: string[]) {
 function optionalText(v: Record<string, unknown>, key: string, max: number) {
   if (v[key] !== undefined && !string(v[key], max)) fail(`Invalid ${key}.`);
 }
-function size(input: unknown) {
+function size(input: unknown, limit = MAX_MESSAGE_BYTES) {
   let encoded: string;
   try { encoded = JSON.stringify(input); } catch { return fail("Message must be serializable."); }
-  if (!encoded || new TextEncoder().encode(encoded).byteLength > MAX_MESSAGE_BYTES) fail("Message exceeds the supported size.");
+  if (!encoded || new TextEncoder().encode(encoded).byteLength > limit) fail("Message exceeds the supported size.");
 }
+
+export function validateDeskEntry(input: unknown): asserts input is DeskEntry & Record<string, unknown> {
+  if (!object(input) || !choices(input.kind, ["thread", "hypothesis", "counterexample", "code", "screenshot"])
+    || !string(input.text, input.kind === "thread" ? DESK_THREAD_LIMIT : 10000)
+    || (input.kind !== "screenshot" && !input.text.trim())) fail("Write a valid desk entry before saving.");
+  const entry = input as DeskEntry;
+  if (entry.kind !== "screenshot") {
+    if (entry.attachment !== undefined) fail("Only screenshots can include an image.");
+    return;
+  }
+  const image = entry.attachment;
+  if (typeof image !== "string" || image.length > Math.ceil(DESK_IMAGE_LIMIT / 3) * 4 + 23
+    || !/^data:image\/(?:png;base64,iVBORw0KGgo|jpeg;base64,\/9j\/)[A-Za-z0-9+/]*={0,2}$/.test(image)) {
+    return fail("Choose a PNG or JPEG screenshot up to 512 KB.");
+  }
+  const base64 = image.slice(image.indexOf(",") + 1);
+  const padding = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0;
+  if (base64.length % 4 || base64.length / 4 * 3 - padding > DESK_IMAGE_LIMIT) fail("Choose a PNG or JPEG screenshot up to 512 KB.");
+}
+
 /** Validate before persistence or dispatch. Unknown fields never reach privileged code. */
 export function parseCommand(input: unknown, now = Date.now()): CompanionCommand {
-  size(input);
   if (!object(input) || !string(input.id, 90, 1) || !string(input.type, 30, 1) || !object(input.payload)) return fail("Invalid companion command.");
+  const screenshot = input.type === "desk-add" && input.payload.kind === "screenshot";
+  size(input, screenshot ? MAX_MESSAGE_BYTES + Math.ceil(DESK_IMAGE_LIMIT / 3) * 4 : MAX_MESSAGE_BYTES);
   fields(input, ["id", "type", "payload", "expectedProblemKey", "expectedSessionId", "occurredAt"]);
   if (input.occurredAt !== undefined && (!iso(input.occurredAt) || Date.parse(input.occurredAt) > now + 5 * 60 * 1000)) return fail("The command time is invalid or too far in the future. Check the device clock.");
   if (input.expectedProblemKey !== undefined && (!string(input.expectedProblemKey, 100, 1) || !/^(contest|gym):\d+:[A-Z]\d*$/.test(input.expectedProblemKey))) return fail("Invalid expected problem identity.");
@@ -92,6 +119,20 @@ export function parseCommand(input: unknown, now = Date.now()): CompanionCommand
       break;
     case "pause": case "resume": case "finish": fields(p, []); break;
     case "thought": fields(p, ["text"]); if (!string(p.text, 10000, 1) || !p.text.trim()) return fail("Write a thought before saving."); break;
+    case "desk-add": {
+      fields(p, ["kind", "text", "attachment", "problemId", "fileUri"]);
+      validateDeskEntry(p);
+      if (!input.expectedProblemKey || (p.kind === "code" ? p.problemId !== undefined : !string(p.problemId, 200, 1) || p.fileUri !== undefined)) return fail("Choose the original desk before saving.");
+      if (p.kind === "code") {
+        if (!string(p.fileUri, 4096, 1)) return fail("Pin code from a linked solution file.");
+        parseCommand({ id: "desk-file", type: "attach", payload: { url: "https://codeforces.com/contest/1/problem/A", fileUri: p.fileUri } });
+      }
+      break;
+    }
+    case "desk-remove":
+      fields(p, ["itemId", "problemId"]);
+      if (!input.expectedProblemKey || !string(p.itemId, 90, 1) || !string(p.problemId, 200, 1)) return fail("Choose a saved item from this desk.");
+      break;
     case "reflect":
       fields(p, ["outcome", "difficulty", "takeaway", "notes", "mistakes", "mistakeNote", "approach"]);
       if (!choices(p.outcome, ["independent", "hint", "editorial", "unsolved"]) || (p.difficulty !== undefined && p.difficulty !== null && !choices(p.difficulty, ["approach", "coding", "edges", "complexity", "debugging"]))) return fail("Choose a recognised reflection outcome and difficulty.");

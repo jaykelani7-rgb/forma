@@ -68,7 +68,7 @@ export interface BackupRestorePreview {
   token: string;
   scope: "notebook" | "companion" | "tutor";
   includeTutor: boolean;
-  counts: { problems: number; attempts: number; thoughts: number; conversations: number; turns: number; drafts: number };
+  counts: { problems: number; attempts: number; thoughts: number; deskItems?: number; conversations: number; turns: number; drafts: number };
   warnings: string[];
   replacement: string[];
   expiresAt?: string;

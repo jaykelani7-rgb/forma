@@ -59,6 +59,11 @@
         "title": "Forma: Ask About Selected Code"
       },
       {
+        "command": "formaCompanion.pinSelection",
+        "title": "Forma: Pin Selection to Desk",
+        "shortTitle": "Pin Selection to Forma Desk"
+      },
+      {
         "command": "formaCompanion.saveThought",
         "title": "Forma: Save Thought"
       },
@@ -111,6 +116,15 @@
         "title": "Forma: Rebind This File from CPH"
       }
     ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "formaCompanion.pinSelection",
+          "when": "editorHasSelection && isWorkspaceTrusted && resourceScheme == file",
+          "group": "1_modification@90"
+        }
+      ]
+    },
     "configuration": {
       "title": "Forma Companion",
       "properties": {

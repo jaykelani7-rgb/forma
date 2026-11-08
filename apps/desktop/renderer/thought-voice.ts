@@ -37,6 +37,7 @@ export function useThoughtVoice(
   active: boolean,
   problemKey: string | null | undefined,
   sessionId: string | undefined,
+  meterEnabled = true,
 ) {
   const [voice] = useState(() => new TutorVoiceController());
   const [phase, setPhase] = useState<Phase>("idle");
@@ -58,6 +59,7 @@ export function useThoughtVoice(
   } | null>(null);
   const stop = useRef<(() => void) | null>(null);
   const sendClip = useRef<(() => void) | null>(null);
+  const levelRef = useRef<HTMLSpanElement>(null);
 
   const invalidateListing = useCallback(() => {
     listing.current++;
@@ -236,6 +238,7 @@ export function useThoughtVoice(
             ...(target.sessionId ? { sessionId: target.sessionId } : {}),
           }),
         onSeconds: setSeconds,
+        onLevel: meterEnabled ? level => levelRef.current?.style.setProperty("--ribbon-mic-level", String(level)) : undefined,
         onError: fail,
         onStopped: (clip, timeLimit) => {
           stop.current = null;
@@ -328,6 +331,7 @@ export function useThoughtVoice(
   };
   return {
     phase,
+    levelRef,
     seconds,
     provider,
     error,

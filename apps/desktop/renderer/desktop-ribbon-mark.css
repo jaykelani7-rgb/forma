@@ -1,0 +1,97 @@
+.desktop-ribbon-mark {
+  display: inline-flex;
+  position: relative;
+  flex-shrink: 0;
+  line-height: 0;
+  --ribbon-hinge: cubic-bezier(.22, .72, .28, 1);
+}
+
+.desktop-ribbon-pose,
+.desktop-ribbon-fold {
+  display: inline-flex;
+  position: relative;
+}
+
+.desktop-ribbon-mark[data-focus="true"] .desktop-ribbon-pose {
+  transform: translateY(1px) scaleY(.9);
+}
+
+.desktop-ribbon-mark[data-edge="left"] .desktop-ribbon-pose {
+  transform: translateX(-2px) perspective(110px) rotateY(-32deg) scale(.9);
+}
+
+.desktop-ribbon-mark[data-edge="right"] .desktop-ribbon-pose {
+  transform: translateX(2px) perspective(110px) rotateY(32deg) scale(.9);
+}
+
+.desktop-ribbon-seam {
+  position: absolute;
+  inset: auto 16% -3px;
+  block-size: 2px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: #a65343;
+}
+
+.desktop-ribbon-seam::after {
+  content: "";
+  display: block;
+  block-size: 100%;
+  border-radius: inherit;
+  background: #ffd0a6;
+  transform: scaleX(.24);
+  transform-origin: center;
+}
+
+.desktop-ribbon-fold[data-feedback="bookmark"]::before {
+  content: "";
+  position: absolute;
+  inset: 52% 24% auto auto;
+  inline-size: 21%;
+  block-size: 55%;
+  background: linear-gradient(90deg, #c53520, #ed5031 56%, #ffac82);
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 77%, 0 100%);
+}
+
+.desktop-ribbon-fold[data-feedback="bookmark"] svg {
+  position: relative;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .companion:not(.is-reduced) .desktop-ribbon-pose {
+    transition: transform .32s var(--ribbon-hinge);
+  }
+
+  .companion:not(.is-reduced) .desktop-ribbon-seam::after {
+    transform: scaleX(calc(.24 + .76 * var(--ribbon-mic-level, 0)));
+    transition: transform .08s linear;
+  }
+
+  .companion:not(.is-reduced) .desktop-ribbon-fold[data-feedback="thought"] {
+    animation: desktop-ribbon-gather .56s var(--ribbon-hinge) both;
+  }
+
+  .companion:not(.is-reduced) .desktop-ribbon-fold[data-feedback="bookmark"] {
+    animation: desktop-ribbon-settle .62s var(--ribbon-hinge) both;
+  }
+
+  .companion:not(.is-reduced) .desktop-ribbon-fold[data-feedback="bookmark"]::before {
+    transform-origin: top;
+    animation: desktop-ribbon-tail .52s .1s var(--ribbon-hinge) both;
+  }
+}
+
+@keyframes desktop-ribbon-gather {
+  42% { transform: perspective(100px) rotateY(-37deg) scale(.83, .94); }
+  75% { transform: perspective(100px) rotateY(7deg) scale(1.04, 1); }
+}
+
+@keyframes desktop-ribbon-settle {
+  28% { transform: translateY(-3px) rotate(-8deg); }
+  72% { transform: translateY(1px) rotate(2deg); }
+}
+
+@keyframes desktop-ribbon-tail {
+  from { transform: scaleY(.04); }
+  to { transform: scaleY(1); }
+}

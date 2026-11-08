@@ -1,4 +1,4 @@
-import { parseCommand, type CompanionCommand, type CommandPayloads } from "../../contracts/src/index";
+import { parseCommand, validateDeskEntry, type CompanionCommand, type CommandPayloads, type DeskEntry } from "../../contracts/src/index";
 import { canonicalProblemIdentity, normalizeCodeforcesIdentity } from "./codeforces-identity";
 import { deferProblem, elapsed, localDate, nextReview, validateData, type Attempt, type Data, type Problem } from "../../../src/lib/model";
 import { withPracticeSession } from "../../../src/lib/practice-session";
@@ -12,6 +12,9 @@ import { currentPracticePlan, decidePlanItem, reconcilePracticePlan, resolvePlan
 import { withPlannedPracticeSession } from "../../../src/lib/practice-plan-session";
 
 export interface CompanionThought { id: string; problemId: string; text: string; createdAt: string }
+export type CompanionDeskItem = DeskEntry & { id: string; problemId: string; createdAt: string };
+const DESK_ITEM_LIMIT = 250;
+const DESK_IMAGE_BUDGET = 4 * 1024 * 1024;
 export interface CompanionBinding { id: string; problemId: string; identity: string; fileUri: string; confirmedAt: string; workspaceId?: string; clientId?: string; source?: "manual" | "cph" | "browser"; adapterVersion?: string }
 export interface CompanionSubmission { id: number; handle: string; identity: string; verdict: string | null; submittedAt: string; observedAt: string; sessionId?: string }
 export interface CompanionState {
@@ -24,6 +27,7 @@ export interface CompanionState {
   platform: "unknown" | "pending" | "accepted" | "rejected";
   learning: "unrecorded" | "independent" | "hint" | "editorial" | "unsolved";
   thoughts: CompanionThought[];
+  desk?: CompanionDeskItem[];
   bindings: CompanionBinding[];
   submissions: CompanionSubmission[];
   handle: string | null;
@@ -128,6 +132,30 @@ export function applyCompanionCommand(data: Data, state: CompanionState, input: 
       // Untimed thoughts are device memory, never manufactured attempts or coding time.
       return { data, state: { ...state, thoughts } };
     }
+    case "desk-add": {
+      const problem = currentProblem(data, state);
+      const { kind, text, attachment, problemId, fileUri } = command.payload;
+      if (kind === "code") {
+        if (!state.bindings.some(binding => binding.problemId === problem.id && binding.fileUri === fileUri)) {
+          throw new Error("Link this solution to the active problem before pinning a selection.");
+        }
+      } else if (problemId !== problem.id) {
+        throw new Error("The active problem changed. Return to the original desk before saving.");
+      }
+      const desk = state.desk ?? [];
+      if (desk.length >= DESK_ITEM_LIMIT) throw new Error("The desk is full. Remove a saved item to make room.");
+      if (attachment && desk.reduce((size, item) => size + (item.attachment?.length ?? 0), attachment.length) > DESK_IMAGE_BUDGET) {
+        throw new Error("The screenshot space is full. Remove a screenshot to make room.");
+      }
+      const item = { id: command.id, problemId: problem.id, createdAt: stamp, kind,
+        text: kind === "code" || kind === "counterexample" ? text : text.trim(), ...(attachment ? { attachment } : {}) };
+      return { data, state: { ...state, desk: [...desk, item] } };
+    }
+    case "desk-remove": {
+      const problem = currentProblem(data, state);
+      if (command.payload.problemId !== problem.id) throw new Error("The active problem changed. Return to the original desk.");
+      return { data, state: { ...state, desk: (state.desk ?? []).filter(item => item.id !== command.payload.itemId || item.problemId !== problem.id) } };
+    }
     case "reflect": {
       const problem = currentProblem(data, state);
       const session = currentSession(data, state);
@@ -226,6 +254,19 @@ export function validateCompanionState(input: unknown, data: Data): CompanionSta
   const ids = new Set(data.problems.map((p) => p.id));
   if (state.version !== 1 || !(state.problemId === null || ids.has(state.problemId)) || !(state.identity === null || (typeof state.identity === "string" && /^(contest|gym):\d+:[A-Z]\d*$/.test(state.identity))) || !member(state.lifecycle, ["ready", "working", "paused", "closed"]) || !member(state.localTests, ["unknown", "running", "passed", "failed", "stale"]) || !member(state.platform, ["unknown", "pending", "accepted", "rejected"]) || !member(state.learning, ["unrecorded", "independent", "hint", "editorial", "unsolved"]) || !(state.handle === null || (typeof state.handle === "string" && /^[A-Za-z0-9_.-]{3,24}$/.test(state.handle))) || !(state.checkedAt === null || stamp(state.checkedAt)) || !Array.isArray(state.thoughts) || state.thoughts.length > 1000 || !Array.isArray(state.bindings) || state.bindings.length > 500 || !Array.isArray(state.submissions) || state.submissions.length > 1000) throw new Error("Invalid companion state fields.");
   for (const thought of state.thoughts) if (!thought || typeof thought.id !== "string" || !ids.has(thought.problemId) || typeof thought.text !== "string" || thought.text.length > 10000 || !stamp(thought.createdAt)) throw new Error("Invalid saved thought.");
+  if (state.desk !== undefined) {
+    if (!Array.isArray(state.desk) || state.desk.length > DESK_ITEM_LIMIT) throw new Error("Invalid desk items.");
+    const deskIds = new Set<string>();
+    let imageBytes = 0;
+    for (const item of state.desk) {
+      validateDeskEntry(item);
+      if (typeof item.id !== "string" || !item.id || item.id.length > 90 || deskIds.has(item.id) || !ids.has(item.problemId)
+        || !stamp(item.createdAt) || Object.keys(item).some(key => !["id", "problemId", "createdAt", "kind", "text", "attachment"].includes(key))) throw new Error("Invalid saved desk item.");
+      deskIds.add(item.id);
+      imageBytes += item.attachment?.length ?? 0;
+    }
+    if (imageBytes > DESK_IMAGE_BUDGET) throw new Error("Desk screenshot space exceeds the supported size.");
+  }
   for (const binding of state.bindings) { if (!binding || typeof binding.id !== "string" || !ids.has(binding.problemId) || canonicalProblemIdentity(data.problems.find((p) => p.id === binding.problemId)!) !== binding.identity || !stamp(binding.confirmedAt)) throw new Error("Invalid solution binding."); parseCommand({ id: binding.id, type: "attach", payload: { url: data.problems.find((p) => p.id === binding.problemId)!.url, fileUri: binding.fileUri, ...(binding.workspaceId ? { workspaceId: binding.workspaceId } : {}), ...(binding.clientId ? { clientId: binding.clientId } : {}), ...(binding.source ? { source: binding.source } : {}), ...(binding.adapterVersion ? { adapterVersion: binding.adapterVersion } : {}) } }); }
   for (const s of state.submissions) if (!s || !Number.isSafeInteger(s.id) || s.id < 1 || typeof s.handle !== "string" || !/^[A-Za-z0-9_.-]{3,24}$/.test(s.handle) || typeof s.identity !== "string" || !/^(contest|gym):\d+:[A-Z]\d*$/.test(s.identity) || !(s.verdict === null || (typeof s.verdict === "string" && s.verdict.length <= 100)) || !stamp(s.submittedAt) || !stamp(s.observedAt)) throw new Error("Invalid platform evidence.");
   for (const s of state.submissions) {

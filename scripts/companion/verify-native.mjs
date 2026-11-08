@@ -31,7 +31,43 @@ try {
   await page.getByRole('button',{name:'Back to practice',exact:true}).click();
   await page.getByRole('button', {name:'Begin a session',exact:true}).click();
   await page.getByRole('button', {name:'Pause from ribbon',exact:true}).click();
-  await page.getByRole('button', {name:'Resume from ribbon',exact:true}).click();
+  const thread = 'Check what happens when both bounds are equal.';
+  await page.getByLabel('What would you try next?').fill(thread);
+  await page.getByRole('button',{name:'Save thread',exact:true}).click();
+  await page.locator('.desktop-ribbon-fold[data-feedback="thought"]').waitFor();
+  await page.getByRole('button',{name:'Hypothesis',exact:true}).click();
+  await page.getByLabel('Hypothesis',{exact:true}).fill('Try keeping the invariant at the boundary.');
+  await page.getByRole('button',{name:'Save to desk',exact:true}).click();
+  await page.getByText('Try keeping the invariant at the boundary.',{exact:true}).first().waitFor();
+  await page.getByRole('button',{name:'Screenshot',exact:true}).click();
+  const png = await page.evaluate(() => {
+    const canvas = document.createElement('canvas');
+    return canvas.toDataURL('image/png').split(',')[1];
+  });
+  await page.locator('input[type=file]').setInputFiles({name:'practice.png',mimeType:'image/png',buffer:Buffer.from(png,'base64')});
+  await page.getByRole('img',{name:'Screenshot to save',exact:true}).waitFor();
+  await page.getByLabel('Caption (optional)',{exact:true}).fill('Boundary example');
+  await page.getByRole('button',{name:'Save to desk',exact:true}).click();
+  await page.getByText('Boundary example',{exact:true}).first().waitFor();
+  const desk = await page.evaluate(()=>window.forma.getSnapshot());
+  assert.equal(desk.data.session.runningSince,null);
+  assert.deepEqual(desk.state.desk.map(item=>item.kind),['thread','hypothesis','screenshot']);
+  await page.reload();
+  await page.getByRole('button',{name:'Back to practice',exact:true}).click();
+  await page.getByRole('button',{name:/^Pick up the thread/}).click();
+  await page.getByText(thread,{exact:true}).waitFor();
+  await page.getByText('Try keeping the invariant at the boundary.',{exact:true}).first().waitFor();
+  await page.evaluate(()=>window.forma.ui('theme','ink'));
+  await page.locator('.companion.theme-ink').waitFor();
+  await page.screenshot({path:join(output,'native-problem-desk-ink.png')});
+  await page.evaluate(()=>window.forma.ui('theme','light'));
+  await page.locator('.companion.theme-light').waitFor();
+  await page.screenshot({path:join(output,'native-problem-desk-light.png')});
+  await page.getByText('Boundary example',{exact:true}).first().click();
+  await page.getByRole('img',{name:'Boundary example',exact:true}).waitFor();
+  await page.getByRole('button',{name:'Remove screenshot',exact:true}).click();
+  await page.getByText('Boundary example',{exact:true}).first().waitFor({state:'hidden'});
+  await page.getByRole('button', {name:'Resume session',exact:true}).click();
   await page.getByRole('button', {name:'Pause from ribbon',exact:true}).waitFor();
 
   // Rehearsal must not mutate the real, paused session in this isolated profile.

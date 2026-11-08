@@ -25,9 +25,44 @@ export class TutorVoiceController {
   }
 }
 
+/** Observe the recorder's existing stream locally without routing it to the speakers. */
+function watchMicrophoneLevel(stream: MediaStream, onLevel: (level: number) => void): () => void {
+  const audio = new AudioContext();
+  try {
+    const source = audio.createMediaStreamSource(stream);
+    const analyser = audio.createAnalyser();
+    analyser.fftSize = 256;
+    source.connect(analyser);
+    if (audio.state === "suspended") void audio.resume().catch(() => {});
+
+    const samples = new Uint8Array(analyser.fftSize);
+    let level = 0;
+    const timer = setInterval(() => {
+      if (audio.state !== "running") return;
+      analyser.getByteTimeDomainData(samples);
+      let energy = 0;
+      for (const sample of samples) {
+        const centered = (sample - 128) / 128;
+        energy += centered * centered;
+      }
+      const rms = Math.sqrt(energy / samples.length);
+      const next = Math.min(1, rms * 5);
+      level = next > level ? next : level * .55 + next * .45;
+      onLevel(level);
+    }, 50);
+    return () => {
+      clearInterval(timer);
+      void audio.close().catch(() => {});
+    };
+  } catch (error) {
+    void audio.close().catch(() => {});
+    throw error;
+  }
+}
+
 /** Capture bounded audio locally. The caller decides when and where to send it. */
 export async function captureVoice({
-  voice, token, current, authorize, onSeconds, onError, onStopped,
+  voice, token, current, authorize, onSeconds, onError, onStopped, onLevel,
 }: {
   voice: TutorVoiceController;
   token: number;
@@ -36,6 +71,7 @@ export async function captureVoice({
   onSeconds: (seconds: number) => void;
   onError: (message: string) => void;
   onStopped: (clip: Blob, timeLimit: boolean) => void;
+  onLevel?: (level: number) => void;
 }): Promise<(() => void) | undefined> {
   if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined")
     throw new Error("Voice recording is unavailable here.");
@@ -69,6 +105,7 @@ export async function captureVoice({
   const ticker = setInterval(() => {
     if (current()) onSeconds(++seconds);
   }, 1000);
+  let releaseLevel: (() => void) | undefined;
   const release = voice.own(token, () => {
     clearTimeout(limit);
     clearInterval(ticker);
@@ -76,6 +113,7 @@ export async function captureVoice({
     recorder.onerror = null;
     recorder.ondataavailable = null;
     try {
+      releaseLevel?.();
       if (recorder.state !== "inactive") recorder.stop();
     } finally {
       releaseTracks();
@@ -102,7 +140,19 @@ export async function captureVoice({
     if (!bytes) onError("The recording was empty. Try again or type instead.");
     else onStopped(new Blob(chunks, { type: recorder.mimeType }), timeLimit);
   };
-  recorder.start(250);
+  try {
+    recorder.start(250);
+  } catch (error) {
+    release();
+    throw error;
+  }
+  if (onLevel) {
+    try {
+      releaseLevel = watchMicrophoneLevel(stream, onLevel);
+    } catch {
+      // The recorder can still run with a steady indicator.
+    }
+  }
   onSeconds(0);
   return stop;
 }

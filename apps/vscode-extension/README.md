@@ -1,6 +1,6 @@
 # Forma Companion for VS Code
 
-This private extension connects a trusted local VS Code workspace to the desktop companion. It does not read source contents, upload source files, compile solutions, or report CPH test results.
+This private extension connects a trusted local VS Code workspace to the desktop companion. It reads source text only through explicit code commands. CPH runs its own tests and reports their results.
 
 ## Run locally
 
@@ -15,7 +15,9 @@ The standalone equivalent build is `node apps/vscode-extension/scripts/build.mjs
 
 Choose **Recognise problems from CPH** once in setup, then open a CPH-imported solution. Its supported metadata identifies the problem automatically. For a local problem without metadata, use the optional Chrome **Use in Forma** flow. Advanced recovery remains available through **Forma: Attach Codeforces Problem**. Paste its exact problem URL, preserving Gym and indices such as A1/A2. **Start Session**, **Save Thought**, **Pause Session**, **Resume Session**, **Finish and Reflect**, and **Open Prior Memory** are explicit commands. Timer controls require a live desktop connection; offline work duration is not reconstructed. A thought or explicit recovery attachment is kept in the local extension queue until the desktop acknowledges its durable revision. A pending capture is not described as saved to the companion notebook.
 
-The queue keeps stable command IDs and the original capture timestamp, retries with backoff, and caps pending commands at 128 and serialized storage at 1 MiB. The desktop journal retains that capture time separately from its actual receipt time. Captures carry the expected problem and, for known sessions, expected session ID. A context conflict blocks delivery and retains the capture for recovery. Restore the intended problem/session before **Retry Pending Captures**, or export pending captures with **Export Pending Captures for Recovery**. Queue exports contain private notes and local file paths; choose a private destination. Existing malformed queue storage is preserved for export rather than overwritten.
+The queue keeps stable command IDs and the original capture timestamp, retries with backoff, and caps pending commands at 128 and serialized storage at 1 MiB. The desktop journal retains that capture time separately from its actual receipt time. Captures carry the expected problem and, for known sessions, expected session ID. A context conflict blocks delivery and retains the capture for recovery. Restore the intended problem/session before **Retry Pending Captures**, or export pending captures with **Export Pending Captures for Recovery**. Queue exports can contain notes, code selections and local file paths. Existing malformed queue storage is preserved for export rather than overwritten.
+
+To keep a code excerpt beside your practice notes, select one range in an associated solution and run **Forma: Pin Selection to Desk** from the command palette or **Pin Selection to Forma Desk** from the editor context menu. The selected text is saved to the linked problem’s local Desk through the same pending capture queue. Pinning stays on this device and keeps the editor open.
 
 ## CPH capability inspected on this machine
 

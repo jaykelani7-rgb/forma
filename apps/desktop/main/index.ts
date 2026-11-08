@@ -2,6 +2,7 @@ import { readRibbonOptions } from "../../../packages/ribbon/options";
 import { app, BrowserWindow, ipcMain, screen, Tray, Menu, nativeImage, globalShortcut, shell, dialog, safeStorage, powerMonitor, nativeTheme, systemPreferences } from "electron";
 import { mkdirSync, readFileSync, writeFileSync, existsSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { homedir } from 'node:os';
 import { randomBytes, randomUUID } from "node:crypto";
 import { TutorConfiguration } from "./tutor-config";
@@ -441,6 +442,18 @@ async function ui(action:string,payload:unknown){
     case 'hitbox':if(typeof payload!=='boolean')throw new Error('Invalid hitbox.');window.setIgnoreMouseEvents(!payload,{forward:true});return null;
     case 'open-external': {
       await shell.openExternal(tutorExternalUrl(payload));return null;
+    }
+    case 'open-solution': {
+      if (typeof payload !== "string" || payload.length > 90) throw new Error("Choose a linked solution.");
+      const current = recoveryFence.lease();
+      const local = await database.call<LocalSnapshot>("snapshot");
+      current();
+      const binding = local.state.bindings.find(item => item.id === payload && item.problemId === local.state.problemId);
+      if (!binding) throw new Error("This solution is no longer linked to the current problem.");
+      const url = new URL(binding.fileUri);
+      if (!statSync(fileURLToPath(url), { throwIfNoEntry: false })?.isFile()) throw new Error("The linked solution moved. Reopen it in VS Code and update the association.");
+      await shell.openExternal(`vscode://file${url.pathname}`);
+      return null;
     }
     case 'open-vscode':await shell.openExternal('vscode://');return null;
     case 'open-forma':await shell.openExternal('http://localhost:3001');return null;

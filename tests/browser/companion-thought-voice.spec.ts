@@ -18,6 +18,8 @@ interface FailedTake {
 interface ThoughtVoiceFixture {
   microphoneRequests: { requestId: string; problemKey: string; sessionId?: string }[];
   audioRequests: number;
+  audioMeters: number;
+  closedAudioMeters: number;
   stoppedTracks: number;
   transcriptions: RecordedClip[];
   retries: { takeId: string; requestId: string }[];
@@ -37,7 +39,7 @@ declare global {
   }
 }
 
-async function openRibbon(page: Page) {
+async function openRibbon(page: Page, reducedMotion = true) {
   const renderer = resolve(".companion-build/renderer");
   const prefix = "/__thought_voice__/";
   await page.route(`**${prefix}**`, async (route) => {
@@ -68,7 +70,7 @@ async function openRibbon(page: Page) {
     state: { ...initialCompanionState(), identity: "contest:4:A", problemId: "voice-first" },
     revision: 1,
     savedAt: stamp,
-    preferences: { theme: "ink", reducedMotion: true, snoozedUntil: null, thoughtShortcut: "Control+Option+R" },
+    preferences: { theme: "ink", reducedMotion, snoozedUntil: null, thoughtShortcut: "Control+Option+R" },
     integration: { connected: true, paired: true, status: "Fixture connected" },
     codeforces: { checking: false, checkedAt: null, error: null },
     presentation: { expanded: false, thoughtShortcutPress: 7, thoughtShortcutAvailable: true },
@@ -96,6 +98,8 @@ async function openRibbon(page: Page) {
     const fixture: ThoughtVoiceFixture = {
       microphoneRequests: [],
       audioRequests: 0,
+      audioMeters: 0,
+      closedAudioMeters: 0,
       stoppedTracks: 0,
       transcriptions: [],
       retries: [],
@@ -217,6 +221,23 @@ async function openRibbon(page: Page) {
         },
       },
     });
+    class FixtureAudioContext {
+      state: AudioContextState = "running";
+
+      constructor() { fixture.audioMeters++; }
+
+      createMediaStreamSource() { return { connect() {} }; }
+
+      createAnalyser() {
+        return {
+          fftSize: 256,
+          getByteTimeDomainData(samples: Uint8Array) { samples.fill(146); },
+        };
+      }
+
+      async close() { fixture.closedAudioMeters++; this.state = "closed"; }
+    }
+    Object.defineProperty(window, "AudioContext", { configurable: true, value: FixtureAudioContext });
     class FixtureRecorder {
       static isTypeSupported(mime: string) { return mime.startsWith("audio/webm"); }
       state: RecordingState = "inactive";
@@ -274,6 +295,7 @@ test("a recorded ribbon thought becomes an editable draft and saves only on requ
   ]);
   expect(recorded.audioRequests).toBe(1);
   expect(recorded.stoppedTracks).toBe(1);
+  expect(await page.evaluate(() => window.__thoughtVoiceFixture.audioMeters)).toBe(0);
   expect(recorded.transcriptions).toEqual([{
     requestId: recorded.microphoneRequests[0].requestId,
     mime: expect.stringMatching(/^audio\/webm/),
@@ -293,6 +315,22 @@ test("a recorded ribbon thought becomes an editable draft and saves only on requ
     }),
   ]);
   await expect(page.getByText("Thought saved locally.", { exact: true })).toBeVisible();
+});
+
+test("the Ribbon seam reacts only while the microphone is recording and releases its meter", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await openRibbon(page, false);
+  const seam = page.locator(".desktop-ribbon-seam");
+  await expect(seam).toHaveCount(0);
+  await page.getByRole("button", { name: "Speak a thought", exact: true }).click();
+  await expect(seam).toBeVisible();
+  await expect.poll(() => seam.evaluate(element => Number(element.style.getPropertyValue("--ribbon-mic-level")))).toBeGreaterThan(0.5);
+  await page.getByRole("button", { name: "Cancel recording", exact: true }).click();
+  await expect(seam).toHaveCount(0);
+  expect(await page.evaluate(() => {
+    const { audioMeters, closedAudioMeters, stoppedTracks, transcriptions } = window.__thoughtVoiceFixture;
+    return [audioMeters, closedAudioMeters, stoppedTracks, transcriptions.length];
+  })).toEqual([1, 1, 1, 0]);
 });
 
 for (const interruption of ["cancellation", "an attached problem change"] as const) {

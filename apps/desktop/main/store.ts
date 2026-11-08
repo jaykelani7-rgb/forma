@@ -87,6 +87,10 @@ export class CompanionStore {
   }
   command(input: unknown, producer = 'desktop', now=Date.now()): LocalSnapshot {
     const command = parseCommand(input,now);
+    const deskCapture = command.type === "desk-add" || command.type === "desk-remove";
+    if (deskCapture && ((producer === "vscode") !== (command.type === "desk-add" && command.payload.kind === "code"))) {
+      throw new Error("Pin code from VS Code and manage other desk items in the Ribbon.");
+    }
     const fingerprint=hash(JSON.stringify(command));
     return this.transaction(() => {
       const previous=this.db.prepare('SELECT * FROM applied_commands WHERE id=?').get(command.id);
@@ -95,11 +99,15 @@ export class CompanionStore {
         return this.snapshot();
       }
       const before=this.snapshot();
-      const journal=this.db.prepare('SELECT COALESCE(SUM(length(CAST(body AS BLOB))),0) AS bytes FROM observations').get()!;
-      if(Number(journal.bytes)>32*1024*1024)throw new Error('The local observation journal is full. Export a companion backup before continuing. Saved captures are preserved.');
+      if (!deskCapture) {
+        const journal=this.db.prepare('SELECT COALESCE(SUM(length(CAST(body AS BLOB))),0) AS bytes FROM observations').get()!;
+        if(Number(journal.bytes)>32*1024*1024)throw new Error('The local observation journal is full. Export a companion backup before continuing. Saved captures are preserved.');
+      }
       const next=applyCompanionCommand(before.data,before.state,command,now);
       const saved=this.persist(next,before.revision+1,now);
       this.db.prepare('INSERT INTO applied_commands VALUES(?,?,?)').run(command.id,fingerprint,saved.revision);
+      // Desk entries are private, removable working material. Keep the receipt without a second copy.
+      if (deskCapture) return saved;
       const event=parseEvent({eventId:command.id,eventVersion:1,eventType:'CommandReceived',deviceId:this.deviceId(),producer:['vscode','desktop','user'].includes(producer)?producer:'desktop',producerVersion:'0.1.0',workspaceKey:'personal',occurredAt:command.occurredAt ?? saved.savedAt,receivedAt:saved.savedAt,correlationId:command.id,payload:command});
       this.db.prepare('INSERT INTO observations VALUES(?,?,?,?)').run(command.id,command.type,JSON.stringify(event),saved.savedAt);
       this.db.prepare('INSERT INTO outbox VALUES(?,?,?,?)').run(command.id,saved.revision,'local',saved.savedAt);
