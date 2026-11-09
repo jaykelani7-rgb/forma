@@ -1,5 +1,5 @@
 import { canonicalProblemIdentity, normalizeCodeforcesIdentity } from "../../../packages/core/src/codeforces-identity";
-import { learningHistory } from "../../../src/lib/learning";
+import { learningHistory, type LearningRecord } from "../../../src/lib/learning";
 import { MISTAKES } from "../../../src/lib/memory-types";
 import { DIFFICULTIES, OUTCOMES, type Problem } from "../../../src/lib/model";
 import type { CompanionSnapshot } from "./api";
@@ -17,6 +17,7 @@ export interface CommandPaletteResult {
 export interface CommandPaletteRecord extends CommandPaletteResult {
   problem: Problem;
   sections: { label: string; text: string }[];
+  reflection?: LearningRecord;
 }
 
 type IndexedRecord = {
@@ -33,6 +34,8 @@ type IndexedProblem = { problem: Problem; identity?: string; title: string; sear
 type CommandPaletteIndex = {
   recent: IndexedRecord[];
   records: ReadonlyMap<string, CommandPaletteRecord>;
+  history: readonly LearningRecord[];
+  problems: ReadonlyMap<string, Problem>;
 };
 
 const MAX_RESULTS = 8;
@@ -109,7 +112,8 @@ export function buildCommandPaletteIndex(snapshot: Pick<CompanionSnapshot, "data
       sections: [{ label: note.kind === "thread" ? "Next step" : "Thought", text: note.text }] }, "note notes next step");
   }
 
-  for (const reflection of learningHistory(snapshot.data, { handle: snapshot.state.handle })) {
+  const history = learningHistory(snapshot.data, { handle: snapshot.state.handle });
+  for (const reflection of history) {
     const problem = problems.get(reflection.problemId);
     if (!problem || !reflection.reflectedAt || !reflection.outcome) continue;
     const outcome = OUTCOMES[reflection.outcome];
@@ -125,11 +129,11 @@ export function buildCommandPaletteIndex(snapshot: Pick<CompanionSnapshot, "data
     const aliases = reflection.outcome === "hint" ? "hints" : "";
     add(problem, { id: `reflection:${reflection.id}`, kind: "reflection", title: outcome,
       detail: excerpt(reflection.takeaway || reflection.approach || reflection.notes || reflection.mistakeNote || ""),
-      date: reflection.reflectedAt, sections }, `reflection reflections attempt attempts note notes ${aliases}`);
+      date: reflection.reflectedAt, sections, reflection }, `reflection reflections attempt attempts note notes ${aliases}`);
   }
 
   recent.sort((a, b) => b.date - a.date || a.record.id.localeCompare(b.record.id));
-  return { recent, records };
+  return { recent, records, history, problems: new Map([...problems].map(([id, { problem }]) => [id, problem])) };
 }
 
 export function getCommandPaletteRecord(index: CommandPaletteIndex, id: string): CommandPaletteRecord | undefined {

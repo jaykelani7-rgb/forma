@@ -22,6 +22,8 @@ const stamp = "2026-11-08T08:00:00.000Z";
 const activeThread = "Try the equal bounds before changing the loop.";
 const savedThread = "Check the fencepost on both edges before changing the loop.\nIf the lower bound and upper bound coincide, try a matching value, a value below, and a value above before considering the implementation complete.";
 const takeaway = "I isolated the fencepost by writing out the final three states.";
+const laterApproach = "I kept both ends inclusive and verified the empty interval.";
+const savedCode = "while (lo <= hi) { /* saved on the later attempt */ }";
 
 async function openCompanion(page: Page, { paused = false, expanded = true } = {}) {
   const renderer = resolve(".companion-build/renderer");
@@ -44,6 +46,9 @@ async function openCompanion(page: Page, { paused = false, expanded = true } = {
   data.attempts = [{
     id: "earlier-attempt", problemId: "past-problem", startedAt: stamp, completedAt: "2026-11-08T08:10:00.000Z",
     elapsedMs: 600_000, outcome: "hint", difficulty: "edges", takeaway, notes: "I had mixed up inclusive and exclusive endpoints.",
+  }, {
+    id: "later-attempt", problemId: "past-problem", startedAt: "2026-11-08T08:20:00.000Z", completedAt: "2026-11-08T08:30:00.000Z",
+    elapsedMs: 600_000, outcome: "independent", difficulty: null, takeaway: "Keep an explicit empty-interval case.", notes: "", approach: laterApproach,
   }];
   const snapshot: CompanionSnapshot = {
     ...applyCompanionCommand(data, {
@@ -53,6 +58,8 @@ async function openCompanion(page: Page, { paused = false, expanded = true } = {
       desk: [
         { id: "active-thread", problemId: "active-problem", createdAt: stamp, kind: "thread", text: activeThread },
         { id: "past-thread", problemId: "past-problem", createdAt: stamp, kind: "thread", text: savedThread },
+        { id: "later-code", problemId: "past-problem", createdAt: "2026-11-08T08:25:00.000Z", kind: "code", text: savedCode, sessionId: "later-attempt" },
+        { id: "untimed-code", problemId: "past-problem", createdAt: stamp, kind: "code", text: "This snippet has no attempt association." },
       ],
     }, { type: "start", id: "fixture-session", payload: {} }, Date.parse(stamp)),
     revision: 1,
@@ -161,6 +168,29 @@ test("the empty palette resumes the paused session with its original target", as
     { type: "resume", expectedProblemKey: "contest:4:A", expectedSessionId: "companion:fixture-session" },
   ]);
   expect(await page.evaluate(async () => (await window.forma!.getSnapshot()).data.session?.runningSince)).not.toBeNull();
+});
+
+test("a reflection opens a chronological comparison with code from its exact attempt", async ({ page }) => {
+  await openCompanion(page);
+  await page.keyboard.press("Meta+k");
+  await search(page).fill("fencepost");
+  await page.keyboard.press("Enter");
+  const dialog = palette(page);
+  await dialog.getByRole("button", { name: "Compare attempts", exact: true }).click();
+  await expect(dialog.getByRole("heading", { name: "Then / Now", exact: true })).toBeFocused();
+  const comparison = dialog.getByRole("region", { name: "Then / Now", exact: true });
+  await expect(comparison.getByRole("heading", { name: "Then", exact: true })).toBeVisible();
+  await expect(comparison.getByRole("heading", { name: "Now", exact: true })).toBeVisible();
+  await expect(comparison.getByText(takeaway, { exact: true })).toBeVisible();
+  await expect(comparison.getByText(laterApproach, { exact: true })).toBeVisible();
+  const now = comparison.getByRole("article", { name: "Now", exact: true });
+  await now.getByText("Saved code excerpt", { exact: true }).click();
+  await expect(now.getByText(savedCode, { exact: true })).toBeVisible();
+  await expect(comparison.getByRole("article", { name: "Then", exact: true }).getByText(savedCode, { exact: true })).toHaveCount(0);
+  await expect(comparison.getByText("This snippet has no attempt association.", { exact: true })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(dialog.getByRole("heading", { name: "Needed a hint", exact: true })).toBeFocused();
+  expect(await page.evaluate(async () => (await window.forma!.getSnapshot()).data.session?.runningSince)).toBe(Date.parse(stamp));
 });
 
 test("global shortcut opens a compact Ribbon and ignores old press counters", async ({ page }) => {

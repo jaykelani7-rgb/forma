@@ -169,10 +169,23 @@
   margin: 0;
   white-space: pre-wrap;
 }
-.reflection a,
+.reflectionActions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  column-gap: 16px;
+}
+.reflectionActions > *,
 .history button {
   min-height: 44px;
   margin-top: 4px;
+}
+.comparisonDialog:global(.modal) {
+  width: min(940px, calc(100% - 32px));
+  padding: clamp(16px, 4vw, 30px);
+}
+.comparisonDialog :global(.modal-header) > button {
+  margin: 0;
 }
 .history ol {
   list-style: none;

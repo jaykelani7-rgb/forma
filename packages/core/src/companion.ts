@@ -12,7 +12,7 @@ import { currentPracticePlan, decidePlanItem, reconcilePracticePlan, resolvePlan
 import { withPlannedPracticeSession } from "../../../src/lib/practice-plan-session";
 
 export interface CompanionThought { id: string; problemId: string; text: string; createdAt: string }
-export type CompanionDeskItem = DeskEntry & { id: string; problemId: string; createdAt: string };
+export type CompanionDeskItem = DeskEntry & { id: string; problemId: string; createdAt: string; sessionId?: string };
 const DESK_ITEM_LIMIT = 250;
 const DESK_IMAGE_BUDGET = 4 * 1024 * 1024;
 export interface CompanionBinding { id: string; problemId: string; identity: string; fileUri: string; confirmedAt: string; workspaceId?: string; clientId?: string; source?: "manual" | "cph" | "browser"; adapterVersion?: string }
@@ -147,8 +147,13 @@ export function applyCompanionCommand(data: Data, state: CompanionState, input: 
       if (attachment && desk.reduce((size, item) => size + (item.attachment?.length ?? 0), attachment.length) > DESK_IMAGE_BUDGET) {
         throw new Error("The screenshot space is full. Remove a screenshot to make room.");
       }
+      const session = data.session;
+      // A queued pin without a frozen session stays on the problem desk.
+      const sessionId = kind === "code" && session?.problemId === problem.id && command.expectedSessionId === session.id
+        ? session.id : undefined;
       const item = { id: command.id, problemId: problem.id, createdAt: stamp, kind,
-        text: kind === "code" || kind === "counterexample" ? text : text.trim(), ...(attachment ? { attachment } : {}) };
+        text: kind === "code" || kind === "counterexample" ? text : text.trim(),
+        ...(attachment ? { attachment } : {}), ...(sessionId ? { sessionId } : {}) };
       return { data, state: { ...state, desk: [...desk, item] } };
     }
     case "desk-remove": {
@@ -261,7 +266,13 @@ export function validateCompanionState(input: unknown, data: Data): CompanionSta
     for (const item of state.desk) {
       validateDeskEntry(item);
       if (typeof item.id !== "string" || !item.id || item.id.length > 90 || deskIds.has(item.id) || !ids.has(item.problemId)
-        || !stamp(item.createdAt) || Object.keys(item).some(key => !["id", "problemId", "createdAt", "kind", "text", "attachment"].includes(key))) throw new Error("Invalid saved desk item.");
+        || !stamp(item.createdAt) || Object.keys(item).some(key => !["id", "problemId", "createdAt", "kind", "text", "attachment", "sessionId"].includes(key))) throw new Error("Invalid saved desk item.");
+      if (item.sessionId !== undefined) {
+        const target = data.session?.id === item.sessionId ? data.session : data.attempts.find(attempt => attempt.id === item.sessionId);
+        if (item.kind !== "code" || typeof item.sessionId !== "string" || !target || target.problemId !== item.problemId) {
+          throw new Error("The code pin does not match its original practice session.");
+        }
+      }
       deskIds.add(item.id);
       imageBytes += item.attachment?.length ?? 0;
     }

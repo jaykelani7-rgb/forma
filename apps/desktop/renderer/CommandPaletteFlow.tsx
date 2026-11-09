@@ -1,5 +1,8 @@
 import { useMemo, useState } from "react";
 import { normalizeCodeforcesIdentity } from "../../../packages/core/src/codeforces-identity";
+import { AttemptComparison } from "../../../src/components/attempt-comparison";
+import { attemptComparisonChoices } from "../../../src/lib/attempt-comparison";
+import type { LearningRecord } from "../../../src/lib/learning";
 import type { CompanionSnapshot } from "./api";
 import { CommandPalette, type PaletteOption, type PalettePreview, type PaletteSection } from "./CommandPalette";
 import { buildCommandPaletteIndex, getCommandPaletteRecord, matchesPaletteQuery, searchCommandPalette } from "./command-palette-search";
@@ -34,17 +37,34 @@ export function CommandPaletteFlow({
 }) {
   const [query, setQuery] = useState("");
   const [recordId, setRecordId] = useState<string | null>(null);
+  const [compare, setCompare] = useState(false);
   const index = useMemo(() => buildCommandPaletteIndex(snapshot), [snapshot]);
   const matches = useMemo(() => searchCommandPalette(index, query), [index, query]);
   const record = recordId === null ? undefined : getCommandPaletteRecord(index, recordId);
+  const reflection = record?.reflection;
+  const comparisonChoices = reflection ? attemptComparisonChoices(reflection, index.history, index.problems) : [];
+  const comparing = compare && !!reflection && comparisonChoices.length > 0;
   const linkedProblem = record && normalizeCodeforcesIdentity(record.problem.url);
   const currentDesk = !!record && record.problemId === snapshot.state.problemId;
-  const preview: PalettePreview | null = record ? {
+  function savedCode(attempt: LearningRecord) {
+    if (!attempt.timedAttemptId) return [];
+    return (snapshot.state.desk ?? []).filter(item => item.kind === "code" && item.problemId === attempt.problemId
+      && item.sessionId === attempt.timedAttemptId);
+  }
+  const preview: PalettePreview | null = record && comparing ? {
+    title: "Then / Now",
+    eyebrow: "Practice comparison",
+    sections: [],
+    backLabel: "Back to reflection",
+    body: <AttemptComparison key={reflection.id} selected={reflection} choices={comparisonChoices}
+      problemTitle={record.problemTitle} compact showHeading={false} codeForAttempt={savedCode}/>,
+  } : record ? {
     title: record.title,
     eyebrow: kindLabels[record.kind],
     meta: [record.kind !== "problem" ? record.problemTitle : "", formatDate(record.date)].filter(Boolean).join(" · "),
     sections: record.sections,
     actions: [
+      ...(comparisonChoices.length ? [{ id: "compare", label: "Compare attempts" }] : []),
       ...(currentDesk ? [{ id: "desk", label: "Open problem desk" }] : []),
       ...(linkedProblem ? [{ id: "codeforces", label: "Open on Codeforces" }] : []),
     ],
@@ -66,13 +86,17 @@ export function CommandPaletteFlow({
 
   function choose(option: PaletteOption) {
     if (option.kind === "action") commands.find(command => command.id === option.id)?.run();
-    else setRecordId(option.id);
+    else {
+      setCompare(false);
+      setRecordId(option.id);
+    }
   }
 
-  return <CommandPalette query={query} onQueryChange={value => { setRecordId(null); setQuery(value); }}
+  return <CommandPalette query={query} onQueryChange={value => { setCompare(false); setRecordId(null); setQuery(value); }}
     sections={sections} preview={preview} shortcutLabel={shortcutLabel} onChoose={choose}
-    onBack={() => setRecordId(null)} onClose={onClose}
+    onBack={() => { if (comparing) setCompare(false); else setRecordId(null); }} onClose={onClose}
     onPreviewAction={id => {
+      if (id === "compare" && comparisonChoices.length) setCompare(true);
       if (id === "desk" && currentDesk) onOpenDesk();
       if (id === "codeforces" && linkedProblem) onOpenProblem(linkedProblem.url);
     }}/>;

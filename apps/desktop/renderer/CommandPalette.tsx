@@ -1,4 +1,4 @@
-import { useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import {
   ArrowLeft, ArrowUpRight, BookOpen, Code2, Command, CornerDownLeft, Feather, FileText, Search, X,
 } from "lucide-react";
@@ -23,6 +23,8 @@ export interface PalettePreview {
   meta?: string;
   sections: { label?: string; text: string }[];
   actions?: { id: string; label: string }[];
+  body?: ReactNode;
+  backLabel?: string;
 }
 
 interface CommandPaletteProps {
@@ -52,6 +54,7 @@ export function CommandPalette({
   const dialog = useRef<HTMLDialogElement>(null);
   const input = useRef<HTMLInputElement>(null);
   const previewHeading = useRef<HTMLHeadingElement>(null);
+  const previewContent = useRef<HTMLDivElement>(null);
   const results = useRef<HTMLDivElement>(null);
   const scrollToSelection = useRef(false);
   const [selected, setSelected] = useState<string | null>(null);
@@ -60,6 +63,8 @@ export function CommandPalette({
   const active = options[activeIndex];
   const optionId = (index: number) => `${uid}-option-${index}`;
   const showingPreview = !!preview;
+  const previewTitle = preview?.title;
+  const backLabel = preview?.backLabel ?? "Back to results";
 
   useLayoutEffect(() => {
     const surface = dialog.current;
@@ -76,11 +81,12 @@ export function CommandPalette({
 
   useLayoutEffect(() => {
     const target = showingPreview ? previewHeading.current : input.current;
+    if (showingPreview) previewContent.current?.scrollTo({ top: 0 });
     target?.focus({ preventScroll: true });
     if (!showingPreview) {
       results.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" });
     }
-  }, [showingPreview]);
+  }, [showingPreview, previewTitle]);
 
   useLayoutEffect(() => {
     if (!scrollToSelection.current) return;
@@ -123,13 +129,13 @@ export function CommandPalette({
       {preview ? <>
         <div className="command-palette-top">
           <button type="button" className="command-palette-back" onClick={onBack}>
-            <ArrowLeft size={14} aria-hidden="true"/> Back to results
+            <ArrowLeft size={14} aria-hidden="true"/> {backLabel}
           </button>
           <button type="button" className="command-palette-close" onClick={onClose} aria-label="Close command palette">
             <X size={16} aria-hidden="true"/>
           </button>
         </div>
-        <div className="command-palette-preview">
+        <div className="command-palette-preview" ref={previewContent}>
           <p className="command-palette-kicker">{preview.eyebrow}</p>
           <h2 tabIndex={-1} ref={previewHeading}>{preview.title}</h2>
           {preview.meta && <p className="command-palette-meta">{preview.meta}</p>}
@@ -139,6 +145,7 @@ export function CommandPalette({
               <p>{text}</p>
             </section>
           ))}
+          {preview.body}
           {!!preview.actions?.length && <div className="command-palette-preview-actions">
             {preview.actions.map(action => (
               <button type="button" key={action.id} onClick={() => onPreviewAction(action.id)}>
@@ -147,7 +154,7 @@ export function CommandPalette({
             ))}
           </div>}
         </div>
-        <footer className="command-palette-footer"><span><kbd>Esc</kbd> Back to results</span><span>Local notebook</span></footer>
+        <footer className="command-palette-footer"><span><kbd>Esc</kbd> {backLabel}</span><span>Local notebook</span></footer>
       </> : <>
         <div className="command-palette-top">
           <Search size={18} className="command-palette-search-icon" aria-hidden="true"/>

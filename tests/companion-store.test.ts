@@ -92,6 +92,34 @@ test("desk captures follow the original problem, survive restart and restore, an
     rmSync(folder, { recursive: true, force: true });
   }
 });
+test("only an explicitly matched session attaches pinned code to its saved attempt and backup", () => {
+  const store = new CompanionStore(":memory:");
+  const restored = new CompanionStore(":memory:");
+  try {
+    const fileUri = "file:///practice/a.cpp";
+    const { state } = store.command({ ...attach, payload: { ...attach.payload, fileUri } }, "vscode", start);
+    const { data } = store.command({ id: "start", type: "start", payload: {} }, "desktop", start);
+    const sessionId = data.session!.id;
+    const pin = { id: "unscoped", type: "desk-add", expectedProblemKey: state.identity!,
+      payload: { kind: "code", fileUri, text: "  solve();" } };
+    store.command(pin, "vscode", start + 1);
+    assert.throws(() => store.command({ ...pin, id: "stale", expectedSessionId: "previous" }, "vscode", start + 2), /active session changed/);
+    store.command({ ...pin, id: "scoped", expectedSessionId: sessionId }, "vscode", start + 3);
+    const saved = store.command({ id: "reflect", type: "reflect", payload: { outcome: "independent" } }, "desktop", start + 4);
+    assert.equal(saved.data.attempts[0].id, sessionId);
+    assert.deepEqual(saved.state.desk?.map(item => [item.id, item.sessionId]), [["unscoped", undefined], ["scoped", sessionId]]);
+    const backup = store.backups.export({ scope: "companion", includeTutor: false }, start + 5);
+    const recovery = restored.backups.export({ scope: "companion", includeTutor: true }, start + 5);
+    restored.backups.restore(backup, { json: recovery, sha256: backupHash(recovery) }, start + 5);
+    assert.deepEqual(restored.snapshot().state.desk, saved.state.desk);
+    const forged = JSON.parse(backup);
+    forged.companion.desk[1].sessionId = "missing-session";
+    assert.throws(() => restored.backups.preview(JSON.stringify(forged)), /original practice session/);
+  } finally {
+    store.close();
+    restored.close();
+  }
+});
 test('recovery uses only checkpointed time and retains a real session for reflection',()=>{
   const store=new CompanionStore(':memory:');
   try{

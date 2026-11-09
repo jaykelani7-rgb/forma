@@ -1,12 +1,13 @@
 import * as vscode from "vscode";
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import { writeFile, mkdir, readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { cphMetadataPath, SUPPORTED_CPH_VERSIONS } from "../../packages/integrations/cph";
 import type { EditorContext } from "../../packages/integrations/recognition";
 import type { SharedCode } from "../../packages/tutor/types";
 
-type TestApi = { seed: (token: string, folders: string[]) => Promise<void>; reconcile: () => Promise<void>; state: () => { connection: string; bindings: Record<string, { key: string; id?: string }>; observing: EditorContext | null; queue: { command: { expectedProblemKey?: string }; blocked?: string }[] }; frozenTarget: () => Promise<{ fileUri: string; key: string }>; capture: (type: string, payload: Record<string, unknown>, target: { fileUri: string; key: string }) => Promise<void>; setTutorCodeChoice: (mode:"selection"|"file"|"cancel", afterChoice?:()=>Promise<void>)=>void; tutorCommandError:()=>string|null };
+type TestApi = { seed: (token: string, folders: string[]) => Promise<void>; reconcile: () => Promise<void>; state: () => { connection: string; bindings: Record<string, { key: string; id?: string }>; observing: EditorContext | null; queue: { command: { expectedProblemKey?: string }; blocked?: string }[] }; frozenTarget: () => Promise<{ fileUri: string; key: string; sessionId?: string }>; capture: (type: string, payload: Record<string, unknown>, target: { fileUri: string; key: string; sessionId?: string }) => Promise<void>; setTutorCodeChoice: (mode:"selection"|"file"|"cancel", afterChoice?:()=>Promise<void>)=>void; tutorCommandError:()=>string|null };
 export async function run() {
   const folder = vscode.workspace.workspaceFolders![0].uri.fsPath;
   const extension = vscode.extensions.getExtension<TestApi>("forma.forma-companion")!;
@@ -55,11 +56,19 @@ export async function run() {
   const line = codeEditor.document.lineAt(1).text;
   const deskSelection = new vscode.Selection(1, line.indexOf("return"), 1, line.indexOf(";") + 1);
   codeEditor.selection = deskSelection;
+  await writeFile(join(folder, "start-session-from-desktop"), "");
+  await waitFor(() => existsSync(join(folder, "desktop-session-started.json")));
+  const { sessionId } = JSON.parse(await readFile(join(folder, "desktop-session-started.json"), "utf8")) as { sessionId: string };
+  assert.equal((await api.frozenTarget()).sessionId, undefined, "The editor's cached binding predates the desktop start.");
   await vscode.commands.executeCommand("formaCompanion.pinSelection");
   assert.equal(api.tutorCommandError(), null);
   assert.equal(api.state().queue.length, 0);
   assert.equal(vscode.window.activeTextEditor, codeEditor);
   assert.ok(codeEditor.selection.isEqual(deskSelection));
+  const timedTarget = await api.frozenTarget();
+  assert.equal(timedTarget.sessionId, sessionId);
+  await api.capture("finish", {}, timedTarget);
+  await api.capture("reflect", { outcome: "independent", takeaway: "The saved pin is part of this attempt." }, timedTarget);
   // Invoke the actual registered Tutor action, replacing only the picker choice in this Test host.
   codeEditor.selection = new vscode.Selection(1, 0, 1, codeEditor.document.lineAt(1).text.length);
   api.setTutorCodeChoice("selection");

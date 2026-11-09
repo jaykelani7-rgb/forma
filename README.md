@@ -12,6 +12,8 @@ Choose **I’m stuck** in the Problem Desk to review a request for one small hin
 
 Open the desktop command palette with **Command + K** inside Forma or **Control + Option + K** from another app. Change or turn off the global shortcut in desktop Settings. The paused session and its latest thread appear first. Use the arrow keys and Enter to run an action or inspect a saved problem, thought, thread, or reflection. Reading a result leaves the current problem and timer in place.
 
+Choose **Compare attempts** from a Journal entry or a desktop command palette reflection. **Then / Now** orders two saved attempts by when they happened and shows their recorded approaches, outcomes, and takeaways. On desktop, code pinned to the exact timed session in VS Code can appear alongside that attempt.
+
 ## Run locally
 
 Forma Companion's local desktop milestone is also available: `npm run companion:dev`. It adds the floating Ribbon timer, SQLite-backed practice/reflections and a paired VS Code extension while keeping this website independently usable. Desktop account sync is pending; see [companion setup and current scope](docs/companion/README.md).

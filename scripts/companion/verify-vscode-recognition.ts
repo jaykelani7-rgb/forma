@@ -1,5 +1,6 @@
 import { build } from "esbuild";
-import { mkdtemp, mkdir, writeFile, symlink, readFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { mkdtemp, mkdir, writeFile, symlink, readFile, rename } from "node:fs/promises";
 import { tmpdir, homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
@@ -44,28 +45,42 @@ try {
   const timeout = setTimeout(() => child.kill("SIGTERM"), 90000);
   const browserWork = (async () => {
     const deadline = Date.now() + 60000;
-    while (true) { try { await readFile(join(folder, "browser-ready.json")); break; } catch { if (Date.now() > deadline) throw new Error("VS Code did not reach browser delivery test."); await new Promise(r => setTimeout(r, 100)); } }
+    async function waitForFixture(name: string) {
+      while (!existsSync(join(folder, name))) {
+        if (Date.now() > deadline) throw new Error(`VS Code did not reach the ${name} test fixture.`);
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+    }
+    await waitForFixture("browser-ready.json");
     const proposal = await browserRequest({ kind: "propose", url: "https://codeforces.com/contest/6/problem/B", title: "B. President's Office" });
     if (!proposal.ok || proposal.targets?.length !== 1) throw new Error("Expected exactly one frozen browser target.");
     let result = await browserRequest({ kind: "confirm", proposalId: proposal.proposalId, targetId: proposal.targets[0].id });
     while (result.status === "waiting" && Date.now() < deadline) { await new Promise(r => setTimeout(r, 100)); result = await browserRequest({ kind: "status", proposalId: proposal.proposalId }); }
     if (result.status !== "saved") throw new Error("Browser delivery was not durably acknowledged: " + result.status);
+    await waitForFixture("start-session-from-desktop");
+    const started = store.command({ id: "desktop-pin-session", type: "start", payload: {}, expectedProblemKey: "contest:1968:B" }, "desktop");
+    const ready = join(folder, "desktop-session-started.json");
+    await writeFile(`${ready}.tmp`, JSON.stringify({ sessionId: started.data.session?.id }));
+    await rename(`${ready}.tmp`, ready);
   })();
   const exit = await new Promise<number | null>((done, reject) => { child.once("exit", done); child.once("error", reject); }); clearTimeout(timeout);
   await browserWork;
   if (exit !== 0) throw new Error(`VS Code extension host exited ${exit}. Isolated logs: ${directory}`);
   const report = JSON.parse(await readFile(join(folder, "live-results.json"), "utf8"));
-  const { state } = store.snapshot();
+  const { state, data } = store.snapshot();
   const [pin] = state.desk ?? [];
   const linkedProblem = state.bindings.find(binding => binding.fileUri.endsWith("/1968B.cpp"));
   if (state.desk?.length !== 1 || pin.kind !== "code" || pin.text !== "return x + 1;" || !linkedProblem || pin.problemId !== linkedProblem.problemId) {
     throw new Error("The selected code was not pinned to the linked problem in SQLite.");
   }
+  if (pin.sessionId !== "companion:desktop-pin-session" || !data.attempts.some(attempt => attempt.id === pin.sessionId && attempt.problemId === pin.problemId)) {
+    throw new Error("The selected code did not retain its desktop-started attempt in SQLite.");
+  }
   const pending = store.tutor.view().pendingCode;
   if (tutorCaptures !== 1 || !pending || pending.identity !== "contest:1968:B" || pending.filename !== "1968B.cpp" || !pending.revision.endsWith(createHash("sha256").update(pending.text).digest("hex"))) throw new Error("The extension Tutor source snapshot was not frozen in actual SQLite.");
   const providerTurns = Number(store.db.prepare("SELECT COUNT(*) n FROM tutor_turns").get()?.n);
   if (providerTurns !== 0) throw new Error("Sharing code must not start a provider request.");
-  console.log(JSON.stringify({ ...report, recoveredLostAcknowledgement: lostAck, browserScopedSocket: true, deskSelectionInActualSQLite: true, tutorCaptureInActualSQLite: true, tutorCapturedSnapshots: tutorCaptures, noProviderTurnOnShare: providerTurns === 0, bindingsInActualSQLite: state.bindings.length, selectedIdentity: state.identity, isolatedDirectory: directory }, null, 2));
+  console.log(JSON.stringify({ ...report, recoveredLostAcknowledgement: lostAck, browserScopedSocket: true, deskSelectionInActualSQLite: true, deskSelectionAttributedToDesktopSession: true, tutorCaptureInActualSQLite: true, tutorCapturedSnapshots: tutorCaptures, noProviderTurnOnShare: providerTurns === 0, bindingsInActualSQLite: state.bindings.length, selectedIdentity: state.identity, isolatedDirectory: directory }, null, 2));
 } finally { hub.reset(); server.close(); browserServer.close(); store.close(); }
 
 }

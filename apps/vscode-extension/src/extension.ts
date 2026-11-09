@@ -219,7 +219,14 @@ export async function activate(context: vscode.ExtensionContext) {
     const size = document.offsetAt(selection.end) - document.offsetAt(selection.start);
     if (size > 10000) throw new Error("Select up to 10,000 characters to pin to the Problem Desk.");
     const target = await frozenTarget();
-    await credential();
+    const token = await credential();
+    // A timer started on the desktop may have opened since the last heartbeat.
+    // Keep the frozen queue target if the desktop is offline.
+    const host = await send({ version: 1, id: randomUUID(), credential: token, action: "ping" }).catch(() => null);
+    if (host?.ok && host.identity === target.key) {
+      target.sessionId = typeof host.sessionId === "string" ? host.sessionId : undefined;
+      target.recoveryEpoch = captureRecoveryEpoch(host.recoveryEpoch);
+    }
     if (!local() || !paired || target.fileUri !== fileUri || !binding || target.key !== binding.key || bindings[fileUri] !== binding ||
         vscode.window.activeTextEditor !== editor || document.version !== version || editor.selections.length !== 1 || !editor.selection.isEqual(selection)) {
       throw new Error("The selection or problem changed. Choose the code again.");

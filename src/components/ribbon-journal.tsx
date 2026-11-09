@@ -1,7 +1,8 @@
 "use client";
 import Link from "next/link";
 import { useMemo, useRef, useState, type Ref } from "react";
-import { ArrowLeft, ArrowRight, Bookmark, Search } from "lucide-react";
+import { ArrowLeft, ArrowRight, Bookmark, GitCompareArrows, Search } from "lucide-react";
+import { attemptComparisonChoices } from "@/lib/attempt-comparison";
 import { learningHistory, type LearningRecord } from "@/lib/learning";
 import { memoryRecordAnchor } from "@/lib/learning-insights";
 import { MISTAKES } from "@/lib/memory-types";
@@ -17,7 +18,9 @@ import {
   type Problem,
 } from "@/lib/model";
 import { practiceIdentity } from "@/lib/practice-state";
+import { AttemptComparison } from "./attempt-comparison";
 import { useWorkspace } from "./provider";
+import { Modal } from "./ui";
 import styles from "./ribbon-journal.module.css";
 
 const SOURCES: Record<LearningRecord["source"], string> = {
@@ -147,11 +150,13 @@ function JournalEntryDetail({
   otherAttempts,
   headingRef,
   onBack,
+  onCompare,
 }: {
   entry: JournalEntry;
   otherAttempts: JournalEntry[];
   headingRef: Ref<HTMLHeadingElement>;
   onBack: () => void;
+  onCompare?: () => void;
 }) {
   const { record, problem, outcome } = entry;
   const [historyLimit, setHistoryLimit] = useState(HISTORY_PAGE_SIZE);
@@ -221,9 +226,16 @@ function JournalEntryDetail({
               : "No reflection has been saved for this attempt."}
           </p>
         )}
-        <Link href={recordHref(entry, "/journal")} className="text-link">
-          Open original record <ArrowRight size={15} aria-hidden="true" />
-        </Link>
+        <div className={styles.reflectionActions}>
+          <Link href={recordHref(entry, "/journal")} className="text-link">
+            Open original record <ArrowRight size={15} aria-hidden="true" />
+          </Link>
+          {onCompare && (
+            <button type="button" className="text-link" onClick={onCompare}>
+              <GitCompareArrows size={15} aria-hidden="true" /> Compare attempts
+            </button>
+          )}
+        </div>
       </div>
       <section
         className={styles.history}
@@ -292,6 +304,7 @@ function JournalBrowser({
   const [filters, setFilters] = useState(emptyFilters);
   const [limit, setLimit] = useState(PAGE_SIZE);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [comparisonId, setComparisonId] = useState<string | null>(null);
   const entryButton = useRef<HTMLButtonElement | null>(null);
   const resultsHeading = useRef<HTMLHeadingElement | null>(null);
   const detailHeading = useRef<HTMLHeadingElement | null>(null);
@@ -339,6 +352,17 @@ function JournalBrowser({
   const visible = matches.slice(0, limit);
   const selected =
     visible.find(({ record }) => record.id === selectedId) ?? visible[0];
+  const { history, problems, entryById } = useMemo(
+    () => ({
+      history: entries.map(({ record }) => record),
+      problems: new Map(entries.map(({ problem }) => [problem.id, problem])),
+      entryById: new Map(entries.map((entry) => [entry.record.id, entry])),
+    }),
+    [entries],
+  );
+  const comparisonChoices = selected
+    ? attemptComparisonChoices(selected.record, history, problems)
+    : [];
   const otherAttempts = selected
     ? entries.filter(
         (entry) =>
@@ -351,6 +375,7 @@ function JournalBrowser({
     setFilters((current) => ({ ...current, ...update }));
     setLimit(PAGE_SIZE);
     setSelectedId(null);
+    setComparisonId(null);
     entryButton.current = null;
   }
 
@@ -490,6 +515,7 @@ function JournalBrowser({
                     aria-controls="journal-entry-detail"
                     onClick={(event) => {
                       setSelectedId(entry.record.id);
+                      setComparisonId(null);
                       entryButton.current = event.currentTarget;
                       if (window.matchMedia("(max-width: 1000px)").matches) {
                         requestAnimationFrame(() =>
@@ -543,6 +569,9 @@ function JournalBrowser({
             entry={selected}
             otherAttempts={otherAttempts}
             headingRef={detailHeading}
+            onCompare={comparisonChoices.length
+              ? () => setComparisonId(selected.record.id)
+              : undefined}
             onBack={() =>
               (entryButton.current?.isConnected
                 ? entryButton.current
@@ -552,6 +581,28 @@ function JournalBrowser({
           />
         )}
       </div>
+      {selected && comparisonId === selected.record.id && comparisonChoices.length > 0 && (
+        <Modal
+          title="Then / Now"
+          className={styles.comparisonDialog}
+          onClose={() => setComparisonId(null)}
+        >
+          <AttemptComparison
+            selected={selected.record}
+            choices={comparisonChoices}
+            problemTitle={selected.problem.title}
+            showHeading={false}
+            renderRecordLink={(record) => {
+              const entry = entryById.get(record.id);
+              return entry && (
+                <Link href={recordHref(entry, "/journal")} className="text-link">
+                  Open original attempt <ArrowRight size={15} aria-hidden="true" />
+                </Link>
+              );
+            }}
+          />
+        </Modal>
+      )}
     </section>
   );
 }

@@ -200,3 +200,55 @@ test("journal filters combine and the selected reflection includes earlier and l
   await page.getByRole("button", { name: "Clear filters" }).click();
   await expect(entries).toHaveCount(6);
 });
+
+test("Then / Now compares saved attempts across Journal filters and keeps the selected entry", async ({
+  page,
+}, testInfo) => {
+  const data = fixture();
+  data.attempts = data.attempts.map((record) => record.id === "early" ? {
+    ...record,
+    outcome: "hint",
+    approach: "Follow parent edges after a hint.",
+    takeaway: "Track the path endpoint.",
+  } : record);
+  await page.clock.setFixedTime(now);
+  await page.addInitScript((notebook) => {
+    localStorage.setItem("forma.personal.v1", JSON.stringify(notebook));
+  }, data);
+  await page.goto("/journal");
+  const entries = page.getByRole("button", { name: /^View entry:/ });
+  const search = page.getByLabel("Search journal");
+  const outcome = page.getByLabel("Outcome", { exact: true });
+  await expect(entries).toHaveCount(6);
+  await search.fill("Tree paths");
+  await outcome.selectOption("independent");
+  await expect(entries).toHaveCount(1);
+  await entries.click();
+
+  const compare = page.getByRole("button", { name: "Compare attempts" });
+  await compare.press("Enter");
+  const comparison = page.getByRole("dialog", { name: "Then / Now" });
+  await expect(comparison).toBeVisible();
+  await expect(comparison.getByRole("heading", { name: "Then", exact: true })).toBeVisible();
+  await expect(comparison.getByRole("heading", { name: "Now", exact: true })).toBeVisible();
+  await expect(comparison.getByText("Follow parent edges after a hint.", { exact: true })).toBeVisible();
+  await expect(comparison.getByText("Walk the tree.", { exact: true })).toBeVisible();
+  await expect(comparison.getByText(/earlier attempt.*hint.*later attempt.*independent/i)).toBeVisible();
+  const links = comparison.getByRole("link", { name: "Open original attempt" });
+  await expect(links.nth(0)).toHaveAttribute("href", /#record-practice-timed%3Aearly$/);
+  await expect(links.nth(1)).toHaveAttribute("href", /#record-practice-timed%3Aindependent$/);
+  await page.screenshot({ path: testInfo.outputPath("journal-then-now.png") });
+
+  await comparison.getByLabel("Compare with").selectOption("timed:selected");
+  await expect(comparison.getByText("Follow parent edges after a hint.", { exact: true })).toHaveCount(0);
+  await expect(comparison.getByText("Check paths that end at the root.", { exact: true })).toBeVisible();
+  await expect(links.nth(0)).toHaveAttribute("href", /#record-practice-timed%3Aindependent$/);
+  await expect(links.nth(1)).toHaveAttribute("href", /#record-practice-timed%3Aselected$/);
+  await page.keyboard.press("Escape");
+  await expect(comparison).toHaveCount(0);
+  await expect(compare).toBeFocused();
+  await expect(search).toHaveValue("Tree paths");
+  await expect(outcome).toHaveValue("independent");
+  await expect(entries).toHaveCount(1);
+  await expect(entries).toHaveAttribute("aria-pressed", "true");
+});
