@@ -1,7 +1,11 @@
 /** Local-only Tutor boundary. Provider keys/audio never belong in these records. */
 export const TUTOR_VERSION = 1 as const;
-export const TUTOR_ACTIONS = ['discuss','small-hint','stronger-hint','check-code','explain','full-explanation'] as const;
+const DESK_IDEA_ACTIONS = ['outline-idea', 'challenge-assumption'] as const;
+export const TUTOR_ACTIONS = ['discuss','small-hint','stronger-hint','check-code','explain','full-explanation', ...DESK_IDEA_ACTIONS] as const;
 export type TutorAction = typeof TUTOR_ACTIONS[number];
+export function isDeskIdeaAction(action: TutorAction): action is typeof DESK_IDEA_ACTIONS[number] {
+  return action === 'outline-idea' || action === 'challenge-assumption';
+}
 export interface StatementInput {
   identity:string; url:string; title:string; description:string; input:string; output:string;
   constraints:string; samples:{input:string;output:string}[]; explanation:string;
@@ -39,11 +43,15 @@ export interface DeskHintReview {
   provider:TutorProviderStatus;contestMode:boolean;activeRequestId:string|null;
   statement:StatementSnapshot|null;conversationId:string|null;target:DeskHintTarget;
 }
+export interface DeskIdeaReview extends DeskHintReview {code:SharedCode|null}
+export interface IdeaOutline {approach:string;assumptions:string[];uncertainty:string}
+export interface IdeaChallenge {observation:string;question:string;exampleInput:string|null;expectedOutput:string|null}
 export interface TutorSendInput {
   turnId:string;requestId:string;conversationId:string;action:TutorAction;text:string;
   statementId:string|null;codeId:string|null;noteIds:string[];
   draft?:{epoch:string;revision:number};
   deskHint?:DeskHintTarget;
+  deskIdea?:DeskHintTarget;
 }
 export type TutorEvent={kind:'delta'|'updated';conversationId:string;turnId:string;requestId:string;text?:string}|{kind:'context';identity:string;conversationId?:string;source:'statement'|'code'|'removed'}|{kind:'configuration';provider:TutorProviderId}|{kind:'flush-drafts';requestId:string}|{kind:'recovery'};
 export interface TutorProposal {id:string;conversationId:string;turnId:string;problemId:string;identity:string;sessionId:string|null;kind:'thought'|'takeaway';text:string;createdAt:string;saved:boolean}

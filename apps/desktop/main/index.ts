@@ -12,7 +12,7 @@ import { ThoughtHostVoice, TutorHostVoice, type ThoughtVoiceContext } from "./tu
 import { ThoughtTakeStore } from "./thought-take-store";
 import { DesktopSessionHandoff } from "./session-handoff-client";
 import { tutorExternalUrl } from "../../../packages/tutor/links";
-import type { DeskHintReview, SharedCode, StatementSnapshot, TutorConversation, TutorEvent, TutorSendInput, TutorStoredView, TutorTurn } from "../../../packages/tutor/types";
+import type { DeskHintReview, DeskIdeaReview, SharedCode, StatementSnapshot, TutorConversation, TutorEvent, TutorSendInput, TutorStoredView, TutorTurn } from "../../../packages/tutor/types";
 import { AttentionPolicy } from "./attention";
 import { companionToday } from "../../../packages/core/src/companion-today";
 import { localDate } from "../../../src/lib/model";
@@ -458,9 +458,10 @@ async function ui(action:string,payload:unknown){
     case 'handoff-refresh': return desktopHandoff.refresh(payload);
     case 'handoff-send': return desktopHandoff.send(payload);
     case 'handoff-cancel': return desktopHandoff.cancel(payload);
-    case 'desk-hint-review': {
+    case 'desk-hint-review':
+    case 'desk-idea-review': {
       const current=recoveryFence.lease(),provider=tutorProvider.status();
-      const review=await database.call<Omit<DeskHintReview,'provider'|'activeRequestId'>>(action,payload,provider);
+      const review=await database.call<Omit<DeskHintReview|DeskIdeaReview,'provider'|'activeRequestId'>>(action,payload,provider);
       current();
       return {...review,provider,activeRequestId:tutorService.activeRequestId} satisfies DeskHintReview;
     }

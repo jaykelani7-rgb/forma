@@ -27,7 +27,7 @@ interface DeskHintCardProps {
   onRefresh: () => void;
 }
 
-function StatementReview({ statement }: { statement: StatementSnapshot }) {
+export function StatementReview({ statement }: { statement: StatementSnapshot }) {
   const sections = [
     { label: "Description", text: statement.description },
     { label: "Input", text: statement.input },

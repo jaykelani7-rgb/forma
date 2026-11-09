@@ -2,8 +2,10 @@ import type { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
 import { canonicalProblemIdentity } from '../../../packages/core/src/codeforces-identity';
 import { availableTutorNotes, freezeTutorContext, parseSharedCode, TUTOR_BUDGET, tutorFields, tutorHash, tutorId, tutorObject, tutorText, validateStatement } from '../../../packages/tutor/context';
-import { buildProviderMessages, hintLevelForAction, parseTutorAction } from '../../../packages/tutor/policy';
-import type { DeskHintReview, DeskHintTarget, SharedCode, StatementSnapshot, TutorAction, TutorContextView, TutorConversation, TutorProposal, TutorProviderStatus, TutorSendInput, TutorSettings, TutorStoredView, TutorTurn, TutorUsage, TutorDraft, TutorDraftView, TutorDraftSaveInput, TutorDraftSaveResult } from '../../../packages/tutor/types';
+import { buildProviderMessages, hintLevelForAction, parseTutorAction, parseTutorDraftAction } from '../../../packages/tutor/policy';
+import { IDEA_LIMITS, readIdeaChallenge, readIdeaOutline, readIdeaQuestion } from '../../../packages/tutor/idea';
+import { isDeskIdeaAction } from '../../../packages/tutor/types';
+import type { DeskHintReview, DeskHintTarget, DeskIdeaReview, SharedCode, StatementSnapshot, TutorAction, TutorContextView, TutorConversation, TutorProposal, TutorProviderStatus, TutorSendInput, TutorSettings, TutorStoredView, TutorTurn, TutorUsage, TutorDraft, TutorDraftView, TutorDraftSaveInput, TutorDraftSaveResult } from '../../../packages/tutor/types';
 import type { LocalSnapshot } from './store';
 
 interface TutorOwner {snapshot():LocalSnapshot;approveTutorLearning(proposal:TutorProposal,now:number):void}
@@ -11,10 +13,12 @@ const DEFAULT_SETTINGS:TutorSettings={contestMode:false,retentionDays:90,voiceOu
 const MAX_LOCAL_BYTES=32*1024*1024;
 const decode=<T>(value:unknown):T=>JSON.parse(String(value)) as T;
 const decodeTurn=(value:unknown):TutorTurn=>{const turn=decode<TutorTurn>(value);return {...turn,provider:turn.provider??'openai'};};
-function deskHintTarget(input:unknown):DeskHintTarget {
+const canAcknowledgeReply = (turn: TutorTurn) => !!turn.assistantText.trim() &&
+  (!isDeskIdeaAction(turn.action) || turn.status === 'completed');
+function deskReviewTarget(input:unknown):DeskHintTarget {
   const value=tutorObject(input);
   tutorFields(value,['problemId','sessionId','recoveryEpoch','provider','model']);
-  if(value.provider!=='gemini'&&value.provider!=='openai')throw new Error('Review the current Tutor provider before sending a hint.');
+  if(value.provider!=='gemini'&&value.provider!=='openai')throw new Error('Review the current Tutor provider before sending a request.');
   return {
     problemId:tutorText(value.problemId,200,1),
     sessionId:value.sessionId===null?null:tutorId(value.sessionId),
@@ -195,10 +199,10 @@ export class TutorStore {
     const problem=snapshot.data.problems.find(row=>row.id===problemId);
     const identity=problem&&canonicalProblemIdentity(problem);
     if(!identity||snapshot.state.problemId!==problemId||snapshot.state.identity!==identity)
-      throw new Error('The active problem changed. Reopen the hint from its Problem Desk.');
+      throw new Error('The active problem changed. Reopen the request from its Problem Desk.');
     return {identity,sessionId:snapshot.data.session?.problemId===problemId?snapshot.data.session.id:null};
   }
-  deskHintReview(input:unknown,provider:TutorProviderStatus,now=Date.now()):Omit<DeskHintReview,'provider'|'activeRequestId'> {
+  private reviewDeskContext(input:unknown,provider:TutorProviderStatus) {
     const value=tutorObject(input);
     tutorFields(value,['problemId']);
     const problemId=tutorText(value.problemId,200,1);
@@ -206,9 +210,20 @@ export class TutorStore {
     const target={problemId,sessionId,recoveryEpoch:this.draftEpoch(),provider:provider.provider,model:provider.model};
     const {contestMode}=this.settings();
     const statement=contestMode?null:this.statement({identity});
-    const conversationId=statement?.complete&&provider.configured&&provider.capabilities.text
-      ?this.open({problemId},now,false).id:null;
-    return {contestMode,statement,conversationId,target};
+    return {contestMode,statement,target};
+  }
+  deskHintReview(input:unknown,provider:TutorProviderStatus,now=Date.now()):Omit<DeskHintReview,'provider'|'activeRequestId'> {
+    const review = this.reviewDeskContext(input, provider);
+    const conversationId = review.statement?.complete && provider.configured && provider.capabilities.text
+      ? this.open({ problemId: review.target.problemId }, now, false).id : null;
+    return { ...review, conversationId };
+  }
+  deskIdeaReview(input:unknown,provider:TutorProviderStatus,now=Date.now()):Omit<DeskIdeaReview,'provider'|'activeRequestId'> {
+    const review = this.reviewDeskContext(input, provider);
+    const conversation = !review.contestMode && provider.configured && provider.capabilities.text
+      ? this.open({ problemId: review.target.problemId }, now, false) : null;
+    const code = conversation ? this.pendingCode(conversation.identity, conversation.workspaceId) : null;
+    return { ...review, statement: review.statement?.complete ? review.statement : null, conversationId: conversation?.id ?? null, code };
   }
   private draftEpoch():string {return String(this.db.prepare('SELECT epoch FROM tutor_draft_state WHERE id=1').get()!.epoch);}
   private writeDraft(draft:TutorDraft) {
@@ -239,7 +254,7 @@ export class TutorStore {
   saveDraft(input:unknown,now=Date.now()):TutorDraftSaveResult {
     const value=tutorObject(input);tutorFields(value,['conversationId','epoch','expectedRevision','text','action','statementId','codeId','noteIds']);
     if(!Number.isSafeInteger(value.expectedRevision)||Number(value.expectedRevision)<0||!Array.isArray(value.noteIds)||value.noteIds.length>20)throw new Error('Invalid draft revision or note selection.');
-    const parsed:TutorDraftSaveInput={conversationId:tutorId(value.conversationId),epoch:tutorId(value.epoch),expectedRevision:Number(value.expectedRevision),text:tutorText(value.text,TUTOR_BUDGET.user),action:parseTutorAction(value.action),statementId:value.statementId===null?null:tutorId(value.statementId),codeId:value.codeId===null?null:tutorId(value.codeId),noteIds:value.noteIds.map(tutorId)};
+    const parsed:TutorDraftSaveInput={conversationId:tutorId(value.conversationId),epoch:tutorId(value.epoch),expectedRevision:Number(value.expectedRevision),text:tutorText(value.text,TUTOR_BUDGET.user),action:parseTutorDraftAction(value.action),statementId:value.statementId===null?null:tutorId(value.statementId),codeId:value.codeId===null?null:tutorId(value.codeId),noteIds:value.noteIds.map(tutorId)};
     if(new Set(parsed.noteIds).size!==parsed.noteIds.length)throw new Error('Choose distinct note references.');
     return this.transaction(()=>{
       if(parsed.epoch!==this.draftEpoch())throw new Error('The notebook was restored. Reopen this draft before saving.');
@@ -264,34 +279,47 @@ export class TutorStore {
     const now=typeof providerOrNow==='number'?providerOrNow:timestamp;
     const provider=typeof providerOrNow==='number'?'openai':providerOrNow;
     if(provider!=='gemini'&&provider!=='openai')throw new Error('Choose a supported tutor provider.');
-    const value=tutorObject(input);tutorFields(value,['turnId','requestId','conversationId','action','text','statementId','codeId','noteIds','draft','deskHint']);
+    const value=tutorObject(input);tutorFields(value,['turnId','requestId','conversationId','action','text','statementId','codeId','noteIds','draft','deskHint','deskIdea']);
     const request:TutorSendInput={turnId:tutorId(value.turnId),requestId:tutorId(value.requestId),conversationId:tutorId(value.conversationId),action:parseTutorAction(value.action),text:tutorText(value.text,TUTOR_BUDGET.user,1),statementId:value.statementId===null?null:tutorId(value.statementId),codeId:value.codeId===null?null:tutorId(value.codeId),noteIds:Array.isArray(value.noteIds)?value.noteIds.map(tutorId):[]};
     if(!request.text.trim()||!Array.isArray(value.noteIds))throw new Error('Write a question and explicitly select its context.');
     let submittedDraft:{epoch:string;revision:number}|undefined;
     if(value.draft!==undefined){const d=tutorObject(value.draft);tutorFields(d,['epoch','revision']);if(!Number.isSafeInteger(d.revision)||Number(d.revision)<0)throw new Error('Invalid draft revision.');submittedDraft={epoch:tutorId(d.epoch),revision:Number(d.revision)};}
-    const deskHint=value.deskHint===undefined?null:deskHintTarget(value.deskHint);
+    const deskHint=value.deskHint===undefined?null:deskReviewTarget(value.deskHint);
     if(deskHint&&(request.action!=='small-hint'||!request.statementId||request.codeId||request.noteIds.length||submittedDraft))
       throw new Error('A Desk hint uses one small hint with only its reviewed statement and question.');
+    const deskIdea = value.deskIdea === undefined ? null : deskReviewTarget(value.deskIdea);
+    if (Boolean(deskIdea) !== isDeskIdeaAction(request.action) || (deskIdea && deskHint))
+      throw new Error('Open Explain my idea from the Problem Desk.');
+    if (deskIdea && (submittedDraft || request.noteIds.length || (request.action === 'outline-idea' && request.codeId)))
+      throw new Error('Explain my idea uses only your reviewed explanation, statement and code choices.');
+    if (request.action === 'outline-idea') tutorText(request.text, IDEA_LIMITS.explanation, 1);
+    if (request.action === 'challenge-assumption') {
+      if (!request.statementId) throw new Error('Review a complete problem statement before asking for a challenge.');
+      readIdeaQuestion(request.text);
+    }
+    const deskTarget = deskHint ?? deskIdea;
     const selectedModel=tutorText(model,120,1);
     return this.transaction(()=>{
       if(submittedDraft&&submittedDraft.epoch!==this.draftEpoch())throw new Error('This draft belongs to an earlier restore. Reopen the conversation before sending.');
       if(this.settings().contestMode)throw new Error('Contest mode disables problem-specific tutor assistance. Tracking and notes remain available.');
       const conversation=this.conversation(request.conversationId);
-      const deskSnapshot=deskHint?this.owner.snapshot():null;
-      if(deskHint&&deskSnapshot){
-        if(deskHint.recoveryEpoch!==this.draftEpoch())throw new Error('The notebook was restored. Review the hint again.');
-        if(deskHint.provider!==provider||deskHint.model!==selectedModel)throw new Error('The Tutor provider changed. Review the hint again.');
-        const {identity,sessionId}=this.activeDeskProblem(deskSnapshot,deskHint.problemId);
-        if(sessionId!==deskHint.sessionId||conversation.problemId!==deskHint.problemId||conversation.identity!==identity)
-          throw new Error('The practice session changed. Review the hint again.');
+      const deskSnapshot=deskTarget?this.owner.snapshot():null;
+      if(deskTarget&&deskSnapshot){
+        if(deskTarget.recoveryEpoch!==this.draftEpoch())throw new Error('The notebook was restored. Review the request again.');
+        if(deskTarget.provider!==provider||deskTarget.model!==selectedModel)throw new Error('The Tutor provider changed. Review the request again.');
+        const {identity,sessionId}=this.activeDeskProblem(deskSnapshot,deskTarget.problemId);
+        if(sessionId!==deskTarget.sessionId||conversation.problemId!==deskTarget.problemId||conversation.identity!==identity)
+          throw new Error('The practice session changed. Review the request again.');
         const statement=this.statement({identity});
-        if(!statement?.complete||statement.id!==request.statementId)throw new Error('The problem statement changed. Review the hint again.');
+        if(request.statementId&&(!statement?.complete||statement.id!==request.statementId))throw new Error('The problem statement changed. Review the request again.');
+        if (deskIdea && request.codeId && this.pendingCode(identity, conversation.workspaceId)?.id !== request.codeId)
+          throw new Error('The shared code selection changed. Review the request again.');
       }
       const previousRow=this.db.prepare('SELECT body FROM tutor_turns WHERE id=?').get(request.turnId);
       if(previousRow){
         const previous=decodeTurn(previousRow.body);
-        if(!!previous.standalone!==!!deskHint)throw new Error('Review this Desk hint from the Problem Desk before retrying.');
-        if(deskHint&&previous.context.sessionId!==deskHint.sessionId)throw new Error('The practice session changed. Review a new hint.');
+        if(!!previous.standalone!==!!deskTarget)throw new Error('Review this request from the Problem Desk before retrying.');
+        if(deskTarget&&previous.context.sessionId!==deskTarget.sessionId)throw new Error('The practice session changed. Review a new request.');
         const old={conversationId:previous.conversationId,action:previous.action,text:previous.userText,statementId:previous.context.statement?.id??null,codeId:previous.context.code?.id??null,noteIds:previous.context.notes.map(note=>note.id).sort()};
         const incoming={conversationId:request.conversationId,action:request.action,text:request.text,statementId:request.statementId,codeId:request.codeId,noteIds:[...request.noteIds].sort()};
         if(JSON.stringify(old)!==JSON.stringify(incoming))throw new Error('This user turn already has a different frozen question or context. Create a new turn.');
@@ -310,10 +338,11 @@ export class TutorStore {
       let statement:StatementSnapshot|null=null,code:SharedCode|null=null;
       if(request.statementId){statement=this.capturedStatement(request.statementId);if(!statement)throw new Error('The selected statement snapshot is unavailable.');}
       if(request.codeId){const row=this.db.prepare('SELECT body FROM tutor_codes WHERE id=?').get(request.codeId);if(!row)throw new Error('The selected source snapshot changed. Review the new code before sending.');code=decode<SharedCode>(row.body);}
-      if(request.action!=='discuss'&&!statement?.complete)throw new Error('Include a complete statement before requesting problem-specific hints, code review, or an explanation. A URL or title is not the statement.');
+      if(request.action!=='discuss'&&request.action!=='outline-idea'&&!statement?.complete)throw new Error('Include a complete statement before requesting problem-specific hints, code review, or an explanation. A URL or title is not the statement.');
       if(request.action==='check-code'&&!code)throw new Error('Explicitly share and include selected code before asking for a code check.');
       const context=freezeTutorContext(deskSnapshot??this.owner.snapshot(),conversation,{statement,code,noteIds:request.noteIds},now);
-      const turn:TutorTurn={id:request.turnId,requestId:request.requestId,conversationId:conversation.id,action:request.action,userText:request.text,assistantText:'',context,status:'queued',createdAt:new Date(now).toISOString(),completedAt:null,error:null,hintLevel:hintLevelForAction(request.action,this.turns(conversation.id)),exposed:false,usage:null,model:selectedModel,provider,...(deskHint?{standalone:true as const}:{})};
+      if (deskIdea) context.evidence = { platform: 'unknown', checkedAt: null, localTests: 'unknown', submissions: [] };
+      const turn:TutorTurn={id:request.turnId,requestId:request.requestId,conversationId:conversation.id,action:request.action,userText:request.text,assistantText:'',context,status:'queued',createdAt:new Date(now).toISOString(),completedAt:null,error:null,hintLevel:hintLevelForAction(request.action,this.turns(conversation.id)),exposed:false,usage:null,model:selectedModel,provider,...(deskTarget?{standalone:true as const}:{})};
       buildProviderMessages(turn,this.turns(conversation.id));
       if(submittedDraft){
         const saved=this.draft(request.conversationId,now);
@@ -340,14 +369,14 @@ export class TutorStore {
   exposed(input:unknown):TutorTurn|null {
     const value=tutorObject(input);tutorFields(value,['turnId','requestId']);const turn=this.readTurn(value.turnId),requestId=tutorId(value.requestId);
     if(turn.requestId===requestId){
-      if(!turn.assistantText.trim())return null;
+      if(!canAcknowledgeReply(turn))return null;
       const exposed={...turn,exposed:true};this.writeTurn(exposed);return exposed;
     }
     // A visible partial may be acknowledged just after an explicit retry. Keep
     // that factual exposure against its archived request and original turn.
     const row=this.db.prepare('SELECT body FROM tutor_requests WHERE id=? AND turn_id=?').get(requestId,turn.id);
     if(!row)return null;
-    const previous=decodeTurn(row.body);if(!previous.assistantText.trim())return null;
+    const previous=decodeTurn(row.body);if(!canAcknowledgeReply(previous))return null;
     this.db.prepare('UPDATE tutor_requests SET body=? WHERE id=?').run(JSON.stringify({...previous,exposed:true}),requestId);
     const exposed={...turn,exposed:true};this.writeTurn(exposed);return exposed;
   }
@@ -363,9 +392,21 @@ export class TutorStore {
     if(!['completed','interrupted','failed'].includes(String(value.status)))throw new Error('Invalid tutor completion status.');
     let usage:TutorUsage|null=null;
     if(value.usage!==null&&value.usage!==undefined){const u=tutorObject(value.usage);tutorFields(u,['inputTokens','outputTokens','totalTokens']);if(![u.inputTokens,u.outputTokens,u.totalTokens].every(n=>Number.isSafeInteger(n)&&Number(n)>=0&&Number(n)<=100_000_000)||Number(u.totalTokens)<Number(u.inputTokens)+Number(u.outputTokens))throw new Error('Invalid provider usage.');usage={inputTokens:Number(u.inputTokens),outputTokens:Number(u.outputTokens),totalTokens:Number(u.totalTokens)};}
-    const status=this.settings().contestMode?'interrupted':value.status as 'completed'|'interrupted'|'failed';
-    if(status==='completed'&&!turn.assistantText.trim())throw new Error('An empty provider response cannot be marked complete.');
-    const next:TutorTurn={...turn,status,completedAt:new Date(now).toISOString(),error:value.error===null||value.error===undefined?null:tutorText(value.error,500),usage,...(value.responseModel===undefined?{}:{responseModel:tutorText(value.responseModel,120,1)})};this.writeTurn(next);return next;
+    let status=this.settings().contestMode?'interrupted':value.status as 'completed'|'interrupted'|'failed';
+    let error = value.error === null || value.error === undefined ? null : tutorText(value.error, 500);
+    if (status === 'completed') {
+      if (!turn.assistantText.trim()) throw new Error('An empty provider response cannot be marked complete.');
+      if (isDeskIdeaAction(turn.action)) {
+        try {
+          if (turn.action === 'outline-idea') readIdeaOutline(turn.assistantText);
+          else readIdeaChallenge(turn.assistantText);
+        } catch (reason) {
+          status = 'failed';
+          error = reason instanceof Error ? reason.message : 'Tutor returned an unreadable result. Try the request again.';
+        }
+      }
+    }
+    const next:TutorTurn={...turn,status,completedAt:new Date(now).toISOString(),error,usage,...(value.responseModel===undefined?{}:{responseModel:tutorText(value.responseModel,120,1)})};this.writeTurn(next);return next;
   }
   delete(conversationId:unknown) {
     const conversation=this.conversation(conversationId);

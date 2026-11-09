@@ -10,6 +10,8 @@ Pause from the desktop Ribbon to **Leave a thread** about what you would try nex
 
 Choose **I’m stuck** in the Problem Desk to review a request for one small hint. The selected Tutor provider receives the captured problem statement, your request, and your latest hypothesis only if you include it. **Keep as next step** opens an editable thread that you can save yourself. In contest mode the card offers a private thread.
 
+Choose **Explain my idea** in the desktop Problem Desk to turn a written or spoken explanation into an editable outline. With a captured statement, choose one assumption for Tutor to challenge and optionally include code you shared from VS Code. Keep the edited outline as a hypothesis or turn the challenge into a next-step thread.
+
 Open the desktop command palette with **Command + K** inside Forma or **Control + Option + K** from another app. Change or turn off the global shortcut in desktop Settings. The paused session and its latest thread appear first. Use the arrow keys and Enter to run an action or inspect a saved problem, thought, thread, or reflection. Reading a result leaves the current problem and timer in place.
 
 Choose **Compare attempts** from a Journal entry or a desktop command palette reflection. **Then / Now** orders two saved attempts by when they happened and shows their recorded approaches, outcomes, and takeaways. On desktop, code pinned to the exact timed session in VS Code can appear alongside that attempt.

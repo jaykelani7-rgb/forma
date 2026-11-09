@@ -3,13 +3,14 @@ import { validateData, type Data } from '../../../src/lib/model';
 import { initialCompanionState, validateCompanionState, type CompanionState } from '../../../packages/core/src/companion';
 import { canonicalProblemIdentity, normalizeCodeforcesIdentity } from '../../../packages/core/src/codeforces-identity';
 import { parseSharedCode, parseStatementInput, tutorFields, tutorId, tutorObject, tutorText, tutorTime, validateStatement, TUTOR_BUDGET } from '../../../packages/tutor/context';
-import { parseTutorAction } from '../../../packages/tutor/policy';
+import { hintLevelForAction, parseTutorAction, parseTutorDraftAction } from '../../../packages/tutor/policy';
+import { isDeskIdeaAction } from '../../../packages/tutor/types';
 import type { SharedCode, StatementSnapshot, TutorContext, TutorConversation, TutorProposal, TutorSettings, TutorTurn } from '../../../packages/tutor/types';
 import type { BackupRestorePreview } from '../../../packages/setup/status';
 
 export const BACKUP_LIMIT=64*1024*1024;
 export type BackupScope='notebook'|'companion'|'tutor';
-export interface BackupDraft {conversationId:string;identity:string;problemId:string;workspaceId:string;revision:number;updatedAt:string;text:string;action:ReturnType<typeof parseTutorAction>;statementId:string|null;codeId:string|null;noteIds:string[]}
+export interface BackupDraft {conversationId:string;identity:string;problemId:string;workspaceId:string;revision:number;updatedAt:string;text:string;action:ReturnType<typeof parseTutorDraftAction>;statementId:string|null;codeId:string|null;noteIds:string[]}
 export interface TutorBackup {
   conversations:TutorConversation[];turns:TutorTurn[];requests:TutorTurn[];statements:StatementSnapshot[];
   captures:{sequence:number;id:string;statementId:string;identity:string;capturedAt:string}[];
@@ -58,16 +59,25 @@ function turn(v:unknown):TutorTurn {
   if(!['queued','streaming','completed','interrupted','failed'].includes(String(o.status))||o.provider!==undefined&&!['gemini','openai'].includes(String(o.provider)))throw new Error('Invalid Tutor turn status or provider.');
   let usage:TutorTurn['usage']=null;if(o.usage!==null){const u=tutorObject(o.usage);tutorFields(u,['inputTokens','outputTokens','totalTokens']);usage={inputTokens:integer(u.inputTokens,0,100_000_000),outputTokens:integer(u.outputTokens,0,100_000_000),totalTokens:integer(u.totalTokens,0,100_000_000)};if(usage.totalTokens<usage.inputTokens+usage.outputTokens)throw new Error('Invalid usage totals.');}
   const t:TutorTurn={id:tutorId(o.id),requestId:tutorId(o.requestId),conversationId:tutorId(o.conversationId),action:parseTutorAction(o.action),userText:tutorText(o.userText,TUTOR_BUDGET.user,1),assistantText:tutorText(o.assistantText,TUTOR_BUDGET.response),context:context(o.context),status:o.status as TutorTurn['status'],createdAt:tutorTime(o.createdAt),completedAt:o.completedAt===null?null:tutorTime(o.completedAt),error:o.error===null?null:tutorText(o.error,500),hintLevel:integer(o.hintLevel,0,1000),exposed:bool(o.exposed),usage,model:tutorText(o.model,120,1),provider:(o.provider??'openai') as 'openai'|'gemini',...(o.responseModel===undefined?{}:{responseModel:tutorText(o.responseModel,120,1)})};
-  if(o.standalone!==undefined){
-    if(o.standalone!==true||t.action!=='small-hint'||t.hintLevel!==1||!t.context.statement?.complete||t.context.code||t.context.notes.length)throw new Error('Invalid Desk hint context.');
-    t.standalone=true;
+  const idea = isDeskIdeaAction(t.action);
+  if (idea && o.standalone !== true) throw new Error('Invalid Desk idea context.');
+  if (o.standalone !== undefined) {
+    const { statement, code, notes } = t.context;
+    const requiresStatement = t.action !== 'outline-idea';
+    if (
+      o.standalone !== true || (t.action !== 'small-hint' && !idea) ||
+      t.hintLevel !== hintLevelForAction(t.action, []) || notes.length ||
+      (requiresStatement && !statement) || (statement && !statement.complete) ||
+      (code && t.action !== 'challenge-assumption')
+    ) throw new Error('Invalid standalone Desk request context.');
+    t.standalone = true;
   }
   if(t.context.conversationId!==t.conversationId)throw new Error('Invalid turn conversation reference.');return t;
 }
 function settings(v:unknown):TutorSettings {const o=tutorObject(v);tutorFields(o,['contestMode','retentionDays','voiceOutput']);return {contestMode:bool(o.contestMode),retentionDays:integer(o.retentionDays,1,3650),voiceOutput:bool(o.voiceOutput)};}
 function draft(v:unknown):BackupDraft {
   const o=tutorObject(v);tutorFields(o,['conversationId','identity','problemId','workspaceId','revision','updatedAt','text','action','statementId','codeId','noteIds']);
-  return {conversationId:tutorId(o.conversationId),identity:identity(o.identity),problemId:tutorText(o.problemId,200,1),workspaceId:tutorId(o.workspaceId),revision:integer(o.revision,0,1_000_000_000),updatedAt:tutorTime(o.updatedAt),text:tutorText(o.text,TUTOR_BUDGET.user),action:parseTutorAction(o.action),statementId:nullableId(o.statementId),codeId:nullableId(o.codeId),noteIds:unique(list(o.noteIds,20,tutorId),n=>n)};
+  return {conversationId:tutorId(o.conversationId),identity:identity(o.identity),problemId:tutorText(o.problemId,200,1),workspaceId:tutorId(o.workspaceId),revision:integer(o.revision,0,1_000_000_000),updatedAt:tutorTime(o.updatedAt),text:tutorText(o.text,TUTOR_BUDGET.user),action:parseTutorDraftAction(o.action),statementId:nullableId(o.statementId),codeId:nullableId(o.codeId),noteIds:unique(list(o.noteIds,20,tutorId),n=>n)};
 }
 function proposal(v:unknown):TutorProposal {
   const o=tutorObject(v);tutorFields(o,['id','conversationId','turnId','problemId','identity','sessionId','kind','text','createdAt','saved']);

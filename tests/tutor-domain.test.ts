@@ -103,6 +103,86 @@ test('Desk hints use an isolated provider payload and preserve Tutor drafts and 
   }finally{f.store.close();}
 });
 
+test('Desk ideas outline without a statement and challenge only with the reviewed statement and selected code', () => {
+  const store = new CompanionStore(':memory:');
+  try {
+    store.command({ id: 'idea-attach', type: 'attach', payload: {
+      url, title: 'Watermelon', fileUri: 'file:///practice/a.cpp', workspaceId: 'workspace-one', clientId: 'vscode-one', source: 'manual',
+    } }, 'desktop', now);
+    const problemId = store.snapshot().state.problemId!;
+    const review = () => store.tutor.deskIdeaReview({ problemId }, deskProvider, now);
+    const initial = review();
+    assert.ok(initial.conversationId);
+    assert.equal(initial.statement, null);
+    const outline: TutorSendInput = {
+      turnId: 'desk-outline', requestId: 'request-outline', conversationId: initial.conversationId,
+      action: 'outline-idea', text: 'I am assuming every even weight can be split.',
+      statementId: null, codeId: null, noteIds: [], deskIdea: initial.target,
+    };
+    assert.throws(() => store.tutor.prepare({ ...outline, deskIdea: undefined }, deskProvider.model, now), /from the Problem Desk/);
+    assert.throws(() => store.tutor.prepare({ ...outline, codeId: 'unreviewed' }, deskProvider.model, now), /reviewed explanation/);
+    const draft = store.tutor.draft(initial.conversationId, now);
+    assert.throws(() => store.tutor.saveDraft({
+      conversationId: draft.conversationId, epoch: draft.epoch, expectedRevision: draft.revision,
+      action: 'outline-idea', text: outline.text, statementId: null, codeId: null, noteIds: [],
+    }, now), /from the Problem Desk/);
+    const outlined = show(store, store.tutor.prepare(outline, deskProvider.model, now), JSON.stringify({
+      approach: 'Look for an even weight.', assumptions: ['Every even weight splits.'], uncertainty: '',
+    }));
+    assert.equal(outlined.hintLevel, 0);
+    assert.equal(outlined.standalone, true);
+    assert.match(buildProviderMessages(outlined, [])[0].content, /Reflect the learner's explanation/);
+
+    const captured = store.tutor.statement(statement, now)!;
+    const originalCode = store.tutor.code(code());
+    const reviewed = review();
+    assert.equal(reviewed.statement?.id, captured.id);
+    assert.equal(reviewed.code?.id, originalCode.id);
+    const challenge: TutorSendInput = {
+      turnId: 'desk-challenge', requestId: 'request-challenge', conversationId: initial.conversationId,
+      action: 'challenge-assumption', text: JSON.stringify({
+        approach: 'Check for even weights.', assumption: 'Every even weight splits.', uncertainty: '',
+      }),
+      statementId: captured.id, codeId: originalCode.id, noteIds: [], deskIdea: reviewed.target,
+    };
+    assert.throws(() => store.tutor.prepare({ ...challenge, statementId: null }, deskProvider.model, now), /complete problem statement/);
+    assert.throws(() => store.tutor.prepare({ ...challenge, text: outline.text }, deskProvider.model, now), /select one assumption/);
+    assert.throws(() => store.tutor.prepare({ ...challenge, noteIds: ['unreviewed'] }, deskProvider.model, now), /reviewed explanation/);
+    const updatedCode = store.tutor.code(code('code-two', 'int main() { return 0; }'));
+    assert.throws(() => store.tutor.prepare(challenge, deskProvider.model, now), /code selection changed/);
+    const confirmed = review();
+    const challenged = show(store, store.tutor.prepare({ ...challenge, deskIdea: confirmed.target, codeId: updatedCode.id }, deskProvider.model, now), JSON.stringify({
+      observation: 'The smallest even weight leaves no room for two positive even parts.',
+      question: 'What happens for weight two?', exampleInput: '2', expectedOutput: 'NO',
+    }));
+    assert.equal(challenged.hintLevel, 1);
+    assert.equal(challenged.context.code?.id, updatedCode.id);
+    const messages = buildProviderMessages(challenged, [outlined]);
+    assert.equal(messages.length, 2);
+    assert.match(messages[0].content, /has not been run/);
+    assert.ok(messages[1].content.includes(updatedCode.text));
+    assert.doesNotMatch(messages[1].content, /Look for an even weight|file:\/\/|workspace-one|explicitlyIncludedNotes|evidence/);
+    assert.deepEqual(challenged.context.evidence.submissions, []);
+    assert.equal(challenged.exposed, false);
+    assert.equal(store.tutor.exposed({ turnId: challenged.id, requestId: challenged.requestId })?.exposed, true);
+
+    const backup = store.backups.export({ scope: 'companion', includeTutor: true }, now);
+    assert.doesNotThrow(() => store.backups.preview(backup));
+    assert.deepEqual(store.tutor.turns(initial.conversationId).map(turn => turn.action).sort(), ['challenge-assumption', 'outline-idea']);
+    const malformed = show(store, store.tutor.prepare({
+      ...challenge, turnId: 'malformed-challenge', requestId: 'request-malformed', codeId: null,
+    }, deskProvider.model, now), 'A partial response with no structured result.');
+    assert.equal(malformed.status, 'failed');
+    assert.match(malformed.error ?? '', /readable result/);
+    assert.equal(store.tutor.exposed({ turnId: malformed.id, requestId: malformed.requestId }), null);
+    store.tutor.setSettings({ contestMode: true }, now);
+    assert.deepEqual([review().statement, review().code, review().conversationId], [null, null, null]);
+    assert.throws(() => store.tutor.prepare(challenge, deskProvider.model, now), /Contest mode disables/);
+  } finally {
+    store.close();
+  }
+});
+
 test('schema two migrates non-destructively to tutor tables on the original SQLite writer',()=>{
   const folder=mkdtempSync(join(tmpdir(),'forma-tutor-migration-')),path=join(folder,'notebook.sqlite');
   let store=new CompanionStore(path);

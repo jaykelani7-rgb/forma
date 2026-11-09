@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useEffectEvent, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { ArrowLeft, ArrowRight, ArrowUpRight, BookOpen, Check, ChevronRight, CircleHelp, Clock3, Code2, Ellipsis, Feather, FileCode2, Globe2, Link2, LoaderCircle, Mic, Moon, Pause, Play, Plus, Search, Settings2, ShieldCheck, Sun, X } from "lucide-react";
 import { TutorPanel, type TutorActivity } from "./TutorPanel";
 import { useThoughtVoice } from "./thought-voice";
@@ -8,6 +8,7 @@ import { PaletteShortcutSettings } from "./PaletteShortcutSettings";
 import { CommandPaletteFlow, type PaletteCommand } from "./CommandPaletteFlow";
 import { ProblemDesk } from "./ProblemDesk";
 import { DeskHintFlow } from "./DeskHintFlow";
+import { DeskIdeaFlow, emptyDeskIdeaDraft, type DeskIdeaDraft } from "./DeskIdeaFlow";
 import { SessionHandoffPanel } from "./SessionHandoffPanel";
 import { DesktopRibbonMark, type RibbonFeedback } from "./DesktopRibbonMark";
 import { DEFAULT_PALETTE_SHORTCUT, DEFAULT_THOUGHT_SHORTCUT } from "../main/preferences";
@@ -57,9 +58,11 @@ export function App() {
   const [thought, setThought] = useState("");
   const [threadDrafts, setThreadDrafts] = useState<Record<string, string>>({});
   const [threadEditorProblem, setThreadEditorProblem] = useState<string | null>(null);
-  const [deskHintKey, setDeskHintKey] = useState<string | null>(null);
+  const [deskAssist, setDeskAssist] = useState<{ scope: string; kind: "hint" | "idea" } | null>(null);
+  const [ideaDraft, setIdeaDraft] = useState<{ scope: string; value: DeskIdeaDraft } | null>(null);
   const [returnFromTutorToDesk, setReturnFromTutorToDesk] = useState(false);
   const hintButton = useRef<HTMLButtonElement>(null);
+  const ideaButton = useRef<HTMLButtonElement>(null);
   const [ribbonFeedback, setRibbonFeedback] = useState<(RibbonFeedback & { problemId: string | null }) | null>(null);
   const [takeaway, setTakeaway] = useState("");
   const [outcome, setOutcome] = useState<Outcome | null>(null);
@@ -85,7 +88,13 @@ export function App() {
   const visible = usePageVisible();
   const search = new URLSearchParams(location.search);
   const gallery = previewMode && search.get("gallery") === "1";
-  useEffect(() => { let cancelled = false; let unsubscribe: (() => void) | undefined; const receive = (next: CompanionSnapshot) => { setDeskHintKey(current => current === JSON.stringify([next.state.problemId, next.data.session?.id ?? null]) ? current : null); setSnapshot(next); const nextExpanded = next.presentation?.expanded ?? previewMode; setExpanded(nextExpanded); if (!nextExpanded) setPalette(null); const request = next.presentation?.panelRequest; if (request && request.id !== panelRequestId.current) { panelRequestId.current = request.id; setPalette(null); setDeskHintKey(null); setPanel(request.panel); if(request.panel==="tutor")setTutorRequest({id:request.id,conversationId:request.conversationId}); } }; connectBridge().then(async (api) => { const initial = await api.getSnapshot(); if (cancelled) return; setBridge(api); receive(initial); setHandle(initial.state.handle ?? ""); setShortcut(initial.preferences.shortcut ?? "Control+Option+F"); unsubscribe = api.subscribe(receive); }).catch((reason) => { if (!cancelled) setError(errorMessage(reason)); }); return () => { cancelled = true; unsubscribe?.(); }; }, []);
+  useEffect(() => bridge?.subscribeTutor?.(event => {
+    if (event.kind === "recovery") {
+      setIdeaDraft(null);
+      setDeskAssist(null);
+    }
+  }), [bridge]);
+  useEffect(() => { let cancelled = false; let unsubscribe: (() => void) | undefined; const receive = (next: CompanionSnapshot) => { const scope = JSON.stringify([next.state.problemId, next.data.session?.id ?? null]); setDeskAssist(current => current?.scope === scope ? current : null); setIdeaDraft(current => current?.scope === scope ? current : null); setSnapshot(next); const nextExpanded = next.presentation?.expanded ?? previewMode; setExpanded(nextExpanded); if (!nextExpanded) setPalette(null); const request = next.presentation?.panelRequest; if (request && request.id !== panelRequestId.current) { panelRequestId.current = request.id; setPalette(null); setDeskAssist(null); setPanel(request.panel); if(request.panel==="tutor")setTutorRequest({id:request.id,conversationId:request.conversationId}); } }; connectBridge().then(async (api) => { const initial = await api.getSnapshot(); if (cancelled) return; setBridge(api); receive(initial); setHandle(initial.state.handle ?? ""); setShortcut(initial.preferences.shortcut ?? "Control+Option+F"); unsubscribe = api.subscribe(receive); }).catch((reason) => { if (!cancelled) setError(errorMessage(reason)); }); return () => { cancelled = true; unsubscribe?.(); }; }, []);
   useEffect(() => { if (!bridge || previewMode) return; let last: boolean | null = null; const updateHitbox = (event: PointerEvent) => { const interactive = !!(event.target instanceof Element && event.target.closest("button,input,textarea,select,a,[data-interactive],.card,.drag-handle")); if (interactive === last) return; last = interactive; void bridge.ui("hitbox", interactive).catch(() => { /* The menu bar remains available for recovery. */ }); }; document.addEventListener("pointermove", updateHitbox); return () => document.removeEventListener("pointermove", updateHitbox); }, [bridge]);
   useEffect(() => { const motion = matchMedia("(prefers-reduced-motion: reduce)"); const dark = matchMedia("(prefers-color-scheme: dark)"); const onMotion = () => setMotionPreference(motion.matches); const onDark = () => setDarkPreference(dark.matches); motion.addEventListener("change", onMotion); dark.addEventListener("change", onDark); return () => { motion.removeEventListener("change", onMotion); dark.removeEventListener("change", onDark); }; }, []);
   useEffect(() => { if (!visible || !snapshot?.data.session?.runningSince) return; const timer = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(timer); }, [visible, snapshot?.data.session?.runningSince]);
@@ -108,9 +117,10 @@ export function App() {
         return;
       }
       if (event.key !== "Escape" || palette) return;
-      if (showDeskHint) closeDeskHint();
+      if (showDeskIdea) closeDeskAssist("idea");
+      else if (showDeskHint) closeDeskAssist("hint");
       else if (panel === "tutor" && returnFromTutorToDesk) openPanel("desk");
-      else if (panel !== "home") { setDeskHintKey(null); setPanel("home"); }
+      else if (panel !== "home") { setDeskAssist(null); setPanel("home"); }
       else void toggleExpanded(false);
     };
     window.addEventListener("keydown", onKey);
@@ -132,11 +142,20 @@ export function App() {
   const session = view?.session;
   const deskItems = snapshot?.state.desk?.filter(item => item.problemId === problem?.id) ?? [];
   const latestThread = deskItems.findLast(item => item.kind === "thread");
-  const hintScope = problem ? JSON.stringify([problem.id, session?.id ?? null]) : null;
-  const showDeskHint = expanded && panel === "desk" && hintScope !== null && hintScope === deskHintKey;
+  const deskScope = problem ? JSON.stringify([problem.id, session?.id ?? null]) : null;
+  const changeIdeaDraft = useCallback((patch: Partial<DeskIdeaDraft>) => {
+    if (!deskScope) return;
+    setIdeaDraft(current => ({
+      scope: deskScope,
+      value: { ...(current?.scope === deskScope ? current.value : emptyDeskIdeaDraft), ...patch },
+    }));
+  }, [deskScope]);
+  const showDeskAssist = expanded && panel === "desk" && deskAssist?.scope === deskScope;
+  const showDeskHint = showDeskAssist && deskAssist?.kind === "hint";
+  const showDeskIdea = showDeskAssist && deskAssist?.kind === "idea";
   const editThread = !!problem && threadEditorProblem === problem.id;
   const thoughtVoice = useThoughtVoice(
-    window.forma ? bridge : null, expanded && (panel === "thought" || (panel === "desk" && editThread)),
+    window.forma ? bridge : null, expanded && (panel === "thought" || (panel === "desk" && (editThread || showDeskIdea))),
     snapshot?.state.identity, snapshot?.data.session?.id, !reducedMotion,
   );
   const thoughtVoiceBusy = thoughtVoice.phase !== "idle";
@@ -204,8 +223,8 @@ export function App() {
     catch (reason) { setError(errorMessage(reason)); }
     finally { busyRef.current = false; setBusy(false); }
   }
-  async function toggleExpanded(value: boolean) { if (!value) { setDeskHintKey(null); setPalette(null); } setExpanded(value); if (bridge) { try { await bridge.ui("expand", value); } catch (reason) { setError(errorMessage(reason)); setExpanded(true); } } }
-  function openPanel(value: Panel, target?: CaptureTarget) { if (value !== "desk") setDeskHintKey(null); if (value !== "tutor") setReturnFromTutorToDesk(false); if (snapshot && (value === "thought" || value === "reflect" || value === "recall")) { const hasDraft = value === "thought" ? !!thought.trim() : value === "reflect" ? !!takeaway.trim() || !!outcome : !!recallResponse.trim(); if (!hasDraft || !draftTargets[value]) setDraftTargets(current => ({ ...current, [value]: target ?? freezeCaptureTarget(snapshot) })); } setError(""); setNotice(""); setMore(false); setPanel(value); if (value === "today") void ui("today"); else if(value === "tutor")void ui("tutor-show"); else void toggleExpanded(true); }
+  async function toggleExpanded(value: boolean) { if (!value) { setDeskAssist(null); setPalette(null); } setExpanded(value); if (bridge) { try { await bridge.ui("expand", value); } catch (reason) { setError(errorMessage(reason)); setExpanded(true); } } }
+  function openPanel(value: Panel, target?: CaptureTarget) { if (value !== "desk") setDeskAssist(null); if (value !== "tutor") setReturnFromTutorToDesk(false); if (snapshot && (value === "thought" || value === "reflect" || value === "recall")) { const hasDraft = value === "thought" ? !!thought.trim() : value === "reflect" ? !!takeaway.trim() || !!outcome : !!recallResponse.trim(); if (!hasDraft || !draftTargets[value]) setDraftTargets(current => ({ ...current, [value]: target ?? freezeCaptureTarget(snapshot) })); } setError(""); setNotice(""); setMore(false); setPanel(value); if (value === "today") void ui("today"); else if(value === "tutor")void ui("tutor-show"); else void toggleExpanded(true); }
   async function chooseToday(item: NonNullable<CompanionSnapshot["today"]>["items"][number]) {
     const coding=item.activity === "coding";
     if(!await command("plan-select", {itemId:item.id,start:coding&&!item.resume}, undefined, "home"))return;
@@ -241,15 +260,21 @@ export function App() {
     if (problem) setThreadDrafts(current => ({ ...current, [problem.id]: text }));
   }
 
-  function closeDeskHint() {
-    setDeskHintKey(null);
-    hintButton.current?.focus();
+  function closeDeskAssist(kind: "hint" | "idea") {
+    setDeskAssist(null);
+    (kind === "hint" ? hintButton : ideaButton).current?.focus();
   }
 
-  function openThreadFromHint(text?: string) {
+  function openDeskAssist(kind: "hint" | "idea") {
+    if (!deskScope) return;
+    setThreadEditorProblem(null);
+    setDeskAssist({ scope: deskScope, kind });
+  }
+
+  function openThreadFromAssist(text?: string) {
     if (!problem) return;
     if (text?.trim()) addThreadTranscript(text.trim());
-    setDeskHintKey(null);
+    setDeskAssist(null);
     setThreadEditorProblem(problem.id);
   }
 
@@ -309,10 +334,7 @@ export function App() {
   function openPaletteDesk(withHint = false) {
     closePalette(false);
     openPanel("desk");
-    if (withHint) {
-      setThreadEditorProblem(null);
-      setDeskHintKey(hintScope);
-    }
+    if (withHint) openDeskAssist("hint");
   }
 
   const onPaletteShortcut = useEffectEvent(() => {
@@ -372,6 +394,7 @@ export function App() {
     }
     else if (thoughtVoice.phase === "idle") {
       closePalette(false);
+      if (showDeskIdea) return;
       if (expanded && panel === "desk" && editThread) speakThread();
       else speakThought();
     }
@@ -390,23 +413,29 @@ export function App() {
     if (await command("thought", { text: thought }, "Thought saved locally.", "home")) setThought("");
   }
   async function saveReflection() { if (outcome && await command("reflect", { outcome, takeaway, notes: "" }, "Reflection saved locally. Your next revisit follows your notebook’s learning rules.", "home")) { setTakeaway(""); setOutcome(null); } }
-  function renderVoiceControls(thread = false) {
+  function renderVoiceControls(thread = false, onIdeaTranscript?: (text: string) => void, disabled = false) {
+    const start = onIdeaTranscript
+      ? () => { if (thoughtTarget) void thoughtVoice.start(thoughtTarget, onIdeaTranscript); }
+      : thread ? speakThread : speakThought;
+    const retry = onIdeaTranscript
+      ? (takeId: string) => { if (thoughtTarget) void thoughtVoice.retry(takeId, thoughtTarget, onIdeaTranscript); }
+      : thread ? retryThread : retryThought;
     return <>
       {canDictate && <div className="thought-voice">
-        {!thoughtVoiceBusy && <button type="button" className="settings-link" onClick={thread ? speakThread : speakThought} disabled={busy}>
-          <Mic size={15}/> {thoughtVoice.notice ? "Record more" : thread ? "Speak this thread" : "Start voice recording"}
+        {!thoughtVoiceBusy && <button type="button" className="settings-link" onClick={start} disabled={busy || disabled}>
+          <Mic size={15}/> {thoughtVoice.notice ? "Record more" : onIdeaTranscript ? "Speak my idea" : thread ? "Speak this thread" : "Start voice recording"}
         </button>}
-        {!thoughtVoiceBusy && thoughtShortcut && snapshot?.presentation?.thoughtShortcutAvailable &&
+        {!onIdeaTranscript && !thoughtVoiceBusy && thoughtShortcut && snapshot?.presentation?.thoughtShortcutAvailable &&
           <p className="field-help"><kbd>{thoughtShortcut}</kbd> to start or finish.</p>}
         {thoughtVoiceBusy && <>
           <p className="thought-voice-status" role="status">
             {thoughtVoice.phase === "permission" ? "Preparing the microphone…"
               : thoughtVoice.phase === "recording" ? "Recording"
               : thoughtVoice.phase === "recorded" ? "Recording stopped at 60 seconds."
-              : "Transcribing your thought…"}
+              : onIdeaTranscript ? "Transcribing your explanation…" : "Transcribing your thought…"}
           </p>
           {thoughtVoice.phase === "recording" && <span className="thought-voice-time" aria-hidden="true">{thoughtVoice.seconds}s</span>}
-          {thoughtVoice.provider && <p className="field-help">Finishing sends the audio to {thoughtVoice.provider} for transcription. You can review the text before saving it locally.</p>}
+          {thoughtVoice.provider && <p className="field-help">Finishing sends the audio to {thoughtVoice.provider} for transcription. {onIdeaTranscript ? "Review the transcript before outlining your idea." : "You can review the text before saving it locally."}</p>}
           <div className="thought-voice-actions">
             {(thoughtVoice.phase === "recording" || thoughtVoice.phase === "recorded") &&
               <Button secondary onClick={thoughtVoice.finish} icon={Check}>
@@ -419,8 +448,8 @@ export function App() {
         {thoughtVoice.notice && <p className="field-help" role="status">{thoughtVoice.notice}</p>}
       </div>}
       <ThoughtTakeRecovery recovery={thoughtVoice.recovery} problemKey={snapshot?.state.identity}
-        busy={busy || thoughtVoiceBusy} retryDisabledReason={thread ? undefined : draftMismatchReason}
-        onRetry={thread ? retryThread : retryThought}/>
+        busy={busy || thoughtVoiceBusy || disabled} retryDisabledReason={thread || onIdeaTranscript ? undefined : draftMismatchReason}
+        onRetry={retry}/>
     </>;
   }
   const footer = <footer className="card-footer"><span><span className="status-dot"/>{previewMode ? "In-memory preview" : "Local notebook"}</span><span>{busy ? <><LoaderCircle className="spin" size={11}/> Saving…</> : snapshot ? <><ShieldCheck size={11}/>{previewMode ? "Preview only" : "Saved locally"}</> : "Connecting…"}</span></footer>;
@@ -483,7 +512,10 @@ export function App() {
             editThread={editThread}
             threadDraft={threadDrafts[problem.id] ?? ""}
             onThreadDraftChange={changeThreadDraft}
-            onEditThreadChange={open => setThreadEditorProblem(open ? problem.id : null)}
+            onEditThreadChange={open => {
+              if (open) setDeskAssist(null);
+              setThreadEditorProblem(open ? problem.id : null);
+            }}
             onSave={saveDeskEntry}
             onRemove={itemId => command("desk-remove", { itemId, problemId: problem.id }, "Removed from this desk.")}
             onResume={session && !session.running && !reflectionPending && !handoffPending ? () => void resumePractice() : undefined}
@@ -493,20 +525,33 @@ export function App() {
             handoffAction={handoffAction}
             hintButtonRef={hintButton}
             onToggleHint={window.forma && bridge ? () => {
-              if (showDeskHint) closeDeskHint();
-              else {
-                setThreadEditorProblem(null);
-                setDeskHintKey(hintScope);
-              }
+              if (showDeskHint) closeDeskAssist("hint");
+              else openDeskAssist("hint");
             } : undefined}
-            hint={showDeskHint && bridge && <DeskHintFlow key={hintScope} bridge={bridge} problemId={problem.id}
+            hint={showDeskHint && bridge && <DeskHintFlow key={deskScope} bridge={bridge} problemId={problem.id}
               covered={!!palette}
               hypothesis={deskItems.findLast(item => item.kind === "hypothesis")?.text}
-              onClose={closeDeskHint}
+              onClose={() => closeDeskAssist("hint")}
               onOpenTutor={() => { setReturnFromTutorToDesk(true); openPanel("tutor"); }}
-              onLeaveThread={() => openThreadFromHint()}
-              onKeep={openThreadFromHint}
+              onLeaveThread={() => openThreadFromAssist()}
+              onKeep={openThreadFromAssist}
               onOpenLink={url => void ui("open-external", url)}
+            />}
+            ideaButtonRef={ideaButton}
+            onToggleIdea={window.forma && bridge ? () => {
+              if (showDeskIdea) closeDeskAssist("idea");
+              else openDeskAssist("idea");
+            } : undefined}
+            idea={showDeskIdea && bridge && deskScope && <DeskIdeaFlow
+              key={deskScope} bridge={bridge} problemId={problem.id}
+              draft={ideaDraft?.scope === deskScope ? ideaDraft.value : emptyDeskIdeaDraft}
+              onDraftChange={changeIdeaDraft}
+              covered={!!palette || !visible} blocked={busy || thoughtVoiceBusy}
+              renderVoiceControls={(onTranscript, disabled) => renderVoiceControls(false, onTranscript, disabled)}
+              onClose={() => closeDeskAssist("idea")}
+              onOpenTutor={() => { setReturnFromTutorToDesk(true); openPanel("tutor"); }}
+              onKeepOutline={text => saveDeskEntry({ kind: "hypothesis", text })}
+              onKeepChallenge={openThreadFromAssist}
             />}
           />}
           {panel === "desk" && !problem && <PanelHeading eyebrow="PROBLEM DESK" title="Attach a problem to begin." description="Your desk follows the problem you’re practicing."/>}

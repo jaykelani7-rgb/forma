@@ -44,6 +44,7 @@ parentPort!.on('message', (request: {id:number;method:string;args:unknown[]}) =>
       }
       case 'tutor-view': value=store.tutor.view(now); break;
       case 'desk-hint-review': value=store.tutor.deskHintReview(a[0],a[1] as TutorProviderStatus,now); break;
+      case 'desk-idea-review': value=store.tutor.deskIdeaReview(a[0],a[1] as TutorProviderStatus,now); break;
       case 'tutor-open': value=store.tutor.open(a[0],now); break;
       case 'tutor-context': value=store.tutor.context(a[0]); break;
       case 'tutor-draft': value=store.tutor.draft(a[0],now); break;

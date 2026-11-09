@@ -1,7 +1,7 @@
 /* eslint-disable @next/next/no-img-element -- Electron previews local data URLs without a Next.js server. */
 import { useId, useRef, useState, type FormEvent, type ReactNode, type RefObject } from "react";
 import {
-  ArrowUpRight, ChevronDown, Clock3, Code2, Feather, FileCode2, ImagePlus, Lightbulb, Pencil, Play, Plus, Trash2,
+  ArrowUpRight, ChevronDown, Clock3, Code2, Feather, FileCode2, ImagePlus, Lightbulb, MessageSquare, Pencil, Play, Plus, Trash2,
 } from "lucide-react";
 import { DESK_IMAGE_LIMIT, DESK_THREAD_LIMIT, validateDeskEntry, type DeskEntry } from "../../../packages/contracts/src";
 import { RibbonMark } from "../../../packages/ribbon/RibbonMark";
@@ -32,6 +32,9 @@ interface ProblemDeskProps {
   hint?: ReactNode;
   onToggleHint?: () => void;
   hintButtonRef?: RefObject<HTMLButtonElement | null>;
+  idea?: ReactNode;
+  onToggleIdea?: () => void;
+  ideaButtonRef?: RefObject<HTMLButtonElement | null>;
 }
 
 const TEXT_LIMIT = 10_000;
@@ -132,6 +135,7 @@ export function ProblemDesk({
   problemTitle, elapsed, paused = false, busy = false, items, editThread = false,
   threadDraft, onThreadDraftChange, onEditThreadChange, onSave, onRemove,
   onResume, onOpenProblem, onOpenSolution, handoffAction, voiceControls, hint, onToggleHint, hintButtonRef,
+  idea, onToggleIdea, ideaButtonRef,
 }: ProblemDeskProps) {
   const threadId = useId();
   const artifactId = useId();
@@ -245,6 +249,14 @@ export function ProblemDesk({
           </ul>
         </details>}
       </section>
+
+      {onToggleIdea && <div className="desk-hint-slot">
+        <button ref={ideaButtonRef} type="button" className="desk-tool desk-hint-trigger"
+          aria-expanded={!!idea} disabled={busy} onClick={onToggleIdea}>
+          <MessageSquare size={15} aria-hidden="true"/> Explain my idea
+        </button>
+        {idea}
+      </div>}
 
       {onToggleHint && <div className="desk-hint-slot">
         <button ref={hintButtonRef} type="button" className="desk-tool desk-hint-trigger"

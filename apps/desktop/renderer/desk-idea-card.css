@@ -1,0 +1,241 @@
+.desk-idea {
+  --idea-accent: var(--desk-accent, var(--sage-deep));
+  --idea-rule: var(--desk-crease, var(--rule));
+  --hint-accent: var(--idea-accent);
+  --hint-rule: var(--idea-rule);
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--idea-rule);
+  border-inline-start: 2px solid var(--idea-accent);
+  border-radius: 4px 12px 12px 12px;
+  background: var(--desk-thread, var(--paper-raised));
+  color: var(--ink);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.desk-idea :is(h2, h3, p, blockquote, pre) {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.desk-idea-header h2,
+.desk-idea-outline > h3,
+.desk-idea-answer > h3 {
+  font: 400 24px/1.05 "Instrument Serif", Georgia, serif;
+}
+
+.desk-idea :is(h2, h3):focus {
+  outline: none;
+}
+
+.desk-idea h2 {
+  margin-top: 3px;
+}
+
+.desk-idea-outline > h3,
+.desk-idea-answer > h3 {
+  font-size: 20px;
+}
+
+.desk-idea .eyebrow {
+  color: var(--idea-accent);
+}
+
+.desk-idea-header,
+.desk-idea-actions,
+.desk-idea-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.desk-idea-header {
+  justify-content: space-between;
+}
+
+.desk-idea-header .icon-button {
+  align-self: flex-start;
+  min-width: 30px;
+  min-height: 30px;
+}
+
+.desk-idea-actions {
+  flex-wrap: wrap;
+}
+
+.desk-idea-stack,
+.desk-idea-field,
+.desk-idea-assumptions,
+.desk-idea-answer,
+.desk-idea-example {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+}
+
+.desk-idea-field {
+  gap: 4px;
+  font-weight: 500;
+}
+
+.desk-idea textarea {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  min-height: 42px;
+  padding: 7px 8px;
+  resize: vertical;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--paper-raised);
+  color: var(--ink);
+  font-weight: 400;
+  line-height: 1.5;
+}
+
+.desk-idea textarea:focus-visible,
+.desk-idea summary:focus-visible,
+.desk-idea pre:focus-visible {
+  outline: 2px solid var(--sage-deep);
+  outline-offset: 2px;
+}
+
+.desk-idea-assumptions {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.desk-idea-assumptions legend {
+  padding: 0;
+  font-weight: 500;
+}
+
+.desk-idea-assumption {
+  padding: 0 6px 6px;
+  border: 1px solid var(--idea-rule);
+  border-radius: 6px;
+  background: var(--paper-inset);
+}
+
+.desk-idea-assumption:has(input:checked) {
+  border-color: var(--idea-accent);
+}
+
+.desk-idea-check {
+  width: fit-content;
+  min-height: 30px;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.desk-idea-check input {
+  flex-shrink: 0;
+  margin: 0;
+  accent-color: var(--idea-accent);
+}
+
+.desk-idea-muted,
+.desk-idea-count {
+  color: var(--muted);
+}
+
+.desk-idea-count {
+  justify-self: end;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.desk-idea-error {
+  color: var(--error);
+}
+
+.desk-idea-quiet {
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
+  gap: 5px;
+  min-height: 32px;
+  padding: 3px 1px;
+  border: 0;
+  background: transparent;
+  color: var(--idea-accent);
+  font-weight: 600;
+  text-align: left;
+}
+
+.desk-idea-quiet:hover:not(:disabled) {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.desk-idea-primary.button {
+  min-height: 36px;
+  padding: 7px 9px;
+  text-align: left;
+}
+
+.desk-idea-code {
+  border-block: 1px solid var(--idea-rule);
+}
+
+.desk-idea-code summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.desk-idea-code summary::-webkit-details-marker {
+  display: none;
+}
+
+.desk-idea-code[open] summary svg {
+  transform: rotate(180deg);
+}
+
+.desk-idea-code p {
+  padding-bottom: 5px;
+}
+
+.desk-idea-code pre,
+.desk-idea-example pre {
+  max-height: 148px;
+  overflow: auto;
+  padding: 6px;
+  border-radius: 5px;
+  background: var(--paper-inset);
+  scrollbar-width: thin;
+  white-space: pre-wrap;
+}
+
+.desk-idea-code pre {
+  margin-bottom: 6px;
+}
+
+.desk-idea-answer {
+  padding: 10px;
+  border: 1px solid var(--idea-rule);
+  border-radius: 8px;
+  background: var(--paper-raised);
+}
+
+.desk-idea-answer :is(p, blockquote) {
+  white-space: pre-wrap;
+}
+
+.desk-idea-answer blockquote {
+  padding-inline-start: 8px;
+  border-inline-start: 2px solid var(--idea-accent);
+  font: 400 18px/1.2 "Instrument Serif", Georgia, serif;
+}
+
+.desk-idea-example {
+  gap: 4px;
+}
