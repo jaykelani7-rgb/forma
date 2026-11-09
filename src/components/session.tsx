@@ -24,6 +24,7 @@ import {
   Outcome,
   Problem,
   Session,
+  type TakeawayPracticeContext,
   elapsed,
   clockTime,
   nextReview,
@@ -38,6 +39,7 @@ import type { TrackContext } from "@/lib/tracks-types";
 import { nextTrackEntry, trackContextForEntry } from "@/lib/tracks";
 import { MISTAKES, type ReflectionMemory } from "@/lib/memory-types";
 import { ReflectionMemoryFields } from "./reflection-memory-fields";
+import { FoldedTakeawayTopic, TakeawayConnection } from "./takeaway-connection";
 import { recordPracticeReflection } from "../../packages/core/src/companion";
 
 export function FocusedSession() {
@@ -93,6 +95,7 @@ export function FocusedSession() {
     milestone: boolean;
     reviewAt: string | null;
     trackContext?: TrackContext;
+    takeawayPractice?: TakeawayPracticeContext;
   } | null>(null);
   const [nextBusy, setNextBusy] = useState(false);
   const nextLock = useRef(false);
@@ -226,6 +229,9 @@ export function FocusedSession() {
       notes: session.notes,
       ...memory,
       ...(session.trackContext ? { trackContext: session.trackContext } : {}),
+      ...(session.takeawayPractice
+        ? { takeawayPractice: session.takeawayPractice }
+        : {}),
     };
     const isCurrent = guardWorkspace();
     closing.current = true;
@@ -252,6 +258,7 @@ export function FocusedSession() {
         milestone,
         reviewAt: review.reviewAt,
         ...(session.trackContext ? { trackContext: session.trackContext } : {}),
+        takeawayPractice: session.takeawayPractice,
       });
       setClosingDraft(null);
       notify(
@@ -435,6 +442,9 @@ export function FocusedSession() {
             ? `You solved ${completed.title} independently after it once needed more time or a little help. That’s worth remembering.`
             : "Your reflection is part of your story now. Take a breath; you’ve made time to understand something."}
         </p>
+        {completed.takeawayPractice && (
+          <TakeawayConnection context={completed.takeawayPractice} />
+        )}
         {completed.reviewAt && (
           <div className="completion-review">
             <RotateCcw size={16} />A fresh try is suggested for{" "}
@@ -513,10 +523,12 @@ export function FocusedSession() {
     ? { handle: problem.cfHandle }
     : undefined;
   const priorMemory =
-    session.phase === "focus"
+    session.phase === "focus" && !session.takeawayPractice
       ? problemMemory(data, problem.id, memoryScope)
       : null;
-  const recallCue = revisionCueForProblem(data, problem.id, memoryScope);
+  const recallCue = priorMemory
+    ? revisionCueForProblem(data, problem.id, memoryScope)
+    : null;
   return (
     <div className="session-page page-enter">
       <header className="focus-header">
@@ -563,12 +575,15 @@ export function FocusedSession() {
           </div>
           <ProblemLink problem={problem} />
         </div>
-        {currentEntry?.pattern && session.phase === "focus" && (
-          <details className="session-pattern">
-            <summary>Reveal pattern hint</summary>
-            <p>{currentEntry.pattern}</p>
-          </details>
-        )}
+        {session.takeawayPractice && <FoldedTakeawayTopic />}
+        {!session.takeawayPractice &&
+          currentEntry?.pattern &&
+          session.phase === "focus" && (
+            <details className="session-pattern">
+              <summary>Reveal pattern hint</summary>
+              <p>{currentEntry.pattern}</p>
+            </details>
+          )}
         {priorMemory && (priorMemory.history.length > 0 || recallCue) && (
           <section className="session-memory" aria-label="Before you re-solve">
             <h2>Before you re-solve</h2>

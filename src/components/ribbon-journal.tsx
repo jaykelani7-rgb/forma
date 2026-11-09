@@ -19,7 +19,9 @@ import {
 } from "@/lib/model";
 import { practiceIdentity } from "@/lib/practice-state";
 import { AttemptComparison } from "./attempt-comparison";
+import { JournalTakeawayPractice } from "./journal-takeaway-practice";
 import { useWorkspace } from "./provider";
+import { TakeawayConnection } from "./takeaway-connection";
 import { Modal } from "./ui";
 import styles from "./ribbon-journal.module.css";
 
@@ -151,12 +153,14 @@ function JournalEntryDetail({
   headingRef,
   onBack,
   onCompare,
+  takeawaySource,
 }: {
   entry: JournalEntry;
   otherAttempts: JournalEntry[];
   headingRef: Ref<HTMLHeadingElement>;
   onBack: () => void;
   onCompare?: () => void;
+  takeawaySource?: JournalEntry;
 }) {
   const { record, problem, outcome } = entry;
   const [historyLimit, setHistoryLimit] = useState(HISTORY_PAGE_SIZE);
@@ -236,7 +240,23 @@ function JournalEntryDetail({
             </button>
           )}
         </div>
+        {record.takeaway.trim() && (
+          <JournalTakeawayPractice sourceRecordId={record.id} />
+        )}
       </div>
+      {record.takeawayPractice && (
+        <div className={styles.takeawayConnection}>
+          <TakeawayConnection
+            context={record.takeawayPractice}
+            headingLevel={3}
+            action={takeawaySource && (
+              <Link href={recordHref(takeawaySource, "/journal")} className="text-link">
+                View earlier reflection <ArrowRight size={15} aria-hidden="true" />
+              </Link>
+            )}
+          />
+        </div>
+      )}
       <section
         className={styles.history}
         aria-labelledby="journal-history-title"
@@ -378,6 +398,10 @@ function JournalBrowser({
     setComparisonId(null);
     entryButton.current = null;
   }
+
+  const takeawaySource = selected?.record.takeawayPractice
+    ? entryById.get(selected.record.takeawayPractice.sourceRecordId)
+    : undefined;
 
   return (
     <section className="ribbon-journal" aria-label="Practice journal">
@@ -572,6 +596,7 @@ function JournalBrowser({
             onCompare={comparisonChoices.length
               ? () => setComparisonId(selected.record.id)
               : undefined}
+            takeawaySource={takeawaySource}
             onBack={() =>
               (entryButton.current?.isConnected
                 ? entryButton.current
@@ -608,7 +633,7 @@ function JournalBrowser({
 }
 
 export function RibbonJournal({ recent = false }: { recent?: boolean }) {
-  const { savedData, localDay } = useWorkspace();
+  const { savedData, localDay, workspaceKey } = useWorkspace();
   const entries = useMemo(() => {
     const problems = new Map(
       savedData.problems.map((problem) => [problem.id, problem]),
@@ -632,6 +657,10 @@ export function RibbonJournal({ recent = false }: { recent?: boolean }) {
   return recent ? (
     <RecentJournal entries={entries} />
   ) : (
-    <JournalBrowser entries={entries} today={localDay || localDate()} />
+    <JournalBrowser
+      key={workspaceKey}
+      entries={entries}
+      today={localDay || localDate()}
+    />
   );
 }

@@ -14,6 +14,8 @@ Open the desktop command palette with **Command + K** inside Forma or **Control 
 
 Choose **Compare attempts** from a Journal entry or a desktop command palette reflection. **Then / Now** orders two saved attempts by when they happened and shows their recorded approaches, outcomes, and takeaways. On desktop, code pinned to the exact timed session in VS Code can appear alongside that attempt.
 
+Choose **Try it on a new problem** from a saved Journal takeaway. Forma offers one similarly rated problem with a shared topic and no recorded attempt. The topic stays folded during the session and appears beside the earlier takeaway after you save the reflection.
+
 With [account handoff configured](docs/cloud-setup.md#continue-a-desktop-session-on-web), choose **Pause and continue on web** in the Ribbon. Link your Forma account in the browser, confirm the destination in the Ribbon, then receive the paused session on web. Your next step and recorded time are there when you resume.
 
 ## Run locally

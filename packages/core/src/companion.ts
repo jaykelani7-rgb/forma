@@ -206,7 +206,9 @@ export function recordPracticeReflection(data: Data, attempt: Attempt, review: P
   if (data.session && data.session.id !== attempt.id) throw new Error("Another session is now active. Review your recovery copy before saving this reflection.");
   const previous = data.attempts.find((row) => row.id === attempt.id);
   if (previous && (previous.problemId !== attempt.problemId || previous.startedAt !== attempt.startedAt)) throw new Error("A saved attempt cannot be reassigned to another problem or session.");
-  return validateData({ ...data, session: null, attempts: data.attempts.some((a) => a.id === attempt.id) ? data.attempts.map((a) => a.id === attempt.id ? attempt : a) : [...data.attempts, attempt], problems: data.problems.map((p) => p.id === attempt.problemId ? { ...p, ...review, reviewManual: options.reviewManual ?? false, reviewUpdatedAt: attempt.completedAt, ...(p.cfHandle ? { reviewAttemptId: undefined } : {}), ...(options.completedRevisit && p.reviewAt ? { reviewCompletedAt: attempt.completedAt } : {}) } : p) });
+  const takeawayPractice = data.session?.takeawayPractice ?? previous?.takeawayPractice ?? attempt.takeawayPractice;
+  const savedAttempt = takeawayPractice ? { ...attempt, takeawayPractice } : attempt;
+  return validateData({ ...data, session: null, attempts: previous ? data.attempts.map((a) => a.id === attempt.id ? savedAttempt : a) : [...data.attempts, savedAttempt], problems: data.problems.map((p) => p.id === attempt.problemId ? { ...p, ...review, reviewManual: options.reviewManual ?? false, reviewUpdatedAt: attempt.completedAt, ...(p.cfHandle ? { reviewAttemptId: undefined } : {}), ...(options.completedRevisit && p.reviewAt ? { reviewCompletedAt: attempt.completedAt } : {}) } : p) });
 }
 
 /** Submitted platform evidence is independent of the user's retained reflection. */

@@ -9,6 +9,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { Duration, localDate, Problem, reviewQueue, uid } from "@/lib/model";
+import { getCachedCatalogue, getCatalogue } from "@/lib/catalogue-client";
 import { sharedPracticeState } from "@/lib/practice-state";
 import {
   catalogueProblemToSaved,
@@ -20,46 +21,11 @@ import {
   ProblemCatalogue,
   retainFreshSelection,
   selectFreshProblem,
-  validateCatalogue,
   validateDiscovery,
 } from "@/lib/discovery";
 import Link from "next/link";
 import { useWorkspace } from "./provider";
 import styles from "./today-discovery.module.css";
-
-// Public data only. Client navigations reuse the catalogue instead of refetching
-// it on every Today visit; the server separately caches the upstream for 24h.
-let cachedCatalogue: ProblemCatalogue | null = null;
-let catalogueRequest: Promise<ProblemCatalogue> | null = null;
-async function getCatalogue(): Promise<ProblemCatalogue> {
-  if (
-    cachedCatalogue &&
-    Date.now() - Date.parse(cachedCatalogue.fetchedAt) < 24 * 60 * 60 * 1000
-  )
-    return cachedCatalogue;
-  if (catalogueRequest) return catalogueRequest;
-  catalogueRequest = (async () => {
-    try {
-      const response = await fetch("/api/catalogue", {
-        signal: AbortSignal.timeout(30000),
-        credentials: "omit",
-      });
-      const body: unknown = await response.json();
-      if (!response.ok) throw new Error("Unavailable catalogue");
-      cachedCatalogue = validateCatalogue(body);
-      return cachedCatalogue;
-    } catch {
-      throw new Error(
-        "Fresh discovery is unavailable right now. Your saved problems and revisits are still available.",
-      );
-    }
-  })();
-  try {
-    return await catalogueRequest;
-  } finally {
-    catalogueRequest = null;
-  }
-}
 
 export function FreshDiscovery({
   duration,
@@ -84,11 +50,11 @@ export function FreshDiscovery({
   const selectionAttempt = useRef("");
   const [actionError, setActionError] = useState("");
   const [catalogue, setCatalogue] = useState<ProblemCatalogue | null>(
-    cachedCatalogue,
+    getCachedCatalogue,
   );
   const [error, setError] = useState("");
   const [formError, setFormError] = useState("");
-  const [loading, setLoading] = useState(!cachedCatalogue);
+  const [loading, setLoading] = useState(() => !getCachedCatalogue());
   const preferences = useMemo(
     () => data.discovery ?? defaultDiscovery(),
     [data.discovery],

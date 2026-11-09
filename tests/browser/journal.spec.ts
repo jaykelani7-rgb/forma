@@ -1,10 +1,11 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import {
   connectProfile,
   mergeActivity,
   saveQuickReflection,
 } from "../../src/lib/codeforces";
 import { emptyData, type Attempt, type Problem } from "../../src/lib/model";
+import type { CatalogueProblem } from "../../src/lib/discovery";
 
 test.use({ timezoneId: "Asia/Kolkata" });
 
@@ -251,4 +252,117 @@ test("Then / Now compares saved attempts across Journal filters and keeps the se
   await expect(outcome).toHaveValue("independent");
   await expect(entries).toHaveCount(1);
   await expect(entries).toHaveAttribute("aria-pressed", "true");
+});
+
+function catalogueEntry(
+  contest: number,
+  title: string,
+  rating: number | null,
+  tags: string[],
+): CatalogueProblem {
+  return {
+    key: `contest:${contest}:A`,
+    code: `${contest}A`,
+    url: `https://codeforces.com/problemset/problem/${contest}/A`,
+    title,
+    rating,
+    tags,
+  };
+}
+
+const originalTakeaway = "Walk the tree.";
+const freshProblem = catalogueEntry(1240, "Changing the root", 1500, [
+  "trees",
+  "greedy",
+]);
+const ineligibleProblems = [
+  catalogueEntry(1234, problem.title, 1400, ["trees"]),
+  catalogueEntry(1235, "A different graph", 1400, ["trees"]),
+  catalogueEntry(1236, "Unrelated challenge", 1400, ["strings"]),
+  catalogueEntry(1237, "Advanced challenge", 1800, ["trees"]),
+  catalogueEntry(1238, "Unrated challenge", null, ["trees"]),
+];
+
+async function openTakeaway(page: Page, problems: CatalogueProblem[]) {
+  await page.clock.setFixedTime(now);
+  await page.addInitScript((data) => {
+    if (localStorage.getItem("forma.takeaway-test-seeded")) return;
+    localStorage.setItem("forma.personal.v1", JSON.stringify(data));
+    localStorage.setItem("forma.takeaway-test-seeded", "1");
+  }, fixture());
+  await page.route("**/api/catalogue", (route) =>
+    route.fulfill({
+      json: { fetchedAt: now.toISOString(), stale: false, problems },
+    }),
+  );
+  await page.goto("/journal");
+  await page
+    .getByRole("button", {
+      name: /^View entry: Tree paths, .*Solved independently$/,
+    })
+    .click();
+  const detail = page.getByRole("region", { name: "Journal entry detail" });
+  await expect(detail.getByText(originalTakeaway, { exact: true })).toBeVisible();
+  await detail.getByRole("button", { name: "Try it on a new problem" }).click();
+  return detail;
+}
+
+test("a fresh Journal problem keeps its connection folded until reflection is saved", async ({
+  page,
+}) => {
+  const detail = await openTakeaway(page, [...ineligibleProblems, freshProblem]);
+  await expect(detail.getByText(freshProblem.title, { exact: true })).toBeVisible();
+  await expect(detail.getByText("trees", { exact: true })).toHaveCount(0);
+  const start = detail.getByRole("button", { name: "Start practice", exact: true });
+  await expect(start).toHaveCount(1);
+  await start.click();
+  await expect(page).toHaveURL(/\/session$/);
+  await expect(page.getByRole("heading", { name: freshProblem.title })).toBeVisible();
+
+  const folded = page.getByText("The shared topic is folded until you save your reflection.");
+  const connection = page.getByRole("region", { name: "The connection", exact: true });
+  await expect(folded).toBeVisible();
+  await page.reload();
+  await expect(folded).toBeVisible();
+  await expect(page.getByText(originalTakeaway, { exact: true })).toHaveCount(0);
+  await expect(page.getByText("trees", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("greedy", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Reveal pattern hint", { exact: true })).toHaveCount(0);
+  await expect(connection).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Finish session", exact: true }).click();
+  await expect(folded).toBeVisible();
+  await expect(connection).toHaveCount(0);
+  await page.getByRole("button", { name: "Solved independently", exact: true }).click();
+  await page.getByLabel(/One thing to remember/).fill("Check every possible root.");
+  await page.getByRole("button", { name: "Save reflection", exact: true }).click();
+  await expect(connection).toBeVisible();
+  await expect(connection).toContainText(problem.title);
+  await expect(connection).toContainText(originalTakeaway);
+  await expect(connection).toContainText("trees");
+
+  await page.goto("/journal");
+  await page.getByRole("button", { name: /^View entry: Changing the root,/ }).click();
+  await expect(connection).toContainText(originalTakeaway);
+  await expect(connection).toContainText("trees");
+  const source = connection.getByRole("link", { name: "View earlier reflection" });
+  await expect(source).toHaveAttribute(
+    "href",
+    "/problems/personal-tree?from=%2Fjournal#record-practice-timed%3Aindependent",
+  );
+  await source.click();
+  const sourceRecord = page.locator('[id="record-practice-timed:independent"]');
+  await expect(sourceRecord).toBeVisible();
+  await expect(sourceRecord).toContainText(originalTakeaway);
+});
+
+test("Journal offers no practice start when every candidate is ineligible", async ({
+  page,
+}) => {
+  const detail = await openTakeaway(page, ineligibleProblems);
+  await expect(
+    detail.getByText("No untried problem of a similar rating was found for this takeaway."),
+  ).toBeVisible();
+  await expect(detail.getByRole("button", { name: "Start practice", exact: true })).toHaveCount(0);
+  await expect(page).toHaveURL(/\/journal$/);
 });

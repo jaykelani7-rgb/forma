@@ -94,6 +94,12 @@ export interface Problem {
   deferredUntil?: string | null;
   skippedOn?: string | null;
 }
+export interface TakeawayPracticeContext {
+  sourceRecordId: string;
+  sourceProblemTitle: string;
+  takeaway: string;
+  topic: string;
+}
 export interface Attempt extends ReflectionMemory {
   id: string;
   problemId: string;
@@ -105,6 +111,7 @@ export interface Attempt extends ReflectionMemory {
   takeaway: string;
   notes: string;
   trackContext?: TrackContext;
+  takeawayPractice?: TakeawayPracticeContext;
 }
 export interface Session {
   id: string;
@@ -117,6 +124,7 @@ export interface Session {
   timerVisible: boolean;
   phase: "focus" | "reflection";
   trackContext?: TrackContext;
+  takeawayPractice?: TakeawayPracticeContext;
 }
 export interface Settings {
   displayName: string;
@@ -727,6 +735,24 @@ function str(value: unknown, max: number, min = 0): value is string {
     typeof value === "string" && value.length >= min && value.length <= max
   );
 }
+function validateTakeawayPractice(value: unknown): TakeawayPracticeContext {
+  if (
+    !record(value) ||
+    !str(value.sourceRecordId, 330, 1) ||
+    !str(value.sourceProblemTitle, 240, 1) ||
+    !str(value.takeaway, 2000, 1) ||
+    !value.takeaway.trim() ||
+    !str(value.topic, 60, 1) ||
+    !value.topic.trim()
+  )
+    throw new Error("The saved takeaway practice connection is invalid.");
+  return {
+    sourceRecordId: value.sourceRecordId,
+    sourceProblemTitle: value.sourceProblemTitle,
+    takeaway: value.takeaway,
+    topic: value.topic,
+  };
+}
 function num(value: unknown, min: number, max: number): value is number {
   return (
     typeof value === "number" &&
@@ -977,6 +1003,9 @@ export function validateData(input: unknown): Data {
     ...(a.trackContext !== undefined
       ? { trackContext: validateTrackContext(a.trackContext) }
       : {}),
+    ...(a.takeawayPractice !== undefined
+      ? { takeawayPractice: validateTakeawayPractice(a.takeawayPractice) }
+      : {}),
   }));
   const revisions = validateRevisions(
     input.revisions,
@@ -1056,6 +1085,11 @@ export function validateData(input: unknown): Data {
             phase: session.phase,
             ...(session.trackContext !== undefined
               ? { trackContext: validateTrackContext(session.trackContext) }
+              : {}),
+            ...(session.takeawayPractice !== undefined
+              ? {
+                  takeawayPractice: validateTakeawayPractice(session.takeawayPractice),
+                }
               : {}),
           } as Session),
   };

@@ -1,5 +1,6 @@
 import { contestLockedSetup, type PracticeContest } from "./contest-lab";
 import { Data, validateData } from "./model";
+import { takeawayPracticeStartConflict } from "./takeaway-practice";
 
 export const MAX_BACKUP_BYTES = 64 * 1024 * 1024;
 export const CAPACITY_LABEL = "64 MB";
@@ -158,7 +159,17 @@ export function mergeWorkspaces(
   }
   const merged = merge(base, local, remote, "workspace");
   try {
-    return { data: validateData(merged), conflicts };
+    const data = validateData(merged);
+    const session = data.session;
+    if (
+      !conflicts.length &&
+      session?.takeawayPractice &&
+      session.id !== base.session?.id &&
+      session.id !== remote.session?.id &&
+      takeawayPracticeStartConflict(data, session)
+    )
+      return { data: remote, conflicts: ["workspace.session.takeawayPractice"] };
+    return { data, conflicts };
   } catch {
     return {
       data: remote,

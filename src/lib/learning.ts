@@ -3,7 +3,14 @@ import type {
   ImportedAttempt,
   QuickReflection,
 } from "./codeforces-types";
-import type { Attempt, Data, Difficulty, Outcome, Problem } from "./model";
+import type {
+  Attempt,
+  Data,
+  Difficulty,
+  Outcome,
+  Problem,
+  TakeawayPracticeContext,
+} from "./model";
 import type { ReflectionMemory } from "./memory-types";
 import type { TrackContext } from "./tracks-types";
 import { practiceIdentity } from "./practice-state";
@@ -43,6 +50,7 @@ export interface LearningRecord extends ReflectionMemory {
   reflectionPending: boolean;
   reflectionSource: "timed" | "codeforces" | "contest" | null;
   trackContext?: TrackContext;
+  takeawayPractice?: TakeawayPracticeContext;
   contestSource?: ContestLearningSource;
 }
 
@@ -329,6 +337,9 @@ export function learningHistory(
         ? { approach: reflection.approach }
         : {}),
       ...(attempt.trackContext ? { trackContext: attempt.trackContext } : {}),
+      ...(attempt.takeawayPractice
+        ? { takeawayPractice: attempt.takeawayPractice }
+        : {}),
     });
   }
   for (const attempt of imported.values()) {

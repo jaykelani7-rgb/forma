@@ -1,0 +1,80 @@
+.connection {
+  display: grid;
+  gap: 0.625rem;
+  padding: clamp(0.875rem, 3vw, 1.25rem);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  text-align: start;
+  overflow-wrap: anywhere;
+}
+
+:global(.session-complete) > .connection {
+  max-width: 30rem;
+  margin: 1.5rem auto 0;
+}
+
+.header,
+.folded {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+}
+
+.header svg,
+.folded svg {
+  flex: none;
+}
+
+.connection .title {
+  margin: 0;
+  font: 400 1.625rem/1.1 "Instrument Serif", Georgia, serif;
+}
+
+.topic,
+.takeaway {
+  margin: 0;
+}
+
+.topic {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.375rem;
+  color: var(--muted);
+  font-size: var(--text-meta);
+}
+
+.topic strong {
+  padding: 0.125rem 0.5rem;
+  border-radius: 0.375rem;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.takeaway {
+  padding-inline-start: 0.75rem;
+  border-inline-start: 2px solid var(--line);
+}
+
+.takeaway figcaption,
+.folded {
+  color: var(--muted);
+  font-size: var(--text-meta);
+}
+
+.takeaway blockquote {
+  margin: 0.25rem 0 0;
+  color: var(--text);
+  font-size: var(--text-support);
+  white-space: pre-wrap;
+}
+
+.folded {
+  margin: 0.875rem 0 0;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  width: fit-content;
+}
