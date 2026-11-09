@@ -1,9 +1,12 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
+import { basename } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { canonicalProblemIdentity } from '../../../packages/core/src/codeforces-identity';
 import { availableTutorNotes, freezeTutorContext, parseSharedCode, TUTOR_BUDGET, tutorFields, tutorHash, tutorId, tutorObject, tutorText, validateStatement } from '../../../packages/tutor/context';
 import { buildProviderMessages, hintLevelForAction, parseTutorAction, parseTutorDraftAction } from '../../../packages/tutor/policy';
 import { IDEA_LIMITS, readIdeaChallenge, readIdeaOutline, readIdeaQuestion } from '../../../packages/tutor/idea';
+import { CHALLENGE_RUN_LIMIT, challengeOutputEqual, challengeSampleOutput, parseChallengeRunRequest, readChallengeRunReceipt, type ChallengeRunPlan, type ChallengeRunReceipt } from '../../../packages/tutor/challenge-run';
 import { isDeskIdeaAction } from '../../../packages/tutor/types';
 import type { DeskHintReview, DeskHintTarget, DeskIdeaReview, SharedCode, StatementSnapshot, TutorAction, TutorContextView, TutorConversation, TutorProposal, TutorProviderStatus, TutorSendInput, TutorSettings, TutorStoredView, TutorTurn, TutorUsage, TutorDraft, TutorDraftView, TutorDraftSaveInput, TutorDraftSaveResult } from '../../../packages/tutor/types';
 import type { LocalSnapshot } from './store';
@@ -121,6 +124,18 @@ export class TutorStore {
     if(!row)throw new Error('This local conversation is no longer available.');
     return decode<TutorConversation>(row.body);
   }
+  private scopedConversation(snapshot: LocalSnapshot, problemId: string, identity: string, requestedWorkspace?: unknown) {
+    const binding = snapshot.state.bindings.find(item => item.problemId === problemId);
+    const rememberedId = this.db.prepare('SELECT last_conversation_id FROM tutor_draft_state WHERE id=1').get()?.last_conversation_id;
+    const rememberedRow = rememberedId ? this.db.prepare('SELECT body FROM tutor_conversations WHERE id=?').get(rememberedId) : null;
+    const remembered = rememberedRow ? decode<TutorConversation>(rememberedRow.body) : null;
+    const workspaceId = tutorId(requestedWorkspace ?? binding?.workspaceId ??
+      (remembered?.problemId === problemId && remembered.identity === identity ? remembered.workspaceId : 'personal'));
+    const existing = this.db.prepare('SELECT body FROM tutor_conversations WHERE identity=? ORDER BY updated_at DESC').all(identity)
+      .map(row => decode<TutorConversation>(row.body))
+      .find(conversation => conversation.problemId === problemId && conversation.workspaceId === workspaceId);
+    return { workspaceId, existing };
+  }
   open(input:unknown={},now=Date.now(),remember=true):TutorConversation {
     const value=tutorObject(input);tutorFields(value,['conversationId','problemId','workspaceId']);
     if(value.conversationId!==undefined){const found=this.conversation(value.conversationId);if(remember)this.remember(found.id);return found;}
@@ -129,12 +144,7 @@ export class TutorStore {
     const identity=problem&&canonicalProblemIdentity(problem);
     if(!problem||!identity){const remembered=this.db.prepare('SELECT last_conversation_id FROM tutor_draft_state WHERE id=1').get()?.last_conversation_id;if(remembered&&this.db.prepare('SELECT id FROM tutor_conversations WHERE id=?').get(remembered))return this.conversation(remembered);}
     if(!problem||!identity)throw new Error('Recognise or attach a Codeforces problem before opening its tutor.');
-    const binding=snapshot.state.bindings.find(binding=>binding.problemId===problem.id);
-    const rememberedId=this.db.prepare('SELECT last_conversation_id FROM tutor_draft_state WHERE id=1').get()?.last_conversation_id;
-    const rememberedRow=rememberedId?this.db.prepare('SELECT body FROM tutor_conversations WHERE id=?').get(rememberedId):null;
-    const remembered=rememberedRow?decode<TutorConversation>(rememberedRow.body):null;
-    const workspaceId=tutorId(value.workspaceId??binding?.workspaceId??(remembered?.problemId===problem.id&&remembered.identity===identity?remembered.workspaceId:'personal'));
-    const existing=this.db.prepare('SELECT body FROM tutor_conversations WHERE identity=? ORDER BY updated_at DESC').all(identity).map(row=>decode<TutorConversation>(row.body)).find(conversation=>conversation.problemId===problem.id&&conversation.workspaceId===workspaceId);
+    const { workspaceId, existing } = this.scopedConversation(snapshot, problem.id, identity, value.workspaceId);
     if(existing){if(remember)this.remember(existing.id);return existing;}
     if(Number(this.db.prepare('SELECT COUNT(*) n FROM tutor_conversations').get()!.n)>=200)throw new Error('There are 200 local conversations. Export and delete an older one before opening another.');
     const stamp=new Date(now).toISOString();
@@ -220,10 +230,107 @@ export class TutorStore {
   }
   deskIdeaReview(input:unknown,provider:TutorProviderStatus,now=Date.now()):Omit<DeskIdeaReview,'provider'|'activeRequestId'> {
     const review = this.reviewDeskContext(input, provider);
-    const conversation = !review.contestMode && provider.configured && provider.capabilities.text
-      ? this.open({ problemId: review.target.problemId }, now, false) : null;
+    let conversation: TutorConversation | null = null;
+    if (!review.contestMode) {
+      if (provider.configured && provider.capabilities.text) {
+        conversation = this.open({ problemId: review.target.problemId }, now, false);
+      } else {
+        const snapshot = this.owner.snapshot();
+        if (snapshot.state.identity) {
+          conversation = this.scopedConversation(snapshot, review.target.problemId, snapshot.state.identity).existing ?? null;
+        }
+      }
+    }
     const code = conversation ? this.pendingCode(conversation.identity, conversation.workspaceId) : null;
     return { ...review, statement: review.statement?.complete ? review.statement : null, conversationId: conversation?.id ?? null, code };
+  }
+  private activeChallengeCase(turn: TutorTurn, snapshot: LocalSnapshot) {
+    if (this.settings().contestMode) throw new Error('Contest mode disables challenge verification.');
+    if (turn.action !== 'challenge-assumption' || turn.status !== 'completed' || !turn.standalone || !turn.context.statement?.complete) {
+      throw new Error('Open a completed challenge in the Problem Desk first.');
+    }
+    const { identity, sessionId } = this.activeDeskProblem(snapshot, turn.context.problemId);
+    if (turn.context.identity !== identity || turn.context.sessionId !== sessionId) {
+      throw new Error('The practice session changed. Review a challenge for the active session.');
+    }
+    const { exampleInput } = readIdeaChallenge(turn.assistantText);
+    return { input: exampleInput, samples: turn.context.statement.samples };
+  }
+  deskChallengeRuns(input: unknown): ChallengeRunReceipt[] {
+    const value = tutorObject(input);
+    tutorFields(value, ['turnId', 'requestId']);
+    const turn = this.readTurn(value.turnId);
+    if (turn.requestId !== tutorId(value.requestId)) throw new Error('The challenge request changed. Reopen it in the Problem Desk.');
+    this.activeChallengeCase(turn, this.owner.snapshot());
+    return turn.challengeRuns ?? [];
+  }
+  challengeRun(input: unknown, now = Date.now()): { plan: ChallengeRunPlan } | { receipt: ChallengeRunReceipt; conversationId: string } {
+    const request = parseChallengeRunRequest(input);
+    const { target } = request;
+    return this.transaction(() => {
+      if (this.settings().contestMode) throw new Error('Contest mode disables challenge verification.');
+      const snapshot = this.owner.snapshot();
+      const binding = snapshot.state.bindings.find(item => item.problemId === snapshot.state.problemId &&
+        item.identity === snapshot.state.identity && item.fileUri === target.fileUri &&
+        item.workspaceId === target.workspaceId && item.clientId === target.clientId);
+      if (!binding) throw new Error('Open the approved VS Code solution for the active Forma problem.');
+      const { sessionId } = this.activeDeskProblem(snapshot, binding.problemId);
+      if (snapshot.data.session && !sessionId) throw new Error('Return to the problem with the current practice session.');
+      const recoveryEpoch = this.draftEpoch();
+
+      if (request.operation === 'review') {
+        const row = this.db.prepare(`SELECT body FROM tutor_turns
+          WHERE status='completed' AND json_extract(body,'$.action')='challenge-assumption'
+            AND json_extract(body,'$.exposed')=1 AND json_extract(body,'$.context.problemId')=?
+            AND json_extract(body,'$.context.workspaceId')=? AND json_extract(body,'$.context.sessionId') IS ?
+          ORDER BY rowid DESC LIMIT 1`).get(binding.problemId, target.workspaceId, sessionId);
+        if (!row) throw new Error('Open an assumption challenge with a suggested case in the Problem Desk for this solution.');
+        const turn = decodeTurn(row.body);
+        const { input, samples } = this.activeChallengeCase(turn, snapshot);
+        if (input === null) throw new Error('The current challenge has no suggested case to run.');
+        if ((turn.challengeRuns?.length ?? 0) >= CHALLENGE_RUN_LIMIT) throw new Error('This challenge has reached its local run limit. Request a new challenge to continue.');
+        return { plan: {
+          turnId: turn.id, requestId: turn.requestId, problemTitle: turn.context.title,
+          assumption: readIdeaQuestion(turn.userText).assumption, input,
+          sampleOutput: challengeSampleOutput(input, samples), recoveryEpoch, sessionId,
+        } };
+      }
+
+      const { run } = request;
+      if (run.recoveryEpoch !== recoveryEpoch) throw new Error('The notebook was restored. Review the challenge again before running it.');
+      const turn = this.readTurn(run.turnId);
+      if (turn.requestId !== run.requestId || !turn.exposed || turn.context.workspaceId !== target.workspaceId) {
+        throw new Error('The reviewed challenge no longer matches this solution.');
+      }
+      const { input, samples } = this.activeChallengeCase(turn, snapshot);
+      if (input === null) throw new Error('The reviewed challenge has no suggested case to run.');
+      if (run.expectedSource === 'statement-sample' && challengeSampleOutput(input, samples) !== run.expectedOutput) {
+        throw new Error('The expected output does not match the captured statement sample.');
+      }
+      const receipt = readChallengeRunReceipt({
+        id: run.id, input, expectedOutput: run.expectedOutput, expectedSource: run.expectedSource,
+        sourceHash: run.sourceHash, fileName: basename(fileURLToPath(target.fileUri)), output: run.output,
+        outcome: run.outcome === 'exited'
+          ? challengeOutputEqual(run.output, run.expectedOutput) ? 'match' : 'mismatch'
+          : run.outcome,
+        diagnostic: run.diagnostic, ranAt: new Date(now).toISOString(),
+      });
+      const runs = turn.challengeRuns ?? [];
+      const previous = runs.find(item => item.id === run.id);
+      if (previous) {
+        if (JSON.stringify(previous) !== JSON.stringify({ ...receipt, ranAt: previous.ranAt })) {
+          throw new Error('This run already belongs to a different saved result.');
+        }
+        return { receipt: previous, conversationId: turn.conversationId };
+      }
+      if (runs.length >= CHALLENGE_RUN_LIMIT) throw new Error('This challenge has reached its local run limit. Request a new challenge to continue.');
+      this.writeTurn({ ...turn, challengeRuns: [...runs, receipt] });
+      const conversation = this.conversation(turn.conversationId);
+      const updated = { ...conversation, updatedAt: receipt.ranAt };
+      this.db.prepare('UPDATE tutor_conversations SET updated_at=?,body=? WHERE id=?').run(updated.updatedAt, JSON.stringify(updated), updated.id);
+      this.quota();
+      return { receipt, conversationId: turn.conversationId };
+    });
   }
   private draftEpoch():string {return String(this.db.prepare('SELECT epoch FROM tutor_draft_state WHERE id=1').get()!.epoch);}
   private writeDraft(draft:TutorDraft) {

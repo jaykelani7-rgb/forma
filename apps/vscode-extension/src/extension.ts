@@ -12,11 +12,24 @@ import { captureRecoveryEpoch, enqueueCommand, requireCaptureRecoveryEpoch, rest
 import { collectExplicitCode, sameCodeSource, type CodeSourceFence } from "../../../packages/integrations/tutor-code";
 import { companionConnectionError } from "../../../packages/integrations/connection-error";
 import { afterCompanionReady, CompanionLauncher, launchCompanion, resolveCompanionLaunch, userDevelopmentLaunchPath } from "../../../packages/integrations/local-launch";
+import { cppChallengeSupported, readCppChallengeSource, runCppChallenge } from "../../../packages/integrations/cpp-challenge";
+import { CHALLENGE_RUN_LIMITS, readChallengeRunPlan, readChallengeRunReceipt, type ChallengeRunRequest } from "../../../packages/tutor/challenge-run";
 
 const SECRET = "forma-companion.pairing.v1", QUEUE = "forma-companion.queue.v1", FOLDERS = "forma-companion.allowed-folders.v1", BINDINGS = "forma-companion.bindings.v1";
 type Binding = RecognisedBinding & { id?: string; key: string; fileUri: string; sessionId?: string };
 type Target = { fileUri: string; key: string; sessionId?: string; recoveryEpoch?: string | null };
+type ChallengeSubmission = Extract<ChallengeRunRequest, { operation: "record" }>;
 let testEndpoint: string | undefined;
+
+function expectedChallengeOutput(value: string) {
+  // JSON strings allow newlines and preserve exact output bytes in an input box.
+  const output: unknown = value.startsWith('"') ? JSON.parse(value) : value;
+  if (typeof output !== "string" || output.length > CHALLENGE_RUN_LIMITS.expectedOutput || output.includes("\0")) {
+    throw new Error("Enter up to 4,000 characters of expected output.");
+  }
+  return output;
+}
+
 function send(request: TransportRequest, signal?: AbortSignal): Promise<TransportResponse> {
   return new Promise((resolve, reject) => {
     const socket = createConnection(testEndpoint ?? defaultCompanionEndpoint());
@@ -58,6 +71,8 @@ export async function activate(context: vscode.ExtensionContext) {
   let testTutorChoice: { mode: "selection" | "file" | "cancel"; afterChoice?: () => Promise<void> } | undefined;
   let testCommandError: string | null = null;
   let pollAbort: AbortController | undefined, observationAbort = new AbortController();
+  let challengeRun: AbortController | undefined;
+  let unsavedChallenge: ChallengeSubmission | undefined;
   const local = () => !disposed && !vscode.env.remoteName && vscode.workspace.isTrusted;
   const enabled = () => vscode.workspace.getConfiguration("formaCompanion").get<boolean>("cphMetadataEnabled", false);
   const warned = new Set<string>();
@@ -209,6 +224,135 @@ export async function activate(context: vscode.ExtensionContext) {
     if (type === "start" && !pending) { bindings[target.fileUri].sessionId = `companion:${id}`; await saveBindings(); }
     return pending;
   }
+
+  async function saveChallengeRun(submission: ChallengeSubmission, token: string) {
+    const response = await send({ version: 1, id: randomUUID(), credential: token, challengeRun: submission });
+    // A network failure retains the frozen submission for another acknowledgement attempt.
+    // A definite rejection applies to this run and should not block future runs.
+    if (!response.ok) {
+      if (unsavedChallenge === submission) unsavedChallenge = undefined;
+      throw new Error(response.error);
+    }
+    const { outcome } = readChallengeRunReceipt(response.receipt);
+    if (unsavedChallenge === submission) unsavedChallenge = undefined;
+    const detail = outcome === "match" ? "Output matches the expected output."
+      : outcome === "mismatch" ? "Output differs from the expected output."
+      : "The run ended before output could be compared.";
+    void vscode.window.setStatusBarMessage(`Forma · ${detail} See the result in the Problem Desk.`, 9000);
+  }
+
+  async function runChallengeCase() {
+    if (challengeRun) throw new Error("A challenge case is already open in VS Code.");
+    if (!cppChallengeSupported()) throw new Error("Local C++ challenge runs are available on macOS and Linux.");
+    const controller = new AbortController();
+    challengeRun = controller;
+    let cancelOnEditorChange: vscode.Disposable | undefined;
+    try {
+      const editor = vscode.window.activeTextEditor;
+      const target = await frozenTarget();
+      if (!editor || editor.document.uri.toString() !== target.fileUri || editor.document.languageId !== "cpp") {
+        throw new Error("Open the associated C++ solution before running a challenge case.");
+      }
+      const { document } = editor;
+      if (document.isDirty) throw new Error("Save the C++ solution before reviewing the challenge case.");
+      const runTarget = { fileUri: target.fileUri, workspaceId, clientId };
+      const token = await credential();
+      const fence = editorLaunchFence();
+      cancelOnEditorChange = vscode.window.onDidChangeActiveTextEditor(next => {
+        if (next?.document !== document) controller.abort();
+      });
+      async function checkTarget(unchanged = true) {
+        await permitted(target.fileUri);
+        if (controller.signal.aborted || !paired || await credential() !== token ||
+          vscode.window.activeTextEditor?.document !== document || bindings[target.fileUri]?.key !== target.key ||
+          (unchanged && (document.isDirty || editorLaunchFence() !== fence))) {
+          throw new Error("The editor or practice context changed. Review the case again for the intended solution.");
+        }
+      }
+
+      const previous = unsavedChallenge;
+      if (previous?.target.fileUri === target.fileUri) {
+        const choice = await vscode.window.showQuickPick(["Save previous result", "Review a new run"], {
+          title: "Forma · Previous result is awaiting acknowledgement", ignoreFocusOut: true,
+        });
+        if (!choice) return;
+        if (choice === "Save previous result") {
+          await checkTarget(false);
+          await saveChallengeRun(previous, token);
+          return;
+        }
+      }
+
+      async function review() {
+        const response = await send({ version: 1, id: randomUUID(), credential: token,
+          challengeRun: { operation: "review", target: runTarget } }, controller.signal);
+        if (!response.ok) throw new Error(response.error);
+        return readChallengeRunPlan(response.plan);
+      }
+      const plan = await review();
+      await checkTarget();
+      const sourceFile = await realpath(document.uri.fsPath);
+      const source = await readCppChallengeSource(sourceFile);
+      if (new TextDecoder("utf-8", { fatal: true }).decode(source) !== document.getText()) {
+        throw new Error("The saved file differs from the editor. Reload or save the solution and review the case again.");
+      }
+      let expectedOutput = plan.sampleOutput;
+      if (expectedOutput === null) {
+        const entered = await vscode.window.showInputBox({
+          title: `Expected output · ${plan.problemTitle}`,
+          prompt: `Enter the expected output for input ${JSON.stringify(plan.input)}. For multiple lines, enter a JSON string like "3\\n4".`,
+          ignoreFocusOut: true,
+          validateInput: value => {
+            try { expectedChallengeOutput(value); }
+            catch (error) { return error instanceof SyntaxError ? "Enter a valid JSON string for quoted or multiline output." : (error as Error).message; }
+          },
+        });
+        if (entered === undefined) return;
+        expectedOutput = expectedChallengeOutput(entered);
+      }
+      const expectedSource = plan.sampleOutput === null ? "user" : "statement-sample";
+      const approved = await vscode.window.showWarningMessage("Run this Forma challenge case locally?", {
+        modal: true,
+        detail: [
+          `${plan.problemTitle} · ${path.basename(sourceFile)}`,
+          `Assumption: ${plan.assumption}`,
+          `Input: ${JSON.stringify(plan.input)}`,
+          `${expectedSource === "statement-sample" ? "Statement sample" : "Your expected output"}: ${JSON.stringify(expectedOutput)}`,
+          "This runs the reviewed saved C++ source with your local user permissions.",
+        ].join("\n\n"),
+      }, "Run locally");
+      if (approved !== "Run locally") return;
+      if (JSON.stringify(await review()) !== JSON.stringify(plan)) {
+        throw new Error("The challenge changed. Review the new case before running it.");
+      }
+      await checkTarget();
+      if (await realpath(document.uri.fsPath) !== sourceFile || !source.equals(await readCppChallengeSource(sourceFile))) {
+        throw new Error("The saved source changed during review. Review the case again for the new source.");
+      }
+      await checkTarget();
+      const result = await vscode.window.withProgress({
+        location: vscode.ProgressLocation.Notification, title: "Forma · Running C++ challenge case", cancellable: true,
+      }, async (_progress, cancellation) => {
+        const subscription = cancellation.onCancellationRequested(() => controller.abort());
+        if (cancellation.isCancellationRequested) controller.abort();
+        try { return await runCppChallenge({ source, input: plan.input, signal: controller.signal }); }
+        finally { subscription.dispose(); }
+      });
+      await checkTarget(false);
+      const submission: ChallengeSubmission = { operation: "record", target: runTarget, run: {
+        id: randomUUID(), turnId: plan.turnId, requestId: plan.requestId, recoveryEpoch: plan.recoveryEpoch,
+        expectedOutput, expectedSource, ...result,
+      } };
+      unsavedChallenge = submission;
+      await saveChallengeRun(submission, token);
+    } catch (error) {
+      if (!controller.signal.aborted) throw error;
+    } finally {
+      cancelOnEditorChange?.dispose();
+      challengeRun = undefined;
+    }
+  }
+
   async function pinSelection() {
     requireLocal();
     const editor = vscode.window.activeTextEditor;
@@ -427,6 +571,7 @@ export async function activate(context: vscode.ExtensionContext) {
   register("open", () => openCompanion());
   register("askSelectedCode", askSelectedCode);
   register("pinSelection", pinSelection);
+  register("runChallengeCase", runChallengeCase);
   register("memory", () => openCompanion("memory"));
   register("saveThought", async () => { const target = await frozenTarget(); const text = await vscode.window.showInputBox({ title: "Save Thought", prompt: "An observation for this problem", ignoreFocusOut: true, validateInput: value => value.trim() && value.length <= 10000 ? undefined : "Write up to 10,000 characters." }); if (text) await capture("thought", { text }, target); });
   register("start", () => capture("start")); register("pause", () => capture("pause")); register("resume", () => capture("resume"));
@@ -470,7 +615,7 @@ export async function activate(context: vscode.ExtensionContext) {
   );
   const retry = setInterval(() => { if (queue.length) void flush(); }, 1000);
   const heartbeat = setInterval(() => { void (async () => { if (!local() || !paired) { await withdraw(); return; } try { const host = await action("ping"); if (host.hostEpoch !== registeredEpoch) await watchActive(vscode.window.state.focused ? "focus" : "observe"); else if (observing) await publish({ ...observing, reason: "heartbeat", observedAt: Date.now(), binding: undefined }); else await watchActive(); startPolling(); } catch { connection = "Offline"; renderStatus(); } })(); }, 30000);
-  context.subscriptions.push({ dispose: () => { disposed = true; generation.next(); observationAbort.abort(); pollAbort?.abort(); clearInterval(retry); clearInterval(heartbeat); clearTimeout(metadataTimer); watcher?.dispose(); } });
+  context.subscriptions.push({ dispose: () => { disposed = true; generation.next(); observationAbort.abort(); pollAbort?.abort(); challengeRun?.abort(); clearInterval(retry); clearInterval(heartbeat); clearTimeout(metadataTimer); watcher?.dispose(); } });
   context.subscriptions.push(context.secrets.onDidChange(event => { if (event.key === SECRET) void (async () => { paired = !!await context.secrets.get(SECRET); if (paired) await watchActive(); else { await withdraw(); connection = "Not paired"; renderStatus(); } })(); }));
   renderStatus(); await watchActive(); void flush();
   // Only VS Code's isolated extension-test host receives this harness; normal activation exports no access.

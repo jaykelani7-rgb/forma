@@ -7,6 +7,7 @@ import { CompanionStore } from '../apps/desktop/main/store';
 import { buildProviderMessages, hintLevelForAction, policyInstructions } from '../packages/tutor/policy';
 import { parseSharedCode, parseStatementInput, providerContext, tutorHash, validateStatement } from '../packages/tutor/context';
 import type { SharedCode, StatementInput, TutorAction, TutorProviderStatus, TutorSendInput, TutorTurn } from '../packages/tutor/types';
+import type { ChallengeRunRequest, ChallengeRunSubmission } from '../packages/tutor/challenge-run';
 
 const now=Date.now(),url='https://codeforces.com/contest/4/problem/A';
 const statement:StatementInput={identity:'contest:4:A',url,title:'Watermelon',description:'Split a positive integer into two positive even integers.',input:'A positive integer w, 1 <= w <= 100.',output:'Print YES if a split exists, otherwise NO.',constraints:'1 <= w <= 100',samples:[{input:'8',output:'YES'}],explanation:'4 + 4 is a valid split.',complete:true,source:'manual'};
@@ -40,6 +41,77 @@ function deskSendInput(review:ReturnType<typeof reviewDeskHint>):TutorSendInput 
   return {turnId:'desk-turn',requestId:'desk-request',conversationId:review.conversationId,action:'small-hint',
     text:'One hint for my current idea.',statementId:review.statement.id,codeId:null,noteIds:[],deskHint:review.target};
 }
+
+test('challenge verification records exact input, reviewed expected output and a scoped local run', () => {
+  const f = fixture();
+  try {
+    const store = f.store;
+    const problemId = store.snapshot().state.problemId!;
+    store.command({ id: 'challenge-start', type: 'start', payload: {} }, 'desktop', now);
+    const context = store.tutor.deskIdeaReview({ problemId }, deskProvider, now);
+    assert.ok(context.statement && context.conversationId);
+    const localContext = store.tutor.deskIdeaReview({ problemId }, { ...deskProvider, configured: false }, now);
+    assert.equal(localContext.conversationId, context.conversationId);
+    const input: TutorSendInput = {
+      turnId: 'run-challenge', requestId: 'run-challenge-request', conversationId: context.conversationId,
+      action: 'challenge-assumption', text: JSON.stringify({ approach: 'Check even weights.', assumption: 'Weight 8 can be split.', uncertainty: '' }),
+      statementId: context.statement.id, codeId: null, noteIds: [], deskIdea: context.target,
+    };
+    const challenge = show(store, store.tutor.prepare(input, deskProvider.model, now), JSON.stringify({
+      observation: 'The sample covers this weight.', question: 'What does your program print?', exampleInput: '8\r\n', expectedOutput: 'NO',
+    }));
+    const target = { fileUri: 'file:///practice/a.cpp', workspaceId: 'workspace-one', clientId: 'vscode-one' };
+    const review: ChallengeRunRequest = { operation: 'review', target };
+    const ids = { turnId: challenge.id, requestId: challenge.requestId };
+    assert.deepEqual(store.tutor.deskChallengeRuns(ids), []);
+    assert.throws(() => store.tutor.challengeRun(review, now), /Open an assumption challenge/);
+    store.tutor.exposed(ids);
+    assert.throws(() => store.tutor.challengeRun({ ...review, target: { ...target, clientId: 'different-client' } }, now), /approved VS Code solution/);
+    const reviewed = store.tutor.challengeRun(review, now);
+    assert.ok('plan' in reviewed);
+    assert.equal(reviewed.plan.input, '8\r\n');
+    assert.equal(reviewed.plan.sampleOutput, 'YES');
+    assert.equal(reviewed.plan.sessionId, store.snapshot().data.session?.id);
+
+    const run: ChallengeRunSubmission = {
+      ...ids, id: 'first-run', recoveryEpoch: reviewed.plan.recoveryEpoch,
+      sourceHash: 'a'.repeat(64), outcome: 'exited', diagnostic: '',
+      output: 'NO\n', expectedOutput: 'YES', expectedSource: 'statement-sample',
+    };
+    const record = (submission: ChallengeRunSubmission, at = now + 200) => store.tutor.challengeRun({ operation: 'record', target, run: submission }, at);
+    assert.throws(() => record({ ...run, expectedOutput: 'NO' }), /expected output does not match/);
+    const recorded = record(run);
+    assert.ok('receipt' in recorded);
+    assert.equal(recorded.receipt.outcome, 'mismatch');
+    assert.equal(recorded.receipt.fileName, 'a.cpp');
+    assert.equal(recorded.receipt.sourceHash, run.sourceHash);
+    assert.deepEqual(record(run, now + 500), recorded);
+    assert.throws(() => record({ ...run, output: 'YES' }), /different saved result/);
+    const rerun = record({ ...run, id: 'second-run', sourceHash: 'b'.repeat(64), output: 'YES\r\n' });
+    assert.ok('receipt' in rerun);
+    assert.equal(rerun.receipt.outcome, 'match');
+    assert.deepEqual(store.tutor.deskChallengeRuns(ids), [recorded.receipt, rerun.receipt]);
+
+    const exported = store.backups.export({ scope: 'companion', includeTutor: true }, now + 300);
+    assert.doesNotThrow(() => store.backups.preview(exported));
+    const altered = JSON.parse(exported);
+    altered.tutor.turns[0].challengeRuns[0].outcome = 'match';
+    assert.throws(() => store.backups.preview(JSON.stringify(altered)), /inconsistent output evidence/);
+
+    const newChallenge = show(store, store.tutor.prepare({ ...input, turnId: 'new-challenge', requestId: 'new-request' }, deskProvider.model, now), JSON.stringify({
+      observation: 'Think about an invariant.', question: 'What must remain true?', exampleInput: null, expectedOutput: null,
+    }));
+    store.tutor.exposed({ turnId: newChallenge.id, requestId: newChallenge.requestId });
+    assert.throws(() => store.tutor.challengeRun(review, now), /current challenge has no suggested case/);
+    store.tutor.rotateRecoveryEpoch();
+    assert.throws(() => record({ ...run, id: 'late-run' }), /notebook was restored/);
+    store.tutor.setSettings({ contestMode: true }, now);
+    assert.throws(() => store.tutor.challengeRun(review, now), /Contest mode disables/);
+  } finally {
+    f.store.close();
+  }
+});
+
 test('Desk hint requires current consent for the statement, active session and configured provider',()=>{
   const store=new CompanionStore(':memory:');
   try{

@@ -92,6 +92,10 @@
         "title": "Forma: Run CPH Tests"
       },
       {
+        "command": "formaCompanion.runChallengeCase",
+        "title": "Forma: Run Challenge Case"
+      },
+      {
         "command": "formaCompanion.retry",
         "title": "Forma: Retry Pending Captures"
       },

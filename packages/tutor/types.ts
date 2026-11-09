@@ -1,4 +1,6 @@
 /** Local-only Tutor boundary. Provider keys/audio never belong in these records. */
+import type { ChallengeRunReceipt } from './challenge-run';
+
 export const TUTOR_VERSION = 1 as const;
 const DESK_IDEA_ACTIONS = ['outline-idea', 'challenge-assumption'] as const;
 export const TUTOR_ACTIONS = ['discuss','small-hint','stronger-hint','check-code','explain','full-explanation', ...DESK_IDEA_ACTIONS] as const;
@@ -32,6 +34,7 @@ export interface TutorTurn {
   context:TutorContext;status:TutorTurnStatus;createdAt:string;completedAt:string|null;error:string|null;
   hintLevel:number;exposed:boolean;usage:TutorUsage|null;model:string;provider?:TutorProviderId;responseModel?:string;
   standalone?:true;
+  challengeRuns?:ChallengeRunReceipt[];
 }
 export interface TutorSettings {contestMode:boolean;retentionDays:number;voiceOutput:boolean}
 export interface TutorStoredView { conversations:TutorConversation[];settings:TutorSettings;pendingCode:SharedCode|null;lastConversationId?:string|null }

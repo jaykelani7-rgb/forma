@@ -547,11 +547,13 @@ export function App() {
               draft={ideaDraft?.scope === deskScope ? ideaDraft.value : emptyDeskIdeaDraft}
               onDraftChange={changeIdeaDraft}
               covered={!!palette || !visible} blocked={busy || thoughtVoiceBusy}
+              savedRunEvidence={new Set(deskItems.filter(item => item.kind === "counterexample").map(item => item.text))}
               renderVoiceControls={(onTranscript, disabled) => renderVoiceControls(false, onTranscript, disabled)}
               onClose={() => closeDeskAssist("idea")}
               onOpenTutor={() => { setReturnFromTutorToDesk(true); openPanel("tutor"); }}
               onKeepOutline={text => saveDeskEntry({ kind: "hypothesis", text })}
               onKeepChallenge={openThreadFromAssist}
+              onSaveRun={text => saveDeskEntry({ kind: "counterexample", text })}
             />}
           />}
           {panel === "desk" && !problem && <PanelHeading eyebrow="PROBLEM DESK" title="Attach a problem to begin." description="Your desk follows the problem you’re practicing."/>}

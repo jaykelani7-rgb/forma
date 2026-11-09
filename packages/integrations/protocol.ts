@@ -4,6 +4,7 @@ import path from "node:path";
 import { parseRecognition, type RecognitionRequest } from "./recognition";
 import { parseSharedCode } from "../tutor/context";
 import type { SharedCode } from "../tutor/types";
+import { parseChallengeRunRequest, type ChallengeRunRequest } from "../tutor/challenge-run";
 
 export const PROTOCOL_VERSION = 1;
 export const MAX_MESSAGE_BYTES = 64 * 1024;
@@ -12,7 +13,13 @@ export type TransportRequest = {
   version: 1;
   id: string;
   credential: string;
-} & ({ command: TransportCommand; expectedRecoveryEpoch?: string; action?: never; recognition?: never; tutorCode?: never } | { action: "open" | "memory" | "ping"; expectedRecoveryEpoch?: never; command?: never; recognition?: never; tutorCode?: never } | { recognition: RecognitionRequest; expectedRecoveryEpoch?: never; command?: never; action?: never; tutorCode?: never } | { tutorCode: SharedCode; expectedRecoveryEpoch?: never; command?: never; action?: never; recognition?: never });
+} & (
+  | { command: TransportCommand; expectedRecoveryEpoch?: string; action?: never; recognition?: never; tutorCode?: never; challengeRun?: never }
+  | { action: "open" | "memory" | "ping"; expectedRecoveryEpoch?: never; command?: never; recognition?: never; tutorCode?: never; challengeRun?: never }
+  | { recognition: RecognitionRequest; expectedRecoveryEpoch?: never; command?: never; action?: never; tutorCode?: never; challengeRun?: never }
+  | { tutorCode: SharedCode; expectedRecoveryEpoch?: never; command?: never; action?: never; recognition?: never; challengeRun?: never }
+  | { challengeRun: ChallengeRunRequest; expectedRecoveryEpoch?: never; command?: never; action?: never; recognition?: never; tutorCode?: never }
+);
 export type TransportResponse =
   | { version: 1; id: string; ok: true; revision: number; [key: string]: unknown }
   | { version: 1; id: string; ok: false; error: string; [key: string]: unknown };
@@ -37,8 +44,13 @@ export function defaultCompanionEndpoint(options: {
 
 export function validateTransportRequest(value: unknown): TransportRequest {
   if (!object(value) || value.version !== 1 || !id(value.id) || typeof value.credential !== "string" || !/^[A-Za-z0-9_-]{32,256}$/.test(value.credential)) throw new Error("Invalid protocol envelope or unsupported protocol version.");
-  if (Object.keys(value).some((key) => !["version", "id", "credential", "command", "action", "recognition", "tutorCode", "expectedRecoveryEpoch"].includes(key))) throw new Error("Unexpected protocol field.");
+  if (Object.keys(value).some((key) => !["version", "id", "credential", "command", "action", "recognition", "tutorCode", "challengeRun", "expectedRecoveryEpoch"].includes(key))) throw new Error("Unexpected protocol field.");
   if (value.expectedRecoveryEpoch !== undefined && (value.command === undefined || !id(value.expectedRecoveryEpoch))) throw new Error("Invalid command recovery epoch.");
+  if (value.challengeRun !== undefined) {
+    if (value.command !== undefined || value.action !== undefined || value.recognition !== undefined || value.tutorCode !== undefined)
+      throw new Error("Challenge verification cannot contain another action.");
+    return { version: 1, id: value.id, credential: value.credential, challengeRun: parseChallengeRunRequest(value.challengeRun) };
+  }
   if (value.tutorCode !== undefined) {
     if (value.command !== undefined || value.action !== undefined || value.recognition !== undefined) throw new Error("Code sharing cannot contain another action.");
     parseSharedCode(value.tutorCode);

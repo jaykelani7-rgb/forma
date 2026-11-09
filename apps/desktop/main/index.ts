@@ -12,6 +12,7 @@ import { ThoughtHostVoice, TutorHostVoice, type ThoughtVoiceContext } from "./tu
 import { ThoughtTakeStore } from "./thought-take-store";
 import { DesktopSessionHandoff } from "./session-handoff-client";
 import { tutorExternalUrl } from "../../../packages/tutor/links";
+import type { ChallengeRunPlan, ChallengeRunReceipt, ChallengeRunRequest } from "../../../packages/tutor/challenge-run";
 import type { DeskHintReview, DeskIdeaReview, SharedCode, StatementSnapshot, TutorConversation, TutorEvent, TutorSendInput, TutorStoredView, TutorTurn } from "../../../packages/tutor/types";
 import { AttentionPolicy } from "./attention";
 import { companionToday } from "../../../packages/core/src/companion-today";
@@ -176,6 +177,15 @@ async function shareTutorCode(code:SharedCode){
   // An explicit share opens Fenn when needed; an existing draft stays on screen.
   if(panelRequest?.panel!=='tutor')await openTutor({conversationId:conversation.id});
   return {revision:local.revision};
+}
+async function handleChallengeRun(request: ChallengeRunRequest) {
+  const current = recoveryFence.lease();
+  const result = await database.call<{ plan: ChallengeRunPlan } | { receipt: ChallengeRunReceipt; conversationId: string }>('challenge-run', request);
+  current();
+  if ('plan' in result) return result;
+  if (request.operation !== 'record') throw new Error('The challenge run acknowledgement is invalid.');
+  emitTutor({ kind: 'updated', conversationId: result.conversationId, turnId: request.run.turnId, requestId: request.run.requestId });
+  return { receipt: result.receipt };
 }
 function voiceReady(capability:'transcription'|'speech'){
   if(tutorService.isConfiguring)throw new TutorProviderError('busy');
@@ -458,6 +468,12 @@ async function ui(action:string,payload:unknown){
     case 'handoff-refresh': return desktopHandoff.refresh(payload);
     case 'handoff-send': return desktopHandoff.send(payload);
     case 'handoff-cancel': return desktopHandoff.cancel(payload);
+    case 'desk-challenge-runs': {
+      const current = recoveryFence.lease();
+      const runs = await database.call<ChallengeRunReceipt[]>(action, payload);
+      current();
+      return runs;
+    }
     case 'desk-hint-review':
     case 'desk-idea-review': {
       const current=recoveryFence.lease(),provider=tutorProvider.status();
@@ -600,7 +616,7 @@ async function main(){
     } catch { /* Tray recovery stays available and settings reports unavailable shortcuts. */ }
   }
   void broadcast();
-  transport=await startTransport({...(developmentData?{endpoint:join(userData,'runtime','companion.sock')}:{}),credential:()=>credential,command:(command,epoch)=>{if(!epoch)throw new Error('Update the Forma VS Code extension before delivering saved captures.');return applyCommand(command,'vscode',epoch);},recoveryEpoch:()=>database.call<string>('recovery-epoch'),tutorCode:shareTutorCode,recognition:request=>{recoveryFence.lease();return recognition.request(request);},action:async action=>{recoveryFence.lease();if(action==='open'||action==='memory'){panelRequest={id:(panelRequest?.id??0)+1,panel:action==='memory'?'memory':'home'};show();}return (await database.call<LocalSnapshot>('snapshot')).revision;},context:async()=>{const local=await database.call<LocalSnapshot>('snapshot');return {identity:local.state.identity,sessionId:local.data.session?.id??null,hostEpoch,recoveryEpoch:await database.call<string>('recovery-epoch')};},connected:value=>{connected=value;void broadcast();}});
+  transport=await startTransport({...(developmentData?{endpoint:join(userData,'runtime','companion.sock')}:{}),credential:()=>credential,command:(command,epoch)=>{if(!epoch)throw new Error('Update the Forma VS Code extension before delivering saved captures.');return applyCommand(command,'vscode',epoch);},recoveryEpoch:()=>database.call<string>('recovery-epoch'),tutorCode:shareTutorCode,challengeRun:handleChallengeRun,recognition:request=>{recoveryFence.lease();return recognition.request(request);},action:async action=>{recoveryFence.lease();if(action==='open'||action==='memory'){panelRequest={id:(panelRequest?.id??0)+1,panel:action==='memory'?'memory':'home'};show();}return (await database.call<LocalSnapshot>('snapshot')).revision;},context:async()=>{const local=await database.call<LocalSnapshot>('snapshot');return {identity:local.state.identity,sessionId:local.data.session?.id??null,hostEpoch,recoveryEpoch:await database.call<string>('recovery-epoch')};},connected:value=>{connected=value;void broadcast();}});
   if(process.platform==='darwin')browserTransport=await startBrowserTransport({endpoint:join(userData,'runtime','browser.sock'),credential:()=>browserCredential,message:async m=>{recoveryFence.lease();if((m as {kind?:string})?.kind==='statement'){await captureTutorStatement((m as {statement:unknown}).statement);browserVerifiedAt=new Date().toISOString();return {ok:true,status:'saved'};}return recognition.browser(m);}});
   powerMonitor.on('suspend',()=>{cancelVoice();void database.call('pause','suspend').then(broadcast);});
   powerMonitor.on('lock-screen',()=>{cancelVoice();void database.call('pause','screen-lock').then(broadcast);});

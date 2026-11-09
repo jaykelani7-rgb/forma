@@ -4,6 +4,7 @@ import { resolve, sep } from "node:path";
 import type { CompanionSnapshot } from "../../apps/desktop/renderer/api";
 import type { CompanionCommand } from "../../packages/contracts/src";
 import { applyCompanionCommand, initialCompanionState } from "../../packages/core/src/companion";
+import type { ChallengeRunReceipt } from "../../packages/tutor/challenge-run";
 import type { SharedCode, StatementSnapshot, TutorEvent, TutorProviderStatus, TutorSendInput, TutorTurn } from "../../packages/tutor/types";
 import { emptyData } from "../../src/lib/model";
 
@@ -15,6 +16,7 @@ interface DeskHintFixture {
   exposures: { turnId: string; requestId: string }[];
   loseNextSendAcknowledgement: boolean;
   finish(text: string): void;
+  recordRun(run: ChallengeRunReceipt): void;
   switchProblem(): void;
 }
 
@@ -119,6 +121,12 @@ async function openDesk(page: Page, options: { contestMode?: boolean; timed?: bo
         turn.completedAt = snapshot.savedAt;
         notify(turn);
       },
+      recordRun(run) {
+        const turn = turns.findLast(row => row.action === "challenge-assumption" && row.status === "completed");
+        if (!turn) throw new Error("A challenge must be completed before recording a run.");
+        turn.challengeRuns = [...(turn.challengeRuns ?? []), run];
+        notify(turn);
+      },
       switchProblem() {
         snapshot.state.problemId = "hint-second";
         snapshot.state.identity = "contest:5:A";
@@ -139,11 +147,11 @@ async function openDesk(page: Page, options: { contestMode?: boolean; timed?: bo
       },
       async command(command) {
         controls.commands.push(structuredClone(command));
-        if (command.type !== "desk-add" || command.payload.kind !== "thread" || command.payload.problemId !== snapshot.state.problemId) {
-          throw new Error("The fixture accepts only a thread for the attached problem.");
+        if (command.type !== "desk-add" || !["thread", "counterexample"].includes(command.payload.kind) || command.payload.problemId !== snapshot.state.problemId) {
+          throw new Error("The fixture accepts threads and cases for the attached problem.");
         }
         snapshot.state.desk!.push({
-          id: command.id, problemId: currentProblem().id, createdAt: snapshot.savedAt, kind: "thread", text: command.payload.text,
+          id: command.id, problemId: currentProblem().id, createdAt: snapshot.savedAt, kind: command.payload.kind, text: command.payload.text,
         });
         snapshot.revision++;
         return structuredClone(snapshot);
@@ -199,6 +207,11 @@ async function openDesk(page: Page, options: { contestMode?: boolean; timed?: bo
           }
           case "tutor-turns":
             return structuredClone(turns.filter(turn => turn.conversationId === payload));
+          case "desk-challenge-runs": {
+            const { turnId, requestId } = payload as { turnId: string; requestId: string };
+            const turn = turns.find(row => row.id === turnId && row.requestId === requestId && row.context.problemId === currentProblem().id);
+            return structuredClone(turn?.challengeRuns ?? []);
+          }
           case "tutor-stop": {
             controls.stops.push(String(payload));
             const turn = turns.find(turn => turn.requestId === payload);
@@ -378,16 +391,39 @@ test("an outlined idea can challenge one edited assumption and save a reviewed n
   await expect(card.getByText(challenge.question, { exact: true })).toBeVisible();
   await expect(card.getByText(challenge.observation, { exact: true })).toBeVisible();
   await expect(card.getByText(/unverified|not run/i)).toBeVisible();
+  const verifier = card.getByRole("region", { name: "Verify in VS Code", exact: true });
+  await expect(verifier.getByText("Forma: Run Challenge Case", { exact: true })).toBeVisible();
+  const failedRun: ChallengeRunReceipt = {
+    id: "first-run", input: challenge.exampleInput, expectedOutput: challenge.expectedOutput,
+    expectedSource: "statement-sample", output: "0\n", outcome: "mismatch", diagnostic: "",
+    sourceHash: "a".repeat(64), fileName: "search.cpp", ranAt: "2026-11-08T08:10:00.000Z",
+  };
+  await page.evaluate(run => window.__deskHintFixture.recordRun(run), failedRun);
+  await expect(verifier.getByText("Output differed", { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => window.__deskHintFixture.commands)).toEqual([]);
+  await page.getByRole("button", { name: "Explain my idea", exact: true }).click();
+  await page.getByRole("button", { name: "Explain my idea", exact: true }).click();
+  await expect(verifier.getByText("Output differed", { exact: true })).toBeVisible();
+  await page.evaluate(run => window.__deskHintFixture.recordRun(run), {
+    ...failedRun, id: "second-run", outcome: "match", output: "1\n", sourceHash: "b".repeat(64), ranAt: "2026-11-08T08:13:00.000Z",
+  } satisfies ChallengeRunReceipt);
+  await expect(verifier.getByText("Output matched", { exact: true })).toBeVisible();
+  await verifier.getByText("Earlier runs (1)", { exact: true }).click();
+  await verifier.getByRole("button", { name: "Save failing case to Desk", exact: true }).click();
+  await expect(verifier.getByRole("button", { name: "Failing case saved", exact: true })).toBeDisabled();
   await card.getByRole("button", { name: "Keep as next step", exact: true }).click();
 
   const draft = page.getByRole("textbox", { name: "What would you try next?", exact: true });
   await expect(draft).toHaveValue(/What will the loop inspect on a one-element interval\?/);
-  expect(await page.evaluate(() => window.__deskHintFixture.commands)).toEqual([]);
+  expect(await page.evaluate(() => window.__deskHintFixture.commands)).toMatchObject([
+    { type: "desk-add", payload: { kind: "counterexample", problemId: "hint-first" } },
+  ]);
   const nextStep = "Trace the loop on equal boundaries before changing it.";
   await draft.fill(nextStep);
   await page.getByRole("button", { name: "Save thread", exact: true }).click();
   await expect(page.getByText(nextStep, { exact: true })).toBeVisible();
   expect(await page.evaluate(() => window.__deskHintFixture.commands)).toMatchObject([
+    { type: "desk-add", payload: { kind: "counterexample", problemId: "hint-first" } },
     { type: "desk-add", expectedProblemKey: "contest:4:A", payload: { kind: "thread", problemId: "hint-first", text: nextStep } },
   ]);
 });

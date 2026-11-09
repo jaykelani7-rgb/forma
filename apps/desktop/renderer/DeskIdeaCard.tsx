@@ -14,6 +14,7 @@ interface DeskIdeaCardProps {
   includeCode: boolean;
   challenge: IdeaChallenge | null;
   challengedAssumption?: string;
+  verification?: ReactNode;
   pending: "outline" | "challenge" | null;
   loading?: boolean;
   error?: string;
@@ -25,6 +26,7 @@ interface DeskIdeaCardProps {
   onExplanationChange: (text: string) => void;
   onOutlineChange: (outline: IdeaOutline) => void;
   onReviseExplanation: () => void;
+  onTryAnother: () => void;
   onSelectAssumption: (index: number) => void;
   onIncludeStatementChange: (include: boolean) => void;
   onIncludeCodeChange: (include: boolean) => void;
@@ -53,9 +55,9 @@ function CodeReview({ code }: { code: SharedCode }) {
 
 export function DeskIdeaCard({
   review, explanation, outline, selectedAssumption, includeStatement, includeCode, challenge,
-  challengedAssumption, pending, loading = false, error, covered = false, blocked = false,
+  challengedAssumption, verification, pending, loading = false, error, covered = false, blocked = false,
   voiceControls, saving = false, outlineKept,
-  onExplanationChange, onOutlineChange, onReviseExplanation, onSelectAssumption, onIncludeStatementChange,
+  onExplanationChange, onOutlineChange, onReviseExplanation, onTryAnother, onSelectAssumption, onIncludeStatementChange,
   onIncludeCodeChange, onOutline, onChallenge, onKeepOutline, onKeepChallenge,
   onChallengeVisible, onStop, onClose, onOpenTutor, onRefresh,
 }: DeskIdeaCardProps) {
@@ -80,8 +82,7 @@ export function DeskIdeaCard({
   useEffect(() => {
     const previous = previousStage.current;
     previousStage.current = stage;
-    if (covered || document.hidden || stage === previous ||
-      (previous === "answer" && stage === "outline")) return;
+    if (covered || document.hidden || stage === previous) return;
     const current = stage === "answer" ? answerHeading : stage === "outline" ? outlineHeading : previous ? explanationField : heading;
     current.current?.focus();
   }, [covered, stage]);
@@ -119,7 +120,7 @@ export function DeskIdeaCard({
       {loading && <p className="desk-idea-muted" role="status">Preparing your problem context…</p>}
       {contestMode && <p className="desk-idea-muted" role="status">Contest mode keeps this space for private notes.</p>}
 
-      {!contestMode && !outline && <div className="desk-idea-stack">
+      {!contestMode && !outline && !challenge && <div className="desk-idea-stack">
         <label className="desk-idea-field">
           <span>Your explanation</span>
           <textarea ref={explanationField} rows={4} value={explanation} maxLength={IDEA_LIMITS.explanation}
@@ -148,7 +149,7 @@ export function DeskIdeaCard({
         </button>
       </div>}
 
-      {!contestMode && outline && <div className="desk-idea-stack desk-idea-outline">
+      {!contestMode && outline && !challenge && <div className="desk-idea-stack desk-idea-outline">
         <h3 ref={outlineHeading} tabIndex={-1}>Your working idea</h3>
         <p className="desk-idea-muted">Edit the outline to match your thinking. Choose one assumption to test.</p>
         <button className="desk-idea-quiet" type="button" onClick={onReviseExplanation} disabled={editingDisabled || blocked}>
@@ -210,10 +211,10 @@ export function DeskIdeaCard({
           Your approach, selected assumption, uncertainty, and the problem statement will go to {review.provider.name}.
           {includeCode && review.code ? " The selected code will be included." : ""}
         </p>}
-        {!challenge && <button className="button desk-idea-primary" type="button" onClick={onChallenge}
+        <button className="button desk-idea-primary" type="button" onClick={onChallenge}
           disabled={requestDisabled || !statement || !outline.approach.trim() || !selected}>
           Challenge this assumption <ArrowRight size={14} aria-hidden="true" />
-        </button>}
+        </button>
       </div>}
 
       {!contestMode && challenge && <section className="desk-idea-answer" ref={answer} aria-labelledby={`${id}-answer`}>
@@ -230,9 +231,13 @@ export function DeskIdeaCard({
             <pre>{challenge.expectedOutput}</pre>
           </>}
         </div>}
+        {verification}
         <button className="button button--secondary desk-idea-primary" type="button" onClick={onKeepChallenge}
           disabled={blocked || editingDisabled}>
           Keep as next step <Feather size={14} aria-hidden="true" />
+        </button>
+        <button className="desk-idea-quiet" type="button" onClick={onTryAnother} disabled={blocked || editingDisabled}>
+          Try another assumption
         </button>
       </section>}
 
@@ -249,7 +254,7 @@ export function DeskIdeaCard({
       </div>}
 
       {!contestMode && error && <p className="desk-idea-error" role="alert">{error}</p>}
-      {!contestMode && !loading && !pending && (!ready || outline || error) && (
+      {!contestMode && !challenge && !loading && !pending && (!ready || outline || error) && (
         <div className="desk-idea-stack">
           {review && !ready && <p className="desk-idea-muted">Set up a Tutor provider with text support to review your idea.</p>}
           <div className="desk-idea-actions">

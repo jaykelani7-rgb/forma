@@ -4,6 +4,8 @@ import { initialCompanionState, validateCompanionState, type CompanionState } fr
 import { canonicalProblemIdentity, normalizeCodeforcesIdentity } from '../../../packages/core/src/codeforces-identity';
 import { parseSharedCode, parseStatementInput, tutorFields, tutorId, tutorObject, tutorText, tutorTime, validateStatement, TUTOR_BUDGET } from '../../../packages/tutor/context';
 import { hintLevelForAction, parseTutorAction, parseTutorDraftAction } from '../../../packages/tutor/policy';
+import { readIdeaChallenge } from '../../../packages/tutor/idea';
+import { CHALLENGE_RUN_LIMIT, challengeOutputEqual, challengeSampleOutput, readChallengeRunReceipt } from '../../../packages/tutor/challenge-run';
 import { isDeskIdeaAction } from '../../../packages/tutor/types';
 import type { SharedCode, StatementSnapshot, TutorContext, TutorConversation, TutorProposal, TutorSettings, TutorTurn } from '../../../packages/tutor/types';
 import type { BackupRestorePreview } from '../../../packages/setup/status';
@@ -55,7 +57,7 @@ function context(v:unknown):TutorContext {
   return result;
 }
 function turn(v:unknown):TutorTurn {
-  const o=tutorObject(v);tutorFields(o,['id','requestId','conversationId','action','userText','assistantText','context','status','createdAt','completedAt','error','hintLevel','exposed','usage','model','provider','responseModel','standalone']);
+  const o=tutorObject(v);tutorFields(o,['id','requestId','conversationId','action','userText','assistantText','context','status','createdAt','completedAt','error','hintLevel','exposed','usage','model','provider','responseModel','standalone','challengeRuns']);
   if(!['queued','streaming','completed','interrupted','failed'].includes(String(o.status))||o.provider!==undefined&&!['gemini','openai'].includes(String(o.provider)))throw new Error('Invalid Tutor turn status or provider.');
   let usage:TutorTurn['usage']=null;if(o.usage!==null){const u=tutorObject(o.usage);tutorFields(u,['inputTokens','outputTokens','totalTokens']);usage={inputTokens:integer(u.inputTokens,0,100_000_000),outputTokens:integer(u.outputTokens,0,100_000_000),totalTokens:integer(u.totalTokens,0,100_000_000)};if(usage.totalTokens<usage.inputTokens+usage.outputTokens)throw new Error('Invalid usage totals.');}
   const t:TutorTurn={id:tutorId(o.id),requestId:tutorId(o.requestId),conversationId:tutorId(o.conversationId),action:parseTutorAction(o.action),userText:tutorText(o.userText,TUTOR_BUDGET.user,1),assistantText:tutorText(o.assistantText,TUTOR_BUDGET.response),context:context(o.context),status:o.status as TutorTurn['status'],createdAt:tutorTime(o.createdAt),completedAt:o.completedAt===null?null:tutorTime(o.completedAt),error:o.error===null?null:tutorText(o.error,500),hintLevel:integer(o.hintLevel,0,1000),exposed:bool(o.exposed),usage,model:tutorText(o.model,120,1),provider:(o.provider??'openai') as 'openai'|'gemini',...(o.responseModel===undefined?{}:{responseModel:tutorText(o.responseModel,120,1)})};
@@ -71,6 +73,24 @@ function turn(v:unknown):TutorTurn {
       (code && t.action !== 'challenge-assumption')
     ) throw new Error('Invalid standalone Desk request context.');
     t.standalone = true;
+  }
+  if (o.challengeRuns !== undefined) {
+    if (t.action !== 'challenge-assumption' || t.status !== 'completed' || !t.exposed || !t.context.statement) {
+      throw new Error('Saved runs must belong to a completed, reviewed challenge.');
+    }
+    const { exampleInput } = readIdeaChallenge(t.assistantText);
+    if (exampleInput === null) throw new Error('Saved runs require a challenge input.');
+    const sample = challengeSampleOutput(exampleInput, t.context.statement.samples);
+    t.challengeRuns = unique(list(o.challengeRuns, CHALLENGE_RUN_LIMIT, readChallengeRunReceipt), run => run.id);
+    for (const run of t.challengeRuns) {
+      if (run.input !== exampleInput || (run.expectedSource === 'statement-sample' && run.expectedOutput !== sample)) {
+        throw new Error('A saved run does not match the frozen challenge case.');
+      }
+      if (run.outcome === 'match' || run.outcome === 'mismatch') {
+        const matches = challengeOutputEqual(run.output, run.expectedOutput);
+        if (matches !== (run.outcome === 'match')) throw new Error('A saved run has inconsistent output evidence.');
+      }
+    }
   }
   if(t.context.conversationId!==t.conversationId)throw new Error('Invalid turn conversation reference.');return t;
 }

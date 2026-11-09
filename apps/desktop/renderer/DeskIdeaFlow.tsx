@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { IDEA_LIMITS, readIdeaChallenge, readIdeaOutline } from "../../../packages/tutor/idea";
+import { IDEA_LIMITS, readIdeaChallenge, readIdeaOutline, readIdeaQuestion } from "../../../packages/tutor/idea";
 import type { DeskIdeaReview, IdeaChallenge, IdeaOutline, TutorSendInput, TutorTurn } from "../../../packages/tutor/types";
 import type { FormaBridge } from "./api";
 import { DeskIdeaCard } from "./DeskIdeaCard";
+import { ChallengeRunPanel } from "./ChallengeRunPanel";
 
 type Stage = "outline" | "challenge";
 type Request = { stage: Stage; input: TutorSendInput; assumption?: string };
@@ -14,7 +15,7 @@ const errorText = (error: unknown) => error instanceof Error ? error.message : "
 
 export function DeskIdeaFlow({
   bridge, problemId, draft, onDraftChange, renderVoiceControls,
-  covered, blocked, onClose, onOpenTutor, onKeepOutline, onKeepChallenge,
+  covered, blocked, savedRunEvidence, onClose, onOpenTutor, onKeepOutline, onKeepChallenge, onSaveRun,
 }: {
   bridge: FormaBridge;
   problemId: string;
@@ -23,10 +24,12 @@ export function DeskIdeaFlow({
   renderVoiceControls: (onTranscript: (text: string) => void, disabled: boolean) => ReactNode;
   covered: boolean;
   blocked: boolean;
+  savedRunEvidence: ReadonlySet<string>;
   onClose: () => void;
   onOpenTutor: () => void;
   onKeepOutline: (text: string) => Promise<boolean>;
   onKeepChallenge: (text: string) => void;
+  onSaveRun: (text: string) => Promise<boolean>;
 }) {
   const { explanation, outline, selected, outlineKept } = draft;
   const [review, setReview] = useState<DeskIdeaReview | null>(null);
@@ -42,7 +45,7 @@ export function DeskIdeaFlow({
   const savingResult = useRef(false);
   const exposure = useRef<{ requestId: string; saved: Promise<unknown> } | null>(null);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (restoreChallenge = false) => {
     if (request.current) return;
     const version = ++reviewVersion.current;
     setLoading(true);
@@ -53,7 +56,15 @@ export function DeskIdeaFlow({
     setResult(null);
     try {
       const next = await bridge.ui("desk-idea-review", { problemId }) as DeskIdeaReview;
-      if (reviewVersion.current === version) setReview(next);
+      if (reviewVersion.current !== version) return;
+      setReview(next);
+      if (restoreChallenge && !next.contestMode && next.conversationId) {
+        const turns = await bridge.ui("tutor-turns", next.conversationId) as TutorTurn[];
+        if (reviewVersion.current !== version) return;
+        const turn = turns.findLast(item => item.action === "challenge-assumption" && item.standalone &&
+          item.status === "completed" && item.context.problemId === problemId && item.context.sessionId === next.target.sessionId);
+        if (turn) setResult({ value: readIdeaChallenge(turn.assistantText), turn, assumption: readIdeaQuestion(turn.userText).assumption });
+      }
     } catch (reason) {
       if (reviewVersion.current === version) setError(errorText(reason));
     } finally {
@@ -110,7 +121,7 @@ export function DeskIdeaFlow({
         if (request.current === current) setError(errorText(reason));
       });
     });
-    void refresh();
+    void refresh(true);
     return () => {
       invalidateReview();
       unsubscribe?.();
@@ -240,11 +251,14 @@ export function DeskIdeaFlow({
     review={review} explanation={explanation} outline={outline} selectedAssumption={selected}
     includeStatement={includeStatement} includeCode={includeCode} challenge={result?.value ?? null}
     challengedAssumption={result?.assumption}
+    verification={result?.value.exampleInput != null && <ChallengeRunPanel key={result.turn.requestId}
+      bridge={bridge} turn={result.turn} blocked={blocked || covered || saving} savedEvidence={savedRunEvidence} onSave={onSaveRun} />}
     loading={loading} pending={pending} error={error} covered={covered} blocked={blocked}
     saving={saving} outlineKept={outlineKept}
     voiceControls={renderVoiceControls(text => changeExplanation([explanation.trimEnd(), text].filter(Boolean).join("\n\n")), !!pending || saving)}
     onExplanationChange={changeExplanation} onOutlineChange={changeOutline}
     onReviseExplanation={() => { changeExplanation(explanation); setError(""); }}
+    onTryAnother={() => { setResult(null); setError(""); }}
     onSelectAssumption={index => { onDraftChange({ selected: index }); setResult(null); }}
     onIncludeStatementChange={setIncludeStatement} onIncludeCodeChange={value => { setIncludeCode(value); setResult(null); }}
     onOutline={() => void run("outline")} onChallenge={() => void run("challenge")}
