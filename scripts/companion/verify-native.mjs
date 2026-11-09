@@ -164,6 +164,60 @@ try {
   const afterComparison=await page.evaluate(()=>window.forma.getSnapshot());
   assert.deepEqual(afterComparison.data.attempts,beforeComparison.data.attempts);
   assert.equal(afterComparison.revision,beforeComparison.revision);
+
+  // Exercise the native source UI against a deterministic handoff endpoint.
+  const destination='ea7f3538-0d0a-466d-8e34-e08a1747aac7';
+  await application.evaluate(({shell},accountId)=>{
+    const originalFetch=globalThis.fetch, originalOpen=shell.openExternal;
+    const fixture={state:'linked',opened:'',packet:null};
+    globalThis.__formaHandoffFixture=fixture;
+    shell.openExternal=(url,...args)=>{
+      if(new URL(url).pathname==='/handoff'){fixture.opened=url;return Promise.resolve();}
+      return originalOpen(url,...args);
+    };
+    globalThis.fetch=(url,options)=>{
+      if(new URL(String(url)).pathname!=='/api/handoff')return originalFetch(url,options);
+      const input=JSON.parse(options.body);
+      if(input.action==='source-send'){
+        fixture.packet=input.packet;
+        fixture.state='ready';
+      }
+      return Promise.resolve(Response.json({state:fixture.state,accountId,accountLabel:'learner@example.test',
+        ...(fixture.packet?{sessionId:fixture.packet.session.id}:{})}));
+    };
+    globalThis.__formaRestoreHandoffFixture=()=>{globalThis.fetch=originalFetch;shell.openExternal=originalOpen;};
+  },destination);
+  await page.evaluate(()=>window.forma.command({id:'native-handoff-start',type:'start',payload:{}}));
+  await page.getByRole('button',{name:'Pause and continue on web',exact:true}).click();
+  const handoff=page.getByRole('region',{name:'Continue on web',exact:true});
+  const nextStep='Try a boundary case in the browser.';
+  await handoff.getByRole('textbox',{name:/What would you try next/}).fill(nextStep);
+  await handoff.getByRole('button',{name:'Open browser to link',exact:true}).click();
+  await handoff.getByRole('button',{name:'Check status',exact:true}).click();
+  await handoff.getByText('learner@example.test',{exact:true}).waitFor();
+  const pausedForHandoff=await page.evaluate(()=>window.forma.getSnapshot());
+  assert.equal(pausedForHandoff.data.session.runningSince,null);
+  assert.equal(pausedForHandoff.presentation.handoffPending,true);
+  await handoff.getByRole('button',{name:'Send paused session',exact:true}).click();
+  await handoff.getByText(/Choose Receive session in the browser/).waitFor();
+  const sent=await application.evaluate(()=>{
+    const fixture=globalThis.__formaHandoffFixture;
+    fixture.state='received';
+    return {url:fixture.opened,packet:fixture.packet};
+  });
+  assert.equal(new URL(sent.url).search,'');
+  assert.equal(sent.packet.session.id,pausedForHandoff.data.session.id);
+  assert.equal(sent.packet.session.elapsedMs,pausedForHandoff.data.session.elapsedMs);
+  assert.equal(sent.packet.thread,nextStep);
+  await handoff.getByRole('button',{name:'Check status',exact:true}).click();
+  await handoff.getByText(/Received in your web workspace/).waitFor();
+  const transferred=await page.evaluate(()=>window.forma.getSnapshot());
+  assert.equal(transferred.data.session,null);
+  assert.equal(transferred.presentation.handoffPending,false);
+  assert.deepEqual(transferred.data.attempts,afterComparison.data.attempts);
+  await application.evaluate(()=>globalThis.__formaRestoreHandoffFixture());
+  await handoff.getByRole('button',{name:'Back to practice',exact:true}).click();
+
   await page.getByRole('button',{name:/Today’s plan/}).click();
   await page.getByText('TODAY’S PLAN',{exact:true}).waitFor();
   await page.screenshot({path:join(output,'native-today.png')});
@@ -255,7 +309,7 @@ try {
   const traySvgEmpty=await application.evaluate(({nativeImage})=>nativeImage.createFromBuffer(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22"><circle cx="11" cy="11" r="9"/></svg>')).isEmpty());
   const trayPngEmpty=await application.evaluate(({nativeImage},path)=>nativeImage.createFromPath(path).isEmpty(),resolve('.companion-build/assets/ribbon-tray.png'));
   assert.equal(trayPngEmpty,false);
-  const report={today:{suggestionRendered:true,compactHeight:todayWindow.height,readingCreatedNoSession:true},commandPalette:{keyboardOpened:true,pausedThreadShown:true,exactThreadPreview:true,preservedSession:true},thenNow:{openedFromReflection:true,exactAttempts:true,readOnly:true},recognition,verifiedAt:new Date().toISOString(),platform:process.platform,architecture:process.arch,softwareRendering:software,notebook:folder,traySvgEmpty,trayPngEmpty,pairing:{acknowledged:pairedAck.ok,revocationRejected:!revokedAck.ok},cardP95Ms,...timings,idle:{durationMs:idleMs,cpuPercentOfOneCore:cpuSeconds/(idleMs/1000)*100,totalWorkingSetMiB:idleEnd.reduce((s,p)=>s+p.kib,0)/1024,processes:idleEnd},pageErrors:errors};
+  const report={today:{suggestionRendered:true,compactHeight:todayWindow.height,readingCreatedNoSession:true},commandPalette:{keyboardOpened:true,pausedThreadShown:true,exactThreadPreview:true,preservedSession:true},thenNow:{openedFromReflection:true,exactAttempts:true,readOnly:true},handoff:{pausedAndReviewed:true,exactTimerAndThread:true,retiredOnReceipt:true,fixtureEndpoint:true},recognition,verifiedAt:new Date().toISOString(),platform:process.platform,architecture:process.arch,softwareRendering:software,notebook:folder,traySvgEmpty,trayPngEmpty,pairing:{acknowledged:pairedAck.ok,revocationRejected:!revokedAck.ok},cardP95Ms,...timings,idle:{durationMs:idleMs,cpuPercentOfOneCore:cpuSeconds/(idleMs/1000)*100,totalWorkingSetMiB:idleEnd.reduce((s,p)=>s+p.kib,0)/1024,processes:idleEnd},pageErrors:errors};
   assert.deepEqual(errors,[]);
   await writeFile(join(output,'native-results.json'),JSON.stringify(report,null,2));
   console.log(JSON.stringify(report,null,2));

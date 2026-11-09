@@ -14,6 +14,8 @@ Open the desktop command palette with **Command + K** inside Forma or **Control 
 
 Choose **Compare attempts** from a Journal entry or a desktop command palette reflection. **Then / Now** orders two saved attempts by when they happened and shows their recorded approaches, outcomes, and takeaways. On desktop, code pinned to the exact timed session in VS Code can appear alongside that attempt.
 
+With [account handoff configured](docs/cloud-setup.md#continue-a-desktop-session-on-web), choose **Pause and continue on web** in the Ribbon. Link your Forma account in the browser, confirm the destination in the Ribbon, then receive the paused session on web. Your next step and recorded time are there when you resume.
+
 ## Run locally
 
 Forma Companion's local desktop milestone is also available: `npm run companion:dev`. It adds the floating Ribbon timer, SQLite-backed practice/reflections and a paired VS Code extension while keeping this website independently usable. Desktop account sync is pending; see [companion setup and current scope](docs/companion/README.md).

@@ -1,0 +1,54 @@
+.desktop-handoff {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.desktop-handoff .intro {
+  margin-bottom: 4px;
+}
+
+.desktop-handoff-summary,
+.desktop-handoff-destination {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+  padding: 13px;
+  border: 1px solid var(--rule);
+  border-inline-start: 2px solid var(--sage-deep);
+  border-radius: 5px 10px 10px 5px;
+  background: var(--paper-raised);
+  overflow-wrap: anywhere;
+}
+
+.desktop-handoff-summary > strong {
+  font: 400 1.55rem/1.1 "Instrument Serif", Georgia, serif;
+}
+
+.desktop-handoff-summary > span,
+.desktop-handoff-receipt {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--sage-deep);
+  font-size: 11px;
+}
+
+.desktop-handoff-summary p {
+  margin: 0;
+  padding-top: 7px;
+  border-top: 1px solid var(--rule);
+  color: var(--muted);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+.desktop-handoff-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+
+.desktop-handoff .field-help {
+  margin: 0;
+}

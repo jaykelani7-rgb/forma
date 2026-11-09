@@ -6,7 +6,13 @@ import { canonicalProblemIdentity } from '../../../packages/core/src/codeforces-
 import type { LocalSnapshot } from './store';
 import { BACKUP_LIMIT, backupHash, portableState, validateLocalBackup, type LocalBackup, type TutorBackup } from './backup-schema';
 
-interface BackupOwner {snapshot():LocalSnapshot;replace(data:Data,state:CompanionState,now:number):LocalSnapshot;rotateDraftEpoch():void}
+interface BackupOwner {
+  snapshot():LocalSnapshot;
+  replace(data:Data,state:CompanionState,now:number):LocalSnapshot;
+  rotateDraftEpoch():void;
+  checkExport():void;
+  checkReplacement(data:Data):void;
+}
 const decode=<T>(v:unknown):T=>JSON.parse(String(v));
 /** The existing synchronous database writer owns both validation and replacement. */
 export class BackupStore {
@@ -19,6 +25,7 @@ export class BackupStore {
       current:this.db.prepare('SELECT c.identity,s.id FROM tutor_statement_current c JOIN tutor_statement_captures s ON c.capture_sequence=s.sequence').all().map(r=>({identity:String(r.identity),captureId:String(r.id)})),settings:bodies<TutorBackup['settings']>('tutor_settings')[0],lastConversationId:draftState?.last_conversation_id?String(draftState.last_conversation_id):null};
   }
   export(input:unknown={scope:'companion',includeTutor:false},now=Date.now()):string {
+    this.owner.checkExport();
     if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).some(k=>!['scope','includeTutor'].includes(k)))throw new Error('Choose a notebook or companion backup.');
     const {scope,includeTutor}=input as {scope:unknown;includeTutor:unknown};
     if(!['notebook','companion'].includes(String(scope))||typeof includeTutor!=='boolean'||scope==='notebook'&&includeTutor)throw new Error('Tutor history is an explicit choice in a full companion backup.');
@@ -30,6 +37,7 @@ export class BackupStore {
   preview(json:string) {const valid=validateLocalBackup(json,this.owner.snapshot().data);this.checkPreserved(valid.backup);return valid.preview;}
   private checkPreserved(backup:LocalBackup) {
     const before=this.owner.snapshot(),data=backup.notebook??before.data;
+    this.owner.checkReplacement(data);
     if(!backup.tutor){
       for(const row of this.db.prepare('SELECT body FROM tutor_conversations').all()){
         const c=decode<TutorBackup['conversations'][number]>(row.body),problem=data.problems.find(p=>p.id===c.problemId);

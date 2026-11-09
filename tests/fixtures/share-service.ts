@@ -2,10 +2,15 @@
 // It only listens on loopback and is never imported by application routes.
 import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { shareDatabase } from "../helpers/share-database";
 import { emptyData, validateData } from "../../src/lib/model";
 async function main() {
   const { db, as } = await shareDatabase();
+  await db.exec(await readFile(
+    new URL("../../supabase/migrations/20261109020000_session_handoffs.sql", import.meta.url),
+    "utf8",
+  ));
   const users = new Map<string, { id: string; email: string; token: string }>();
   const tokens = new Map<
     string,
@@ -55,13 +60,15 @@ async function main() {
         users.set(email, user);
         tokens.set(token, user);
         await db.query("insert into auth.users values($1)", [id]);
-        const data = validateData(body.data ?? emptyData());
-        await as(
-          "authenticated",
-          id,
-          "select public.forma_commit_workspace($1::jsonb,0,$2::uuid)",
-          [JSON.stringify(data), randomUUID()],
-        );
+        if (body.uninitialized !== true) {
+          const data = validateData(body.data ?? emptyData());
+          await as(
+            "authenticated",
+            id,
+            "select public.forma_commit_workspace($1::jsonb,0,$2::uuid)",
+            [JSON.stringify(data), randomUUID()],
+          );
+        }
         send(user);
         return;
       }
@@ -125,6 +132,14 @@ async function main() {
             forma_list_shares: { args: [], types: [] },
             forma_revoke_share: { args: ["p_id"], types: ["uuid"] },
             forma_resolve_share: { args: ["p_token"], types: ["text"] },
+            forma_manage_handoff: {
+              args: ["p_action", "p_id", "p_account_id", "p_account_label", "p_source_digest", "p_claim_digest", "p_packet"],
+              types: ["text", "uuid", "uuid", "text", "text", "text", "jsonb"],
+            },
+            forma_receive_handoff: {
+              args: ["p_id", "p_claim_digest", "p_data", "p_base_revision"],
+              types: ["uuid", "text", "jsonb", "bigint"],
+            },
           };
         const procedure = procedures[name];
         if (!procedure) {
@@ -140,7 +155,7 @@ async function main() {
             : "anon";
         const sql = `select public.${name}(${procedure.types.map((type, i) => `$${i + 1}::${type}`).join(",")}) result`;
         const values = procedure.args.map((arg, i) =>
-          procedure.types[i] === "jsonb"
+          procedure.types[i] === "jsonb" && body[arg] != null
             ? JSON.stringify(body[arg])
             : body[arg],
         );

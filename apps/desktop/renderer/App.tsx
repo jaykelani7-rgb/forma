@@ -1,5 +1,5 @@
 import { useEffect, useEffectEvent, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { ArrowLeft, ArrowRight, ArrowUpRight, BookOpen, Check, ChevronRight, CircleHelp, Clock3, Code2, Ellipsis, Feather, FileCode2, Link2, LoaderCircle, Mic, Moon, Pause, Play, Plus, Search, Settings2, ShieldCheck, Sun, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, ArrowUpRight, BookOpen, Check, ChevronRight, CircleHelp, Clock3, Code2, Ellipsis, Feather, FileCode2, Globe2, Link2, LoaderCircle, Mic, Moon, Pause, Play, Plus, Search, Settings2, ShieldCheck, Sun, X } from "lucide-react";
 import { TutorPanel, type TutorActivity } from "./TutorPanel";
 import { useThoughtVoice } from "./thought-voice";
 import { ThoughtTakeRecovery } from "./ThoughtTakeRecovery";
@@ -8,6 +8,7 @@ import { PaletteShortcutSettings } from "./PaletteShortcutSettings";
 import { CommandPaletteFlow, type PaletteCommand } from "./CommandPaletteFlow";
 import { ProblemDesk } from "./ProblemDesk";
 import { DeskHintFlow } from "./DeskHintFlow";
+import { SessionHandoffPanel } from "./SessionHandoffPanel";
 import { DesktopRibbonMark, type RibbonFeedback } from "./DesktopRibbonMark";
 import { DEFAULT_PALETTE_SHORTCUT, DEFAULT_THOUGHT_SHORTCUT } from "../main/preferences";
 import { SetupPanel } from "./SetupPanel";
@@ -26,7 +27,7 @@ import { addDays, localDate, type Outcome } from "../../../src/lib/model";
 import type { CompanionCommand, DeskEntry } from "../../../packages/contracts/src";
 import { connectBridge, previewMode, type CompanionSnapshot, type FormaBridge } from "./api";
 
-type Panel = "rehearsal" | "tutor" | "today" | "home" | "attach" | "thought" | "desk" | "reflect" | "memory" | "recall" | "settings";
+type Panel = "rehearsal" | "tutor" | "today" | "home" | "attach" | "thought" | "desk" | "reflect" | "memory" | "recall" | "settings" | "handoff";
 type IconType = typeof ArrowRight;
 const outcomeLabels: Record<Outcome, string> = { independent: "Independent", hint: "With a hint", editorial: "Editorial", unsolved: "Not solved yet" };
 const stateLabels: Record<FennState, string> = { idle: "Ready when you are", focus: "A little room to focus", "context-ready": "Problem attached", "tests-running": "Local tests running", "local-tests-passed": "Local tests passed", "submission-pending": "Submission pending", accepted: "Accepted on Codeforces", "needs-attention": "Needs your attention", "reflection-saved": "Reflection saved locally", "recall-available": "A thought to revisit", paused: "Taking a quiet moment", offline: "Working locally" };
@@ -159,6 +160,8 @@ export function App() {
   const bindingFilename = binding ? decodeURIComponent(new URL(binding.fileUri).pathname.split("/").at(-1) ?? "Solution file") : null;
   const latestThought = snapshot?.state.thoughts.filter((item) => item.problemId === problem?.id).at(-1);
   const reflectionPending = session?.phase === "reflection";
+  const handoffPending = !!snapshot?.presentation?.handoffPending;
+  const canHandoff = !!window.forma && !!bridge && (handoffPending || (!!session && !reflectionPending));
   const snoozed = !!snapshot?.preferences.snoozedUntil && Date.parse(snapshot.preferences.snoozedUntil) > now;
   const semanticState: FennState = reaction ?? (tutorActivity!=="idle"?tutorStates[tutorActivity]:error ? "needs-attention" : snapshot?.state.platform === "accepted" && snapshot.state.learning === "unrecorded" ? "accepted" : snapshot?.state.localTests === "running" ? "tests-running" : snapshot?.state.platform === "pending" ? "submission-pending" : snapshot?.state.lifecycle === "working" ? "focus" : snapshot?.state.lifecycle === "paused" ? "paused" : view?.due.length && !snoozed ? "recall-available" : problem ? "context-ready" : "idle");
   const ribbon = snapshot?.preferences.ribbon ?? defaultRibbon;
@@ -276,7 +279,20 @@ export function App() {
   }
 
   async function resumePractice() {
+    if (handoffPending) { openPanel("handoff"); return; }
     if (await command("resume", {}, "Session resumed.")) setThreadEditorProblem(null);
+  }
+
+  async function openHandoff() {
+    if (!canHandoff || busy || thoughtVoiceBusy) return;
+    if (session?.running && !await command("pause", {}, "Session paused.")) return;
+    openPanel("handoff");
+  }
+
+  async function prepareHandoff(thread: string) {
+    if (thread !== (latestThread?.text ?? "") && (!thread || !await saveDeskEntry({ kind: "thread", text: thread }))) return false;
+    changeThreadDraft("");
+    return true;
   }
 
   function openPalette(restoreCompact = !expanded, hostExpanded = false) {
@@ -313,7 +329,7 @@ export function App() {
 
   const paletteCommands: PaletteCommand[] = [];
   if (palette && problem && !busy && !thoughtVoiceBusy) {
-    if (session && !session.running && !reflectionPending) paletteCommands.push({
+    if (session && !session.running && !reflectionPending && !handoffPending) paletteCommands.push({
       id: "action:resume", title: `Resume ${problem.title}`,
       detail: latestThread?.text ?? `${duration(session.elapsedMs)} tracked`,
       meta: "Paused session", keywords: "continue paused session practice yesterday s problem",
@@ -330,7 +346,18 @@ export function App() {
       id: "action:hint", title: "I’m stuck", detail: "Review a request for one hint", keywords: "tutor help one hint current problem",
       run: () => openPaletteDesk(true),
     });
+    if (canHandoff) paletteCommands.push({
+      id: "action:handoff", title: handoffPending ? "Review web handoff" : "Continue on web",
+      detail: problem.title, keywords: "pause browser transfer",
+      run: () => { closePalette(false); void openHandoff(); },
+    });
   }
+
+  const handoffAction = canHandoff && <button type="button" className="settings-link"
+    disabled={busy || thoughtVoiceBusy} onClick={() => void openHandoff()}>
+    <Globe2 size={15} aria-hidden="true"/>
+    {handoffPending ? "Review web handoff" : session?.running ? "Pause and continue on web" : "Continue on web"}
+  </button>;
 
   function saveDeskEntry(item: DeskEntry) {
     if (!problem || thoughtVoiceBusy) return Promise.resolve(false);
@@ -431,9 +458,10 @@ export function App() {
             <div className="intro"><span className="eyebrow"><span className="tiny-line"/>{reflectionPending ? "A MOMENT TO REFLECT" : session?.running ? "IN YOUR OWN TIME" : "YOUR PRACTICE, REMEMBERED"}</span><h1>{reflectionPending ? <>What will you<br/><em>carry forward?</em></> : session?.running ? <>One thought<br/><em>at a time.</em></> : <>A little space<br/><em>to find your way.</em></>}</h1><p>{reflectionPending ? "The result is one part. Your experience is the other." : session?.running ? "Ribbon will keep the thread while you focus." : "A problem, a thought, and something to return to."}</p></div>
             {problem ? <>
               <div className="problem"><div className="problem-icon"><FileCode2 size={19} strokeWidth={1.4}/></div><div className="problem-copy"><span>CODEFORCES · {problem.problemCode || problem.cfKey || "ATTACHED"}</span><strong>{problem.title.replace(/^[A-Z]\d?\.\s*/, "")}</strong><small className="binding-source">{bindingFilename ? `${binding?.source === "cph" ? "CPH metadata" : "Confirmed file"} · ${bindingFilename}` : snapshot.state.bindings.some(item => item.problemId === problem.id) ? "No active solution file for this problem" : "Manually attached"}</small></div><IconButton icon={ArrowUpRight} label="Open problem on Codeforces" onClick={() => void ui("open-external", problem.url)}/></div>
-              <div className="session-line"><span className={`session-state ${session?.running ? "session-state--running" : ""}`}><span className="status-dot"/>{reflectionPending ? "Ready for reflection" : session?.running ? "Session running" : session ? "Session paused" : "Problem attached"}</span>{session && <time aria-label="Tracked practice duration" className="session-time"><Clock3 size={12}/>{duration(session.elapsedMs)}</time>}</div>
+              <div className="session-line"><span className={`session-state ${session?.running ? "session-state--running" : ""}`}><span className="status-dot"/>{reflectionPending ? "Ready for reflection" : session?.running ? "Session running" : session ? handoffPending ? "Paused for web handoff" : "Session paused" : "Problem attached"}</span>{session && <time aria-label="Tracked practice duration" className="session-time"><Clock3 size={12}/>{duration(session.elapsedMs)}</time>}</div>
 
-              {reflectionPending ? <Button disabled={busy} onClick={() => openPanel("reflect")} icon={ArrowRight}>Capture the reflection</Button> : session ? <><Button disabled={busy} onClick={() => openPanel("thought")} icon={Plus}>Save a thought</Button><div className="split-actions"><button disabled={busy} onClick={() => void (session.running ? pausePractice() : resumePractice())}><span>{session.running ? <Pause size={13}/> : <Play size={13}/>}</span>{session.running ? "Pause" : "Resume"}</button><button disabled={busy} onClick={() => void command("finish", {}, undefined, "reflect")}><Check size={14}/>Finish & reflect</button></div></> : <><Button disabled={busy} onClick={() => void command("start", {}, "Session started. Only explicitly tracked time counts.")} icon={Play}>Begin a session</Button><button className="text-button centered" onClick={() => openPanel("thought")}><Feather size={12}/>Just leave a thought</button></>}
+              {reflectionPending ? <Button disabled={busy} onClick={() => openPanel("reflect")} icon={ArrowRight}>Capture the reflection</Button> : session ? <><Button disabled={busy} onClick={() => openPanel("thought")} icon={Plus}>Save a thought</Button><div className="split-actions"><button disabled={busy} onClick={() => void (session.running ? pausePractice() : resumePractice())}><span>{session.running ? <Pause size={13}/> : <Play size={13}/>}</span>{handoffPending ? "Review handoff" : session.running ? "Pause" : "Resume"}</button><button disabled={busy || handoffPending} onClick={() => void command("finish", {}, undefined, "reflect")}><Check size={14}/>Finish & reflect</button></div></> : <><Button disabled={busy} onClick={() => void command("start", {}, "Session started. Only explicitly tracked time counts.")} icon={Play}>Begin a session</Button><button className="text-button centered" onClick={() => openPanel("thought")}><Feather size={12}/>Just leave a thought</button></>}
+              {handoffAction}
               <button type="button" className="desk-entry" onClick={() => openPanel("desk")}>
                 <BookOpen size={15} aria-hidden="true"/>
                 <span><strong>{session && !session.running && !reflectionPending ? "Pick up the thread" : "Open problem desk"}</strong>
@@ -458,10 +486,11 @@ export function App() {
             onEditThreadChange={open => setThreadEditorProblem(open ? problem.id : null)}
             onSave={saveDeskEntry}
             onRemove={itemId => command("desk-remove", { itemId, problemId: problem.id }, "Removed from this desk.")}
-            onResume={session && !session.running && !reflectionPending ? () => void resumePractice() : undefined}
+            onResume={session && !session.running && !reflectionPending && !handoffPending ? () => void resumePractice() : undefined}
             onOpenProblem={() => void ui("open-external", problem.url)}
             onOpenSolution={deskBinding ? () => void ui("open-solution", deskBinding.id) : undefined}
             voiceControls={renderVoiceControls(true)}
+            handoffAction={handoffAction}
             hintButtonRef={hintButton}
             onToggleHint={window.forma && bridge ? () => {
               if (showDeskHint) closeDeskHint();
@@ -481,6 +510,11 @@ export function App() {
             />}
           />}
           {panel === "desk" && !problem && <PanelHeading eyebrow="PROBLEM DESK" title="Attach a problem to begin." description="Your desk follows the problem you’re practicing."/>}
+          {panel === "handoff" && bridge && <SessionHandoffPanel bridge={bridge}
+            sessionId={session && !session.running && !reflectionPending ? session.id : undefined}
+            problemTitle={problem?.title} elapsedMs={session?.elapsedMs}
+            savedThread={latestThread?.text ?? ""} initialDraft={problem ? threadDrafts[problem.id] : undefined}
+            onDraftChange={changeThreadDraft} onPrepare={prepareHandoff} onBack={() => openPanel("home")}/>}
           {panel === "thought" && <>
             <PanelHeading eyebrow="LEAVE YOURSELF A THREAD"
               title={<>Keep the thought.<br/><em>Find it later.</em></>}
@@ -529,9 +563,9 @@ export function App() {
           {!folded && <span>{reflectionPending ? "Reflect" : session ? duration(session.elapsedMs) : "Ribbon"}</span>}
         </button>
         {!folded && session && !reflectionPending && <button className="ribbon-pause" type="button" disabled={busy}
-          aria-label={session.running ? "Pause from ribbon" : "Resume from ribbon"}
+          aria-label={handoffPending ? "Review web handoff" : session.running ? "Pause from ribbon" : "Resume from ribbon"}
           onClick={() => void (session.running ? pausePractice() : resumePractice())}>
-          {session.running ? <Pause size={16}/> : <Play size={16}/>}
+          {handoffPending ? <Globe2 size={16}/> : session.running ? <Pause size={16}/> : <Play size={16}/>}
         </button>}
         {!folded && canDictate && (!expanded || (panel !== "thought" && !(panel === "desk" && editThread))) && <button type="button" className="ribbon-mic"
           aria-label="Speak a thought" title="Speak a thought" onClick={speakThought} disabled={busy}>

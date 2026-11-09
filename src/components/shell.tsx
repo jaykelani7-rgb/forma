@@ -186,7 +186,11 @@ export function Shell({ children }: { children: ReactNode }) {
                 Your workspace<span>/</span>
                 <strong>
                   {navigation.find((n) => n.href === activePath)?.label ??
-                    (path === "/rehearsal" ? "Rehearsal" : "Settings")}
+                    (path === "/rehearsal"
+                      ? "Rehearsal"
+                      : path === "/handoff"
+                        ? "Handoff"
+                        : "Settings")}
                 </strong>
               </div>
               <div className="topbar-right">

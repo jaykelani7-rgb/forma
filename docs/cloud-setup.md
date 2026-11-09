@@ -37,6 +37,16 @@ npx supabase db advisors --local --type all
 
 The repository includes `supabase/config.toml`; do not initialize over it with `--force`. The local stack is optional and was not started during implementation. Set the environment values to that stack's public URL/publishable key when using it.
 
+## Continue a desktop session on web
+
+Apply `supabase/migrations/20261109020000_session_handoffs.sql` after the account workspace migration and keep `forma_private` outside the exposed schemas. Configure `SUPABASE_SECRET_KEY` in the web server environment using the same server-only key as Shared Tracks. Launch the desktop process with `FORMA_WEB_ORIGIN` set to your HTTPS Forma origin for a hosted site. The local development default is `http://localhost:3001`.
+
+In the Ribbon, choose **Pause and continue on web** and review the next step. Open the browser, sign in, and link the chosen account. Confirm that account back in the Ribbon to send the paused session. Choose **Receive session** in the browser, wait for account sync, then open the session and resume. The account needs a free practice slot and a settled local notebook.
+
+The one-time link contains a claim key and the digest of a different source key. The source key stays with the desktop. The browser verifies its account before linking or receiving. The server binds the link to that verified account and commits receipt and the paused workspace update in one transaction. Linked offers expire after 30 minutes. Retrying a completed receipt returns the original session ID even after the attempt has been finished.
+
+The desktop locks the paused timer while the transfer is open, including across restarts. **Review web handoff** checks the receipt or lets you cancel. After an attempted send, the desktop checks the server before allowing local resume. The transfer includes the Codeforces problem, measured time, session notes and latest thread. The web notebook shows the thread at the top of the received session notes when there are no other notes.
+
 ## Storage and conflict behavior
 
 `GET /api/account` verifies the bearer access token through `auth.getUser(token)` and returns the account's ID/email. Both workspace endpoints repeat that server-side verification before any database query. A fresh scoped Supabase client sends that same user's token to Postgres; account transport uses no privileged key. Responses carry `Cache-Control: private, no-store` and vary by Authorization. The optional public-share resolver described above is a separate server-only path and cannot read private workspace snapshots through its RPC.

@@ -4,7 +4,7 @@ import {
   type APIRequestContext,
   type Page,
 } from "@playwright/test";
-import { randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { emptyData, validateData, type Data } from "../../src/lib/model";
 import { importTrack } from "../../src/lib/tracks";
@@ -14,6 +14,7 @@ import {
   type SharedTrackFile,
 } from "../../src/lib/shared-tracks";
 import type { OwnedShare } from "../../src/lib/share-links";
+import type { SessionHandoffPacket } from "../../src/lib/session-handoff";
 const title = "A shared path through careful boundaries";
 const secret = "PRIVATE-LEARNING-6ac1";
 function sender() {
@@ -97,10 +98,10 @@ function sender() {
   ];
   return validateData(data);
 }
-async function account(request: APIRequestContext, data = emptyData()) {
+async function account(request: APIRequestContext, data: Data | null = emptyData()) {
   const result = await request.post(
     "http://127.0.0.1:54399/__test__/accounts",
-    { data: { data } },
+    { data: data ? { data } : { uninitialized: true } },
   );
   expect(result.ok()).toBeTruthy();
   return (await result.json()) as { id: string; email: string; token: string };
@@ -1045,4 +1046,82 @@ test("long public curricula support keyboard disclosures, Large text and narrow 
     await add.focus();
     await expect(add).toBeFocused();
   }
+});
+
+test("the browser reviews a linked handoff and resumes only the received account session", async ({
+  page,
+  request,
+}) => {
+  const owner = await account(request, null);
+  const id = randomUUID();
+  const claimKey = randomBytes(32).toString("base64url");
+  const sourceKey = randomBytes(32).toString("base64url");
+  const sourceDigest = createHash("sha256").update(sourceKey).digest("hex");
+  const packet: SessionHandoffPacket = {
+    version: 1,
+    problem: {
+      title: "An exercise from the Ribbon",
+      url: "https://codeforces.com/problemset/problem/381/A",
+      problemCode: "381A",
+      rating: 800,
+    },
+    session: {
+      id: "companion:browser-handoff-fixture",
+      startedAt: "2026-11-08T08:00:00.000Z",
+      elapsedMs: 245_000,
+      targetMinutes: 30,
+      runningSince: null,
+      phase: "focus",
+      notes: "A note saved on desktop.",
+    },
+    thread: "Try the boundary case next.",
+  };
+  const actions: string[] = [];
+  page.on("request", (browserRequest) => {
+    if (new URL(browserRequest.url()).pathname === "/api/handoff") {
+      actions.push(browserRequest.postDataJSON().action);
+    }
+  });
+
+  await page.goto(`/handoff#id=${id}&key=${claimKey}&source=${sourceDigest}`);
+  await expect(page).toHaveURL(/\/handoff$/);
+  await expect(page.getByRole("heading", { name: "Sign in to your Forma account." })).toBeVisible();
+  expect(actions).toEqual([]);
+  await page.getByRole("link", { name: "Open account settings" }).click();
+  await page.getByLabel("Email", { exact: true }).fill(owner.email);
+  await page.getByLabel("Password", { exact: true }).fill("forma-fixture-password");
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(page.locator("#account").getByRole("status")).toHaveText("synced");
+  await page.goBack();
+  await page.getByRole("button", { name: "Link this workspace" }).click();
+  await expect(page.getByRole("heading", { name: "Confirm in the Ribbon." })).toBeVisible();
+  expect(actions).not.toContain("receive");
+
+  const linked = await request.post("/api/handoff", {
+    data: { action: "source-status", id, sourceKey },
+  });
+  expect(linked.ok(), await linked.text()).toBeTruthy();
+  expect(await linked.json()).toMatchObject({ state: "linked", accountId: owner.id, accountLabel: owner.email });
+  const sent = await request.post("/api/handoff", {
+    data: { action: "source-send", id, sourceKey, accountId: owner.id, packet },
+  });
+  expect(sent.ok(), await sent.text()).toBeTruthy();
+  expect(await sent.json()).toMatchObject({ state: "ready", sessionId: packet.session.id });
+  await page.getByRole("button", { name: "Check transfer" }).click();
+  await expect(page.getByRole("heading", { name: packet.problem.title })).toBeVisible();
+  await expect(page.getByText(packet.thread, { exact: true })).toBeVisible();
+  await expect(page.getByText("04:05", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Receive session" }).click();
+  await expect(page.getByRole("link", { name: "Open session" })).toBeVisible();
+  await page.reload();
+  await page.getByRole("link", { name: "Open session" }).click();
+  await expect(page).toHaveURL(/\/session$/);
+  await expect(page.getByRole("heading", { name: packet.problem.title })).toBeVisible();
+  await expect(page.getByLabel("04:05 elapsed")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Resume timer" })).toBeVisible();
+  await expect(page.getByLabel("A place for your thoughts")).toHaveValue(
+    `${packet.session.notes}\n\nNext step from the Ribbon\n${packet.thread}`,
+  );
+  expect((await durable(page, `account:${owner.id}`)).session?.id).toBe(packet.session.id);
+  expect(actions.filter((action) => action === "receive")).toEqual(["receive"]);
 });

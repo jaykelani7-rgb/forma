@@ -20,6 +20,11 @@ parentPort!.on('message', (request: {id:number;method:string;args:unknown[]}) =>
         value=store.updateEvidence(String(a[1]),(data,state)=>({data,state:reconcileFollowups(state,e.handle,e.submissions,now,e.error??null,data)}),e,now); break;
       }
       case 'snapshot': value=store.snapshot(); break;
+      case 'handoff-current': value=store.currentHandoff(); break;
+      case 'handoff-begin': value=store.beginHandoff(a[0] as Parameters<CompanionStore['beginHandoff']>[0]); break;
+      case 'handoff-mark-sending': value=store.markHandoffSending(a[0] as Parameters<CompanionStore['markHandoffSending']>[0]); break;
+      case 'handoff-complete': value=store.completeHandoff(a[0] as Parameters<CompanionStore['completeHandoff']>[0],now); break;
+      case 'handoff-cancel': value=store.cancelHandoff(a[0] as Parameters<CompanionStore['cancelHandoff']>[0]); break;
       case 'health': value={healthy:store.db.prepare('PRAGMA quick_check').get()?.quick_check==='ok',savedAt:store.snapshot().savedAt}; break;
       case 'recovery-epoch': value=String(store.db.prepare('SELECT epoch FROM tutor_draft_state WHERE id=1').get()!.epoch); break;
       case 'thought-voice-context': {

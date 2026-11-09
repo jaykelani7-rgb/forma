@@ -57,7 +57,9 @@ See [automatic recognition and optional Chrome capture](automatic-recognition.md
 
 The default Mac notebook is `~/Library/Application Support/Forma Companion/notebook.sqlite`. The socket is in that app directory's private `runtime/` folder. A developer can set `FORMA_COMPANION_DATA_DIR` for an isolated test notebook; packaged normal launches ignore that override.
 
-**Saved locally** means a SQLite transaction completed. Tutor autosaving is debounced by 450 ms; a crash can lose edits not yet committed. This milestone has no desktop account sign-in or live cloud sync. **Export canonical notebook for Forma web** preserves the existing web interchange format. The desktop restore workflow also accepts legacy notebook/companion/Tutor exports with explicit preview limitations.
+**Saved locally** means a SQLite transaction completed. Tutor autosaving is debounced by 450 ms. **Pause and continue on web** transfers one session into a verified Forma web account through a one-time link. [Account handoff setup](../cloud-setup.md#continue-a-desktop-session-on-web)
+
+**Export canonical notebook for Forma web** preserves the existing web interchange format. The desktop restore workflow also accepts legacy notebook, companion, and Tutor exports with a preview.
 
 Versioned local backups separate notebook and companion data. Tutor conversations and unfinished drafts are an explicit choice. Restoring replaces only the displayed scope after creating and verifying a private, recoverable full backup. Pairing, API keys, raw audio, executable paths, login settings, live connections and folder permissions are excluded. Imported paths never grant access. See [backup replacement and recovery](local-backup.md).
 

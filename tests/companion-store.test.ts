@@ -178,7 +178,7 @@ test('changed verdicts append validated small batches while prior evidence and l
 });
 test('an older desktop cannot overwrite a newer SQLite schema version',()=>{
   const folder=mkdtempSync(join(tmpdir(),'forma-newer-'));const path=join(folder,'notebook.sqlite');
-  const store=new CompanionStore(path);store.db.exec('PRAGMA user_version=6');store.close();
+  const store=new CompanionStore(path);store.db.exec('PRAGMA user_version=7');store.close();
   try{assert.throws(()=>new CompanionStore(path),/newer Forma Companion/);}finally{rmSync(folder,{recursive:true,force:true});}
 });
 test('version-one notebooks migrate without dropping bindings, thoughts, receipts or outbox captures',()=>{

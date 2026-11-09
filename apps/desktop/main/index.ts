@@ -10,6 +10,7 @@ import { ConfiguredTutorProvider, speechReadyText, TutorProviderError } from "./
 import { TutorService } from "./tutor-service";
 import { ThoughtHostVoice, TutorHostVoice, type ThoughtVoiceContext } from "./tutor-host-voice";
 import { ThoughtTakeStore } from "./thought-take-store";
+import { DesktopSessionHandoff } from "./session-handoff-client";
 import { tutorExternalUrl } from "../../../packages/tutor/links";
 import type { DeskHintReview, SharedCode, StatementSnapshot, TutorConversation, TutorEvent, TutorSendInput, TutorStoredView, TutorTurn } from "../../../packages/tutor/types";
 import { AttentionPolicy } from "./attention";
@@ -47,6 +48,12 @@ const ribbonWindow = { width: 216, height: 78 };
 let window: BrowserWindow;
 let tray: Tray;
 let database: DatabaseClient;
+const desktopHandoff = new DesktopSessionHandoff({
+  call: <T>(method: string, ...args: unknown[]) => database.call<T>(method, ...args),
+  open: url => shell.openExternal(url),
+  changed: () => broadcast(),
+  configuredOrigin: () => process.env.FORMA_WEB_ORIGIN ?? "http://localhost:3001",
+});
 let preferences: CompanionPreferences;
 let transport: Awaited<ReturnType<typeof startTransport>> | undefined;
 let credential:string|null=null;
@@ -250,13 +257,16 @@ function platformStatus(state:LocalSnapshot['state']){
   return codeforcesHandle===state.handle?{...codeforces,checkedAt:codeforces.checkedAt??state.checkedAt}:{checking:false,checkedAt:state.checkedAt,error:null};
 }
 const snapshot=async()=>{
-  const local=await database.call<LocalSnapshot>('snapshot');
+  const [local, handoff] = await Promise.all([
+    database.call<LocalSnapshot>("snapshot"), desktopHandoff.local(),
+  ]);
   const slot=attention.view(local.state,recognition?.presentation()??null,!!preferences.snoozedUntil&&Date.parse(preferences.snoozedUntil)>Date.now(),Date.now());
   const tutorAssistance=local.data.session?.phase==='reflection'?await database.call('tutor-assistance',{problemId:local.data.session.problemId,sessionId:local.data.session.id}):null;
   return {...local,tutorAssistance,today:companionToday(local.data),preferences,presentation:{
     expanded, shortcutPress, thoughtShortcutPress, paletteShortcutPress, paletteShortcutWasExpanded,
     thoughtShortcutAvailable: shortcutAvailable("thoughtShortcut"),
     paletteShortcutAvailable: shortcutAvailable("paletteShortcut"),
+    handoffPending: !!handoff,
     panelRequest, activeFileUri:recognition?.activeFileUri()??null, recognition:slot.recognition, verdict:slot.verdict,
   },integration:{connected,paired:!!credential,browserEnabled:!!browserCredential,browserSupported:process.platform==='darwin',status:connected?'VS Code connected':credential?'Waiting for VS Code':'Pair VS Code when you’re ready'},codeforces:platformStatus(local.state)};
 };
@@ -442,6 +452,12 @@ async function ui(action:string,payload:unknown){
   recoveryFence.lease();
   if(action.startsWith('tutor-'))return tutorUi(action,payload);
   switch(action){
+    case 'handoff-local': return desktopHandoff.local();
+    case 'handoff-begin': return desktopHandoff.begin(payload);
+    case 'handoff-open': return desktopHandoff.reopen(payload);
+    case 'handoff-refresh': return desktopHandoff.refresh(payload);
+    case 'handoff-send': return desktopHandoff.send(payload);
+    case 'handoff-cancel': return desktopHandoff.cancel(payload);
     case 'desk-hint-review': {
       const current=recoveryFence.lease(),provider=tutorProvider.status();
       const review=await database.call<Omit<DeskHintReview,'provider'|'activeRequestId'>>(action,payload,provider);

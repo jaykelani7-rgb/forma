@@ -27,6 +27,7 @@ interface ProblemDeskProps {
   onResume?: () => void;
   onOpenProblem: () => void;
   onOpenSolution?: () => void;
+  handoffAction?: ReactNode;
   voiceControls?: ReactNode;
   hint?: ReactNode;
   onToggleHint?: () => void;
@@ -130,7 +131,7 @@ function SavedItem({ item, busy, onRemove }: {
 export function ProblemDesk({
   problemTitle, elapsed, paused = false, busy = false, items, editThread = false,
   threadDraft, onThreadDraftChange, onEditThreadChange, onSave, onRemove,
-  onResume, onOpenProblem, onOpenSolution, voiceControls, hint, onToggleHint, hintButtonRef,
+  onResume, onOpenProblem, onOpenSolution, handoffAction, voiceControls, hint, onToggleHint, hintButtonRef,
 }: ProblemDeskProps) {
   const threadId = useId();
   const artifactId = useId();
@@ -265,6 +266,7 @@ export function ProblemDesk({
             Open problem <ArrowUpRight size={14} aria-hidden="true"/>
           </button>
         </div>
+        {handoffAction}
       </div>
 
       <section className="desk-working" aria-label="Working notes">

@@ -42,8 +42,8 @@ export class TutorStore {
         CREATE TABLE IF NOT EXISTS tutor_settings (id INTEGER PRIMARY KEY CHECK(id=1), body TEXT NOT NULL);
         CREATE INDEX IF NOT EXISTS tutor_turn_conversation ON tutor_turns(conversation_id);
         CREATE INDEX IF NOT EXISTS tutor_turn_attempt ON tutor_turns(json_extract(body,'$.context.sessionId'),json_extract(body,'$.context.problemId'));
-        CREATE INDEX IF NOT EXISTS tutor_statement_capture_identity ON tutor_statement_captures(identity,sequence);
-        PRAGMA user_version=5;`);
+        CREATE INDEX IF NOT EXISTS tutor_statement_capture_identity ON tutor_statement_captures(identity,sequence);`);
+      if(version<5)db.exec('PRAGMA user_version=5');
       if(version<4){
         // Content-addressed rows are immutable. The old timestamp + rowid order
         // provides a deterministic initial selection, then capture sequence is

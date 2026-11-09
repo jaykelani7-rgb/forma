@@ -9,14 +9,36 @@ import { canonicalProblemIdentity } from "../../../packages/core/src/codeforces-
 import type { TutorProposal } from "../../../packages/tutor/types";
 import { parseCommand, parseEvent } from "../../../packages/contracts/src/index";
 import { reconcilePracticePlan } from "../../../src/lib/practice-plan";
+import { isHandoffAccountId, isHandoffId, isHandoffKey, makeSessionHandoffPacket, parseSessionHandoffPacket, type SessionHandoffPacket } from "../../../src/lib/session-handoff";
 import { expireFollowups } from "../../../packages/core/src/verdict-followup";
 import { defaultPreferences, validatePreferences } from "./preferences";
 import { TutorStore } from './tutor-store';
 import { BackupStore } from './backup-store';
 
 export interface LocalSnapshot { data: Data; state: CompanionState; revision: number; savedAt: string }
+export interface PendingSessionHandoff {
+  id: string;
+  sourceKey: string;
+  claimKey: string;
+  origin: string;
+  packet: SessionHandoffPacket;
+  offered: boolean;
+  accountId?: string;
+}
+const HANDOFF_SCHEMA_VERSION = 6;
+const HANDOFF_PENDING = "Finish or cancel the web handoff before changing this session.";
 const MAX_DEVICE_BYTES = 8 * 1024 * 1024;
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
+function validHandoffOrigin(value: unknown): value is string {
+  if (typeof value !== "string" || value.length > 256) return false;
+  try {
+    const url = new URL(value);
+    return url.origin === value && (url.protocol === "https:" ||
+      (url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)));
+  } catch {
+    return false;
+  }
+}
 
 /** One instance, in the database worker, owns all notebook writes. */
 export class CompanionStore {
@@ -27,7 +49,7 @@ export class CompanionStore {
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
     this.db = new DatabaseSync(path);
     const version=Number(this.db.prepare('PRAGMA user_version').get()?.user_version??0);
-    if(version>5){this.db.close();throw new Error('This notebook was written by a newer Forma Companion. Upgrade the app before opening it; the original file is preserved.');}
+    if(version>HANDOFF_SCHEMA_VERSION){this.db.close();throw new Error('This notebook was written by a newer Forma Companion. Upgrade the app before opening it; the original file is preserved.');}
     if (path !== ':memory:') chmodSync(path, 0o600);
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;
       CREATE TABLE IF NOT EXISTS workspace (id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL, notebook TEXT NOT NULL, device TEXT NOT NULL, saved_at TEXT NOT NULL);
@@ -36,10 +58,24 @@ export class CompanionStore {
       CREATE TABLE IF NOT EXISTS outbox (id TEXT PRIMARY KEY, revision INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'local', created_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS recoveries (id TEXT PRIMARY KEY, notebook TEXT NOT NULL, reason TEXT NOT NULL, created_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS preferences (id TEXT PRIMARY KEY, value TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS session_handoff_pending (
+        slot INTEGER PRIMARY KEY CHECK(slot=1), id TEXT NOT NULL UNIQUE, session_id TEXT NOT NULL,
+        origin TEXT NOT NULL, source_key TEXT NOT NULL, claim_key TEXT NOT NULL, packet TEXT NOT NULL, account_id TEXT
+      );
+      CREATE TABLE IF NOT EXISTS session_handoff_completed (id TEXT PRIMARY KEY, session_id TEXT NOT NULL UNIQUE);
       CREATE TABLE IF NOT EXISTS sync_checkpoints (id TEXT PRIMARY KEY, value TEXT NOT NULL);`);
     this.db.prepare('INSERT OR IGNORE INTO workspace VALUES(1,0,?,?,?)').run(encodeBackup(emptyData()), JSON.stringify(initialCompanionState()), new Date().toISOString());
     this.tutor=new TutorStore(this.db,this);
-    this.backups=new BackupStore(this.db,{snapshot:()=>this.snapshot(),replace:(data,state,now)=>this.persist({data,state},this.snapshot().revision+1,now),rotateDraftEpoch:()=>{this.tutor.rotateRecoveryEpoch();}});
+    this.backups=new BackupStore(this.db,{
+      snapshot:()=>this.snapshot(),
+      replace:(data,state,now)=>this.persist({data,state},this.snapshot().revision+1,now),
+      rotateDraftEpoch:()=>{this.tutor.rotateRecoveryEpoch();},
+      checkExport:()=>this.assertNoPendingHandoff("Finish or cancel the web handoff before exporting this notebook."),
+      checkReplacement:data=>{
+        this.assertNoPendingHandoff("Finish or cancel the web handoff before restoring a backup.");
+        this.assertSessionWasNotTransferred(data);
+      },
+    });
   }
   close() { this.db.close(); }
   snapshot(): LocalSnapshot {
@@ -56,6 +92,10 @@ export class CompanionStore {
     catch (error) { this.db.exec('ROLLBACK'); throw error; }
   }
   private persist(next: {data:Data;state:CompanionState}, revision:number, now:number, capture=true) {
+    const frozen = this.pendingSession();
+    if (frozen && (next.data.session?.id !== frozen || next.data.session?.runningSince !== null || next.data.session?.phase !== "focus"))
+      throw new Error(HANDOFF_PENDING);
+    this.assertSessionWasNotTransferred(next.data);
     next = { data: reconcilePracticePlan(next.data, new Date(now)), state: next.state };
     const device=JSON.stringify(validateCompanionState(next.state,next.data));
     if (Buffer.byteLength(device) > MAX_DEVICE_BYTES) throw new Error('The companion capture store is full. Export a companion backup before continuing. Nothing was truncated.');
@@ -63,6 +103,118 @@ export class CompanionStore {
     this.db.prepare('UPDATE workspace SET revision=?, notebook=?, device=?, saved_at=? WHERE id=1').run(revision,encodeBackup(next.data),device,at);
     if(capture)this.db.prepare("INSERT INTO outbox VALUES('notebook',?,'local',?) ON CONFLICT(id) DO UPDATE SET revision=excluded.revision, created_at=excluded.created_at").run(revision,at);
     return {...next, revision, savedAt:at};
+  }
+  private pendingSession() {
+    return this.db.prepare("SELECT session_id FROM session_handoff_pending WHERE slot=1").get()?.session_id;
+  }
+  private assertNoPendingHandoff(message = HANDOFF_PENDING) {
+    if (this.pendingSession()) throw new Error(message);
+  }
+  private assertSessionWasNotTransferred(data: Data) {
+    if (data.session && this.db.prepare("SELECT 1 FROM session_handoff_completed WHERE session_id=?").get(data.session.id))
+      throw new Error("This session was handed off to Forma on the web. Continue it from the receiving workspace.");
+  }
+  /** Capabilities stay inside the worker and host. Portable backups never include them. */
+  currentHandoff(): PendingSessionHandoff | null {
+    const row = this.db.prepare("SELECT * FROM session_handoff_pending WHERE slot=1").get();
+    if (!row) return null;
+    const packet = parseSessionHandoffPacket(JSON.parse(String(row.packet)));
+    if (packet.session.id !== row.session_id) throw new Error("The pending web handoff has a mismatched session.");
+    const accountId = row.account_id === null ? undefined : String(row.account_id);
+    return {
+      id: String(row.id),
+      origin: String(row.origin),
+      sourceKey: String(row.source_key),
+      claimKey: String(row.claim_key),
+      packet,
+      offered: !!accountId,
+      ...(accountId ? { accountId } : {}),
+    };
+  }
+  beginHandoff({ id, origin, sourceKey, claimKey, sessionId }: {
+    id: unknown; origin: unknown; sourceKey: unknown; claimKey: unknown; sessionId?: unknown;
+  }): PendingSessionHandoff {
+    if (!isHandoffId(id) || !validHandoffOrigin(origin) || !isHandoffKey(sourceKey) || !isHandoffKey(claimKey) || sourceKey === claimKey)
+      throw new Error("The web handoff could not be started. Try opening it again.");
+    return this.transaction(() => {
+      this.assertNoPendingHandoff();
+      if (this.db.prepare("SELECT 1 FROM session_handoff_completed WHERE id=?").get(id))
+        throw new Error("This web handoff already finished.");
+      const { data, state } = this.snapshot();
+      if (sessionId !== undefined && data.session?.id !== sessionId) throw new Error("The active practice session changed. Reopen the web handoff.");
+      this.assertSessionWasNotTransferred(data);
+      const packet = makeSessionHandoffPacket(data, state);
+      this.db.prepare("INSERT INTO session_handoff_pending VALUES(1,?,?,?,?,?,?,NULL)")
+        .run(id, packet.session.id, origin, sourceKey, claimKey, JSON.stringify(packet));
+      // The older app has no ownership checks. It may read a notebook with
+      // empty handoff tables, but must refuse a notebook with handoff history.
+      this.db.exec("PRAGMA user_version=" + HANDOFF_SCHEMA_VERSION);
+      return { id, origin, sourceKey, claimKey, packet, offered: false };
+    });
+  }
+  markHandoffSending({ id, accountId }: { id: unknown; accountId: unknown }): PendingSessionHandoff {
+    if (!isHandoffId(id) || !isHandoffAccountId(accountId)) throw new Error("Link the destination Forma workspace first.");
+    return this.transaction(() => {
+      const pending = this.currentHandoff();
+      if (!pending || pending.id !== id) throw new Error("This web handoff is no longer active.");
+      if (pending.accountId && pending.accountId !== accountId) throw new Error("The linked Forma workspace changed.");
+      this.db.prepare("UPDATE session_handoff_pending SET account_id=? WHERE slot=1").run(accountId);
+      return { ...pending, offered: true, accountId };
+    });
+  }
+  completeHandoff({ id, sessionId }: { id: unknown; sessionId: unknown }, now = Date.now()): LocalSnapshot {
+    if (!isHandoffId(id) || typeof sessionId !== "string" || !sessionId || sessionId.length > 100)
+      throw new Error("The web receipt does not identify a practice session.");
+    return this.transaction(() => {
+      const before = this.snapshot();
+      if (this.db.prepare("SELECT 1 FROM session_handoff_completed WHERE id=? AND session_id=?").get(id, sessionId)) return before;
+      const pending = this.currentHandoff();
+      if (!pending?.offered || pending.id !== id || pending.packet.session.id !== sessionId ||
+        before.data.session?.id !== sessionId || before.data.session.runningSince !== null || before.data.session.phase !== "focus")
+        throw new Error("The web receipt does not match this paused session.");
+      const { data, state } = before;
+      function withoutSession<T extends {sessionId?: string}>(item: T): T {
+        if (item.sessionId !== sessionId) return item;
+        const next = { ...item };
+        delete next.sessionId;
+        return next;
+      }
+      this.db.prepare("INSERT INTO session_handoff_completed VALUES(?,?)").run(id, sessionId);
+      this.db.prepare("DELETE FROM session_handoff_pending WHERE slot=1").run();
+      return this.persist({
+        data: {
+          ...data,
+          session: null,
+          ...(data.contests ? { contests: data.contests.map(contest => ({
+            ...contest,
+            problems: contest.problems.map(problem => problem.upsolve?.sessionId === sessionId
+              ? { ...problem, upsolve: withoutSession(problem.upsolve) } : problem),
+          })) } : {}),
+        },
+        state: {
+          ...state,
+          lifecycle: "ready",
+          localTests: "unknown",
+          platform: "unknown",
+          learning: "unrecorded",
+          ...(state.desk ? { desk: state.desk.map(withoutSession) } : {}),
+          ...(state.followups ? { followups: state.followups.filter(row => row.id !== sessionId) } : {}),
+          submissions: state.submissions.map(withoutSession),
+        },
+      }, before.revision + 1, now);
+    });
+  }
+  cancelHandoff({ id, terminal }: { id: unknown; terminal: unknown }): LocalSnapshot {
+    if (!isHandoffId(id) || typeof terminal !== "boolean") throw new Error("The cancellation did not identify a web handoff.");
+    return this.transaction(() => {
+      const pending = this.currentHandoff();
+      if (pending) {
+        if (pending.id !== id) throw new Error("This web handoff is no longer active.");
+        if (pending.offered && !terminal) throw new Error("Confirm cancellation on the web before resuming this session.");
+        this.db.prepare("DELETE FROM session_handoff_pending WHERE slot=1").run();
+      }
+      return this.snapshot();
+    });
   }
   reconcile(now=Date.now()) {
     const before=this.snapshot();
@@ -98,6 +250,8 @@ export class CompanionStore {
         if (previous.fingerprint !== fingerprint) throw new Error('This command ID was already used for a different action.');
         return this.snapshot();
       }
+      if (["start", "resume", "finish", "reflect", "plan-select", "desk-add", "desk-remove"].includes(command.type))
+        this.assertNoPendingHandoff();
       const before=this.snapshot();
       if (!deskCapture) {
         const journal=this.db.prepare('SELECT COALESCE(SUM(length(CAST(body AS BLOB))),0) AS bytes FROM observations').get()!;
@@ -169,7 +323,9 @@ export class CompanionStore {
     return valid;
   }
   importNotebook(json:string, now=Date.now()) {
+    this.assertNoPendingHandoff("Finish or cancel the web handoff before importing a notebook.");
     const imported=decodeBackup(json);
+    this.assertSessionWasNotTransferred(imported);
     const before=this.snapshot();
     if (before.data.session || imported.session) throw new Error('Finish open sessions before importing. Keep the original backup to preserve an unfinished session.');
     const merged=mergeWorkspaces(emptyData(),before.data,imported);
@@ -186,7 +342,10 @@ export class CompanionStore {
       return saved;
     });
   }
-  exportNotebook() { return encodeBackup(this.snapshot().data); }
+  exportNotebook() {
+    this.assertNoPendingHandoff("Finish or cancel the web handoff before exporting this notebook.");
+    return encodeBackup(this.snapshot().data);
+  }
   /** Called only by TutorStore.approve, after the renderer shows a reviewed proposal. */
   approveTutorLearning(proposal:TutorProposal,now:number) {
     return this.transaction(()=>{
@@ -216,6 +375,7 @@ export class CompanionStore {
     });
   }
   exportCompanion() {
+    this.assertNoPendingHandoff("Finish or cancel the web handoff before exporting this notebook.");
     return JSON.stringify({format:'forma-companion',version:1,exportedAt:new Date().toISOString(),...this.snapshot(),preferences:this.preferences(),observations:this.db.prepare('SELECT * FROM observations').all(),commands:this.db.prepare('SELECT * FROM applied_commands').all(),outbox:this.db.prepare('SELECT * FROM outbox').all(),recoveries:this.db.prepare('SELECT * FROM recoveries').all()},null,2);
   }
 }
