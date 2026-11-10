@@ -17,6 +17,7 @@ interface DeskHintFixture {
   loseNextSendAcknowledgement: boolean;
   finish(text: string): void;
   recordRun(run: ChallengeRunReceipt): void;
+  recordRuns(runs: ChallengeRunReceipt[]): void;
   switchProblem(): void;
 }
 
@@ -131,9 +132,12 @@ async function openDesk(page: Page, options: { contestMode?: boolean; timed?: bo
         notify(turn);
       },
       recordRun(run) {
+        controls.recordRuns([run]);
+      },
+      recordRuns(runs) {
         const turn = turns.findLast(row => row.action === "challenge-assumption" && row.status === "completed");
         if (!turn) throw new Error("A challenge must be completed before recording a run.");
-        turn.challengeRuns = [...(turn.challengeRuns ?? []), run];
+        turn.challengeRuns = [...(turn.challengeRuns ?? []), ...runs];
         notify(turn);
       },
       switchProblem() {
@@ -502,7 +506,7 @@ test("another challenge case keeps its own runs and feedback when the Desk reope
     question: "Which endpoint gets inspected?", cases,
   })), [first, second]);
   const verifier = card.getByRole("region", { name: "Verify in VS Code", exact: true });
-  const feedback = card.getByRole("combobox", { name: "How useful was this case?", exact: true });
+  const feedback = card.getByRole("combobox", { name: /^How useful was case [12]\?$/ });
   await expect(card.getByText(first.reason, { exact: true })).toBeVisible();
   await expect(card.getByText(second.reason, { exact: true })).toHaveCount(0);
   const receipt: ChallengeRunReceipt = {
@@ -573,4 +577,76 @@ test("another challenge case keeps its own runs and feedback when the Desk reope
   expect(saved.payload.text).toContain(`Solution search.cpp\nSource SHA-256 ${"a".repeat(64)}`);
   expect(saved.payload.text).toContain("Reference output\n2\n");
   expect(saved.payload.text).toContain("Solution output\n0\n");
+});
+
+test("a counterexample search opens the shortest difference and keeps every case inspectable", async ({ page }) => {
+  await openDesk(page, { timed: true });
+  await page.getByRole("button", { name: "Explain my idea", exact: true }).click();
+  const card = page.getByRole("region", { name: "Explain my idea", exact: true });
+  await card.getByRole("textbox", { name: "Your explanation", exact: true }).fill("My loop always reaches the last element.");
+  await card.getByRole("button", { name: "Outline my idea", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => window.__deskHintFixture.sends.length)).toBe(1);
+  await page.evaluate(() => window.__deskHintFixture.finish(JSON.stringify({
+    approach: "Scan the interval.", assumptions: ["The final element is visited."], uncertainty: "",
+  })));
+  await card.getByRole("radio", { name: "Challenge assumption 1", exact: true }).check();
+  await card.getByRole("button", { name: "Challenge this assumption", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => window.__deskHintFixture.sends.length)).toBe(2);
+  const cases = [
+    { input: "1 1 1\n", expectedOutput: "1", reason: "This is the captured sample." },
+    { input: "1 2 2", expectedOutput: "2", reason: "The right endpoint contains the target." },
+    { input: "0 1 0", expectedOutput: "0", reason: "The left endpoint contains the target." },
+  ];
+  await page.evaluate(cases => window.__deskHintFixture.finish(JSON.stringify({
+    observation: "The endpoint comparison affects the final element.",
+    question: "Which endpoint does the loop visit?", cases,
+  })), cases);
+  const verifier = card.getByRole("region", { name: "Verify in VS Code", exact: true });
+  await expect(verifier.getByText("Forma: Find a Counterexample", { exact: true })).toBeVisible();
+  const run: ChallengeRunReceipt = {
+    id: "batch-case-1", batchId: "search-one", caseId: "case-1", input: cases[0].input, expectedOutput: "1\n",
+    expectedSource: "reference", output: "0\n", outcome: "mismatch", diagnostic: "",
+    sourceHash: "a".repeat(64), fileName: "search.cpp", ranAt: "2026-11-08T08:10:00.000Z",
+    reference: { fileName: "reference.cpp", sourceHash: "b".repeat(64) },
+  };
+  const firstBatch: ChallengeRunReceipt[] = [
+    run,
+    { ...run, id: "batch-case-2", caseId: "case-2", input: cases[1].input, expectedOutput: "2\n", output: "-1\n" },
+    { ...run, id: "batch-case-3", caseId: "case-3", input: cases[2].input, expectedOutput: "", output: "", outcome: "timeout", referenceFailed: true },
+  ];
+  await page.evaluate(runs => window.__deskHintFixture.recordRuns(runs), firstBatch);
+  const batch = verifier.getByRole("region", { name: "Latest counterexample search", exact: true });
+  await expect(batch.getByRole("status")).toHaveText("3 cases tried · 0 matched · 2 differed · 1 could not be compared");
+  const shortest = batch.getByRole("region", { name: "Shortest differing input", exact: true });
+  const shortestResult = shortest.getByRole("group", { name: "Case 2 result", exact: true });
+  await expect(shortestResult.getByText("1 2 2", { exact: true })).toBeVisible();
+  await expect(shortestResult.getByText(/input validity unverified/i)).toBeVisible();
+  await expect(shortestResult.getByRole("group", { name: "Reference output", exact: true }).getByText("2", { exact: true })).toBeVisible();
+  await expect(shortestResult.getByRole("group", { name: "Solution output", exact: true }).getByText("-1", { exact: true })).toBeVisible();
+  await expect(batch.getByRole("group", { name: "Case 1 result", exact: true })).toBeHidden();
+  await batch.getByText("Other case results (2)", { exact: true }).click();
+  await expect(batch.getByRole("group", { name: "Case 1 result", exact: true }).getByText(/captured sample input/i)).toBeVisible();
+  await expect(batch.getByRole("group", { name: "Case 3 result", exact: true }).getByText("Reference reached the time limit", { exact: true })).toBeVisible();
+  await expect(card.getByRole("combobox", { name: "How useful was case 1?", exact: true })).toHaveValue("");
+  expect(await page.evaluate(() => window.__deskHintFixture.commands)).toEqual([]);
+  await shortest.getByRole("button", { name: "Save difference to Desk", exact: true }).click();
+  await expect(shortest.getByRole("button", { name: "Difference saved", exact: true })).toBeDisabled();
+  expect(await page.evaluate(() => window.__deskHintFixture.commands)).toMatchObject([
+    { type: "desk-add", payload: { kind: "counterexample", text: expect.stringContaining("Input validity unverified\n\nInput\n1 2 2") } },
+  ]);
+
+  const latestBatch: ChallengeRunReceipt[] = cases.map((candidate, index) => ({
+    ...run, id: `rerun-case-${index + 1}`, batchId: "search-two", caseId: `case-${index + 1}`,
+    input: candidate.input, ranAt: "2026-11-08T08:11:00.000Z",
+    outcome: index === 2 ? "timeout" : "match", expectedOutput: `${index + 1}\n`, output: index === 2 ? "" : `${index + 1}\n`,
+  }));
+  await page.evaluate(runs => window.__deskHintFixture.recordRuns(runs), latestBatch);
+  await expect(batch.getByRole("status")).toHaveText("3 cases tried · 2 matched · 0 differed · 1 could not be compared");
+  await expect(batch.getByText("No differing output among compared cases.", { exact: true })).toBeVisible();
+  await expect(shortest).toHaveCount(0);
+  await batch.getByText("Case results (3)", { exact: true }).click();
+  const solutionTimeout = batch.getByRole("group", { name: "Case 3 result", exact: true });
+  await expect(solutionTimeout.getByText("Solution reached the time limit", { exact: true })).toBeVisible();
+  await expect(solutionTimeout.getByRole("group", { name: "Reference output", exact: true }).getByText("3", { exact: true })).toBeVisible();
+  await expect(solutionTimeout.getByRole("group", { name: "Solution output", exact: true })).toHaveCount(0);
 });

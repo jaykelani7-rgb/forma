@@ -9,7 +9,7 @@ import { buildProviderMessages, hintLevelForAction, policyInstructions } from '.
 import { parseSharedCode, parseStatementInput, providerContext, tutorHash, validateStatement } from '../packages/tutor/context';
 import { readChallengeRankingDataset } from '../packages/tutor/challenge-ranking';
 import type { SharedCode, StatementInput, TutorAction, TutorProviderStatus, TutorSendInput, TutorTurn } from '../packages/tutor/types';
-import type { ChallengeRunRequest, ChallengeRunSubmission } from '../packages/tutor/challenge-run';
+import { CHALLENGE_RUN_LIMIT, type ChallengeReferenceBatchSubmission, type ChallengeRunRequest, type ChallengeRunSubmission } from '../packages/tutor/challenge-run';
 
 const now=Date.now(),url='https://codeforces.com/contest/4/problem/A';
 const statement:StatementInput={identity:'contest:4:A',url,title:'Watermelon',description:'Split a positive integer into two positive even integers.',input:'A positive integer w, 1 <= w <= 100.',output:'Print YES if a split exists, otherwise NO.',constraints:'1 <= w <= 100',samples:[{input:'8',output:'YES'}],explanation:'4 + 4 is a valid split.',complete:true,source:'manual'};
@@ -229,6 +229,83 @@ test('reference challenge runs keep scoped output and metadata separate from the
     const ranking = readChallengeRankingDataset(store.tutor.exportChallengeRanking());
     assert.deepEqual(ranking.groups[0].cases[0].runs, [{ outcome: 'mismatch', expectedSource: 'reference' }]);
     assert.doesNotMatch(JSON.stringify(ranking), /private-reference\.cpp|b{64}/);
+  } finally {
+    store.close();
+  }
+});
+
+test('reference batches atomically record every reviewed case and retry without duplicating runs', () => {
+  const { store } = fixture();
+  try {
+    const context = store.tutor.deskIdeaReview({ problemId: store.snapshot().state.problemId }, deskProvider, now);
+    assert.ok(context.statement && context.conversationId);
+    const ids = { turnId: 'batch-challenge', requestId: 'batch-request' };
+    show(store, store.tutor.prepare({
+      ...ids, conversationId: context.conversationId, action: 'challenge-assumption', statementId: context.statement.id,
+      codeId: null, noteIds: [], deskIdea: context.target,
+      text: JSON.stringify({ approach: 'Try even weights.', assumption: 'Even weights can be split.', uncertainty: '' }),
+    }, deskProvider.model, now), JSON.stringify({
+      observation: 'Consider smaller weights.', question: 'What does the program print?',
+      cases: [
+        { input: '8\n', expectedOutput: 'YES', reason: 'Check a statement sample.' },
+        { input: '2\n', expectedOutput: 'NO', reason: 'The smallest even weight.' },
+        { input: '4\n', expectedOutput: 'YES', reason: 'The smallest splittable weight.' },
+      ],
+    }));
+    store.tutor.exposed(ids);
+    store.tutor.updateDeskChallenge({ ...ids, caseId: 'case-2' }, 'select', now + 200);
+    const target = { fileUri: 'file:///practice/a.cpp', workspaceId: 'workspace-one', clientId: 'vscode-one' };
+    const review = { operation: 'review-reference-batch', target } as const;
+    const reviewed = store.tutor.challengeRun(review, now + 201);
+    assert.ok('batchPlan' in reviewed);
+    assert.deepEqual(reviewed.batchPlan.cases, [
+      { caseId: 'case-1', input: '8\n' }, { caseId: 'case-2', input: '2\n' }, { caseId: 'case-3', input: '4\n' },
+    ]);
+    const batch: ChallengeReferenceBatchSubmission = {
+      ...ids, id: 'reference-batch', recoveryEpoch: reviewed.batchPlan.recoveryEpoch,
+      sourceHash: 'a'.repeat(64), reference: { fileName: 'reference.cpp', sourceHash: 'b'.repeat(64) },
+      cases: [
+        { caseId: 'case-1', output: 'YES\n', expectedOutput: 'YES', outcome: 'exited' },
+        { caseId: 'case-2', output: 'YES\n', expectedOutput: 'NO', outcome: 'exited' },
+        { caseId: 'case-3', output: '', expectedOutput: '', outcome: 'timeout', referenceFailed: true },
+      ],
+    };
+    const record = (submission: ChallengeReferenceBatchSubmission, at = now + 202) =>
+      store.tutor.challengeRun({ operation: 'record-reference-batch', target, batch: submission }, at);
+    assert.throws(() => record({ ...batch, cases: batch.cases.slice(0, 2) }), /reviewed cases in order/);
+    assert.throws(() => record({ ...batch, cases: [...batch.cases].reverse() }), /reviewed cases in order/);
+    assert.throws(() => record({ ...batch, recoveryEpoch: 'expired' }), /notebook was restored/);
+    assert.deepEqual(store.tutor.deskChallengeRuns(ids), []);
+    const saved = record(batch);
+    assert.ok('batchReceipts' in saved);
+    assert.deepEqual(saved.batchReceipts.map(run => [run.caseId, run.outcome, run.referenceFailed ?? false]), [
+      ['case-1', 'match', false], ['case-2', 'mismatch', false], ['case-3', 'timeout', true],
+    ]);
+    assert.deepEqual(record(batch, now + 203), saved);
+    assert.throws(() => record({ ...batch, sourceHash: 'c'.repeat(64) }), /different saved results/);
+    assert.deepEqual(store.tutor.deskChallengeRuns(ids), saved.batchReceipts);
+    const ranking = store.tutor.exportChallengeRanking();
+    assert.deepEqual(ranking.groups[0].cases.map(candidate => candidate.runs), [
+      [{ expectedSource: 'reference', outcome: 'match' }], [{ expectedSource: 'reference', outcome: 'mismatch' }], [],
+    ]);
+
+    const backup = store.backups.export({ scope: 'companion', includeTutor: true }, now + 204);
+    assert.deepEqual(validateLocalBackup(backup, store.snapshot().data).backup.tutor!.turns[0].challengeRuns, saved.batchReceipts);
+    const partial = JSON.parse(backup);
+    partial.tutor.turns[0].challengeRuns.pop();
+    assert.throws(() => store.backups.preview(JSON.stringify(partial)), /saved batch does not match all challenge cases/);
+
+    for (let index = 1; index < CHALLENGE_RUN_LIMIT; index++) {
+      store.tutor.challengeRun({ operation: 'record', target, run: {
+        ...ids, id: `single-run-${index}`, caseId: 'case-1', recoveryEpoch: batch.recoveryEpoch, sourceHash: batch.sourceHash,
+        outcome: 'exited', diagnostic: '', output: 'YES', expectedOutput: 'YES', expectedSource: 'statement-sample',
+      } }, now + 205 + index);
+    }
+    assert.throws(() => store.tutor.challengeRun(review, now + 300), /local run limit/);
+    const before = store.tutor.deskChallengeRuns(ids);
+    assert.throws(() => record({ ...batch, id: 'over-limit-batch' }), /local run limit/);
+    assert.deepEqual(store.tutor.deskChallengeRuns(ids), before);
+    assert.deepEqual(record(batch, now + 301), saved);
   } finally {
     store.close();
   }

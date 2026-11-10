@@ -5,7 +5,11 @@ import { canonicalProblemIdentity, normalizeCodeforcesIdentity } from '../../../
 import { parseSharedCode, parseStatementInput, tutorFields, tutorId, tutorObject, tutorText, tutorTime, validateStatement, TUTOR_BUDGET } from '../../../packages/tutor/context';
 import { hintLevelForAction, parseTutorAction, parseTutorDraftAction } from '../../../packages/tutor/policy';
 import { readIdeaChallenge } from '../../../packages/tutor/idea';
-import { CHALLENGE_RUN_LIMIT, FIRST_CHALLENGE_CASE_ID, challengeOutputEqual, challengeSampleOutput, readChallengeCaseId, readChallengeFeedback, readChallengeRunReceipt } from '../../../packages/tutor/challenge-run';
+import {
+  CHALLENGE_RUN_LIMIT, FIRST_CHALLENGE_CASE_ID, challengeOutputEqual, challengeSampleOutput,
+  readChallengeCaseId, readChallengeFeedback, readChallengeReferenceBatchReceipts, readChallengeRunReceipt,
+  type ChallengeRunReceipt,
+} from '../../../packages/tutor/challenge-run';
 import { isDeskIdeaAction } from '../../../packages/tutor/types';
 import type { SharedCode, StatementSnapshot, TutorContext, TutorConversation, TutorProposal, TutorSettings, TutorTurn } from '../../../packages/tutor/types';
 import type { BackupRestorePreview } from '../../../packages/setup/status';
@@ -92,6 +96,7 @@ function turn(v:unknown):TutorTurn {
       if (!t.exposed || !cases.length) throw new Error('Saved runs require a reviewed challenge case.');
       t.challengeRuns = unique(list(o.challengeRuns, CHALLENGE_RUN_LIMIT * cases.length, readChallengeRunReceipt), run => run.id);
       const counts = new Map<string, number>();
+      const batches = new Map<string, ChallengeRunReceipt[]>();
       for (const run of t.challengeRuns) {
         const caseId = run.caseId ?? FIRST_CHALLENGE_CASE_ID;
         const item = byId.get(caseId);
@@ -101,9 +106,20 @@ function turn(v:unknown):TutorTurn {
         const count = (counts.get(caseId) ?? 0) + 1;
         if (count > CHALLENGE_RUN_LIMIT) throw new Error('A challenge case exceeds the local run limit.');
         counts.set(caseId, count);
+        if (run.batchId) {
+          const batch = batches.get(run.batchId) ?? [];
+          batch.push(run);
+          batches.set(run.batchId, batch);
+        }
         if (run.outcome === 'match' || run.outcome === 'mismatch') {
           const matches = challengeOutputEqual(run.output, run.expectedOutput);
           if (matches !== (run.outcome === 'match')) throw new Error('A saved run has inconsistent output evidence.');
+        }
+      }
+      for (const batch of batches.values()) {
+        const receipts = readChallengeReferenceBatchReceipts(batch);
+        if (receipts.length !== cases.length || receipts.some((run, index) => run.caseId !== cases[index].id)) {
+          throw new Error('A saved batch does not match all challenge cases in order.');
         }
       }
     }

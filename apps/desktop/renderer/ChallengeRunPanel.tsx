@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, Check, Code2, RotateCcw } from "lucide-react";
 import {
-  FIRST_CHALLENGE_CASE_ID, readChallengeCaseState,
+  challengeOutputEqual, FIRST_CHALLENGE_CASE_ID, readChallengeCaseState,
   type ChallengeCaseState, type ChallengeFeedbackLabel, type ChallengeRunReceipt,
 } from "../../../packages/tutor/challenge-run";
-import type { IdeaChallenge, TutorTurn } from "../../../packages/tutor/types";
+import type { IdeaChallenge, StatementSnapshot, TutorTurn } from "../../../packages/tutor/types";
 import type { FormaBridge } from "./api";
 import "./challenge-run-panel.css";
 
@@ -28,12 +28,34 @@ const feedbackOptions = {
   "invalid-input": "Invalid input",
 } satisfies Record<ChallengeFeedbackLabel, string>;
 
-function evidenceText(run: ChallengeRunReceipt) {
+type StatementSamples = StatementSnapshot["samples"];
+
+function inputValidity(input: string, samples: StatementSamples) {
+  return samples.some(sample => challengeOutputEqual(sample.input, input))
+    ? "Captured sample input"
+    : "Input validity unverified";
+}
+
+function runOutcome(run: ChallengeRunReceipt) {
+  if (!run.reference) return labels[run.outcome];
+  const program = run.referenceFailed ? "Reference" : "Solution";
+  switch (run.outcome) {
+    case "match": return "Output matched reference";
+    case "mismatch": return "Output differed from reference";
+    case "compile-error": return `${program} compilation failed`;
+    case "runtime-error": return `${program} stopped with an error`;
+    case "timeout": return `${program} reached the time limit`;
+    case "output-limit": return `${program} reached the output limit`;
+  }
+}
+
+function evidenceText(run: ChallengeRunReceipt, samples: StatementSamples) {
   if (run.reference) {
     return [
       `Compared in VS Code · ${run.ranAt}`,
       `Solution ${run.fileName}\nSource SHA-256 ${run.sourceHash}`,
       `Reference ${run.reference.fileName}\nSource SHA-256 ${run.reference.sourceHash}`,
+      ...(run.batchId ? [inputValidity(run.input, samples)] : []),
       `Input\n${run.input}`,
       `Reference output\n${run.expectedOutput}`,
       `Solution output\n${run.output}`,
@@ -62,25 +84,27 @@ function ReferenceOutput({ label, fileName, sourceHash, output }: {
   </div>;
 }
 
-function RunResult({ run, saved, saving, disabled, onSave }: {
+function RunResult({ run, saved, saving, disabled, onSave, batchCase }: {
   run: ChallengeRunReceipt;
   saved: boolean;
   saving: boolean;
   disabled: boolean;
   onSave: (run: ChallengeRunReceipt) => Promise<void>;
+  batchCase?: { label: string; validity: string };
 }) {
   const compared = run.outcome === "match" || run.outcome === "mismatch";
   const { reference } = run;
-  const outcome = reference && compared
-    ? run.outcome === "match" ? "Output matched reference" : "Output differed from reference"
-    : labels[run.outcome];
   const saveLabel = reference ? "Save difference to Desk" : "Save failing case to Desk";
   const savedLabel = reference ? "Difference saved" : "Failing case saved";
-  return <div className="challenge-run-result">
-    <p className="challenge-run-outcome"><strong>{outcome}</strong> <span>{expectations[run.expectedSource]}</span></p>
+  return <div className="challenge-run-result" role={batchCase ? "group" : undefined} aria-label={batchCase?.label}>
+    {batchCase && <div className="challenge-batch-input">
+      <p><strong>{batchCase.label}</strong> · {batchCase.validity}</p>
+      <pre tabIndex={0}>{run.input || "(empty)"}</pre>
+    </div>}
+    <p className="challenge-run-outcome"><strong>{runOutcome(run)}</strong> <span>{expectations[run.expectedSource]}</span></p>
     {reference ? <div className="challenge-run-outputs">
-      <ReferenceOutput label={compared ? "Reference output" : "Reference source"}
-        {...reference} output={compared ? run.expectedOutput : undefined} />
+      <ReferenceOutput label={run.referenceFailed ? "Reference source" : "Reference output"}
+        {...reference} output={run.referenceFailed ? undefined : run.expectedOutput} />
       <ReferenceOutput label={compared ? "Solution output" : "Solution source"}
         fileName={run.fileName} sourceHash={run.sourceHash} output={compared ? run.output : undefined} />
     </div> : compared && <div className="challenge-run-outputs">
@@ -102,6 +126,41 @@ function RunResult({ run, saved, saving, disabled, onSave }: {
   </div>;
 }
 
+function CounterexampleBatch({ runs, samples, savedEvidence, saving, disabled, onSave }: {
+  runs: ChallengeRunReceipt[];
+  samples: StatementSamples;
+  savedEvidence: ReadonlySet<string>;
+  saving: string | null;
+  disabled: boolean;
+  onSave: (run: ChallengeRunReceipt) => Promise<void>;
+}) {
+  const differences = runs.filter(run => run.outcome === "mismatch");
+  const matches = runs.filter(run => run.outcome === "match").length;
+  const unavailable = runs.length - matches - differences.length;
+  const shortest = differences.reduce<ChallengeRunReceipt | undefined>((best, run) =>
+    !best || run.input.length < best.input.length ? run : best, undefined);
+  const otherRuns = runs.filter(run => run.id !== shortest?.id);
+  function result(run: ChallengeRunReceipt) {
+    const caseNumber = (run.caseId ?? FIRST_CHALLENGE_CASE_ID).slice("case-".length);
+    return <RunResult key={run.id} run={run} saved={savedEvidence.has(evidenceText(run, samples))}
+      saving={saving === run.id} disabled={disabled} onSave={onSave}
+      batchCase={{ label: `Case ${caseNumber} result`, validity: inputValidity(run.input, samples) }} />;
+  }
+  return <section className="challenge-batch" aria-label="Latest counterexample search">
+    <h5>Latest counterexample search</h5>
+    <p role="status">{runs.length} {runs.length === 1 ? "case" : "cases"} tried · {matches} matched · {differences.length} differed
+      {unavailable > 0 && ` · ${unavailable} could not be compared`}</p>
+    {shortest ? <section className="challenge-batch-shortest" aria-label="Shortest differing input">
+      <h6>Shortest differing input</h6>
+      {result(shortest)}
+    </section> : <p>{matches > 0 ? "No differing output among compared cases." : "No cases could be compared."}</p>}
+    {otherRuns.length > 0 && <details className="challenge-run-history">
+      <summary>{shortest ? "Other case results" : "Case results"} ({otherRuns.length})</summary>
+      {otherRuns.map(result)}
+    </details>}
+  </section>;
+}
+
 export function ChallengeRunPanel({ bridge, turn, challenge, blocked, savedEvidence, onSave }: {
   bridge: FormaBridge;
   turn: TutorTurn;
@@ -111,6 +170,7 @@ export function ChallengeRunPanel({ bridge, turn, challenge, blocked, savedEvide
   onSave: (text: string) => Promise<boolean>;
 }) {
   const { id: turnId, requestId } = turn;
+  const samples = turn.context.statement?.samples ?? [];
   const [state, setState] = useState<ChallengeCaseState>(() => ({
     caseId: turn.challengeCaseId ?? challenge.cases[0]?.id ?? null,
     runs: turn.challengeRuns ?? [],
@@ -170,7 +230,7 @@ export function ChallengeRunPanel({ bridge, turn, challenge, blocked, savedEvide
   }
 
   async function save(run: ChallengeRunReceipt) {
-    const text = evidenceText(run);
+    const text = evidenceText(run, samples);
     if (blocked || saveLock.current || updateLock.current || savedEvidence.has(text)) return;
     saveLock.current = true;
     setSaving(run.id);
@@ -189,18 +249,21 @@ export function ChallengeRunPanel({ bridge, turn, challenge, blocked, savedEvide
   if (!candidate) return null;
   const disabled = blocked || updating || !!saving;
   const label = state.feedback.find(item => item.caseId === candidate.id)?.label ?? "";
-  const [latest, ...history] = state.runs
-    .filter(run => (run.caseId ?? FIRST_CHALLENGE_CASE_ID) === candidate.id)
+  const latestBatchId = state.runs.findLast(run => run.batchId)?.batchId;
+  const latestBatch = latestBatchId ? state.runs.filter(run => run.batchId === latestBatchId) : [];
+  const caseRuns = state.runs.filter(run => (run.caseId ?? FIRST_CHALLENGE_CASE_ID) === candidate.id);
+  const [latest, ...history] = caseRuns
+    .filter(run => !latestBatchId || run.batchId !== latestBatchId)
     .reverse();
-  const compared = latest?.outcome === "match" || latest?.outcome === "mismatch";
+  const compared = caseRuns.some(run => run.outcome === "match" || run.outcome === "mismatch");
   return <section className="challenge-run-panel" aria-label="Verify in VS Code">
     <div className="desk-idea-example">
       <div className="challenge-case-heading">
-        <span className="eyebrow">{compared ? "SUGGESTED CASE" : "SUGGESTED CASE · UNVERIFIED"}</span>
+        <span className="eyebrow">{compared ? "SUGGESTED CASE" : "SUGGESTED CASE · OUTPUT UNVERIFIED"}</span>
         {challenge.cases.length > 1 && <span role="status">Case {index + 1} of {challenge.cases.length}</span>}
       </div>
       {candidate.reason !== challenge.observation && <p>{candidate.reason}</p>}
-      <span>Input</span><pre tabIndex={0}>{candidate.input || "(empty)"}</pre>
+      <span>Input · {inputValidity(candidate.input, samples)}</span><pre tabIndex={0}>{candidate.input || "(empty)"}</pre>
       {candidate.expectedOutput !== null && <><span>Tutor’s suggested output</span><pre tabIndex={0}>{candidate.expectedOutput || "(empty)"}</pre></>}
       {challenge.cases.length > 1 && <div className="challenge-case-actions">
         {index > 0 && <button type="button" className="desk-idea-quiet" disabled={disabled}
@@ -216,15 +279,18 @@ export function ChallengeRunPanel({ bridge, turn, challenge, blocked, savedEvide
     <div className="challenge-run-heading"><Code2 size={15} aria-hidden="true"/><h4>Verify in VS Code</h4></div>
     <p>With your saved C++ solution open, choose <strong>Forma: Run Challenge Case</strong> in VS Code to run the case shown here.</p>
     <p>Choose <strong>Forma: Run Challenge with Reference</strong> to compare with a C++ reference solution you select.</p>
-    {latest && <RunResult run={latest} saved={savedEvidence.has(evidenceText(latest))}
+    <p>Choose <strong>Forma: Find a Counterexample</strong> to compare up to three suggested inputs with a reference solution you select.</p>
+    {latestBatchId && <CounterexampleBatch key={latestBatchId} runs={latestBatch} samples={samples}
+      savedEvidence={savedEvidence} saving={saving} disabled={disabled} onSave={save} />}
+    {latest && <RunResult run={latest} saved={savedEvidence.has(evidenceText(latest, samples))}
       saving={saving === latest.id} disabled={disabled} onSave={save} />}
     {history.length > 0 && <details className="challenge-run-history" key={candidate.id}>
       <summary>Earlier runs ({history.length})</summary>
-      {history.map(run => <RunResult key={run.id} run={run} saved={savedEvidence.has(evidenceText(run))}
+      {history.map(run => <RunResult key={run.id} run={run} saved={savedEvidence.has(evidenceText(run, samples))}
         saving={saving === run.id} disabled={disabled} onSave={save} />)}
     </details>}
     <label className="challenge-case-feedback">
-      <span>How useful was this case?</span>
+      <span>{challenge.cases.length > 1 ? `How useful was case ${index + 1}?` : "How useful was this case?"}</span>
       <select value={label} disabled={disabled} onChange={event => void update({
         caseId: candidate.id, label: event.target.value ? event.target.value as ChallengeFeedbackLabel : null,
       })}>

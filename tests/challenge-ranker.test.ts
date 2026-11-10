@@ -34,6 +34,12 @@ test("training learns within challenges and never reads holdout labels", () => {
   assert.equal(report.methods.trained?.firstCaseTargetedMismatchRate, 2 / 3);
   assert.equal(report.methods.trained?.noCandidate, 1);
   assert.equal(report.challengesWithPositiveCase, 2);
+  assert.deepEqual(report.searchEffort, {
+    scoredChallenges: 3, unscoredChallenges: 0,
+    original: { found: 2, exhausted: 1, firstMismatchAt: [1, 1, 0], meanCasesUntilMismatch: 1.5, meanCasesAttempted: 1 },
+    shortestFirst: { found: 2, exhausted: 1, firstMismatchAt: [0, 2, 0], meanCasesUntilMismatch: 2, meanCasesAttempted: 4 / 3 },
+    trained: { found: 2, exhausted: 1, firstMismatchAt: [2, 0, 0], meanCasesUntilMismatch: 1, meanCasesAttempted: 2 / 3 },
+  });
 
   const relabeled = structuredClone(benchmark);
   for (const group of relabeled.groups.filter(group => group.split === "holdout")) {
@@ -42,6 +48,21 @@ test("training learns within challenges and never reads holdout labels", () => {
   const rerun = compareChallengeRanking(relabeled, "targeted");
   assert.deepEqual(rerun.training, report.training);
   assert.equal(rerun.methods.trained?.positiveFirst, 0);
+});
+
+test("search effort counts exhausted cases and keeps partially labeled challenges outside the denominator", () => {
+  const dataset = structuredClone(benchmark);
+  const exhausted = challenge("exhausted", "holdout", true);
+  for (const candidate of exhausted.cases) candidate.targetedMismatch = false;
+  const unknown = challenge("unknown", "holdout", true);
+  unknown.cases[1].targetedMismatch = null;
+  dataset.groups.push(exhausted, unknown);
+  const { searchEffort } = compareChallengeRanking(dataset, "targeted");
+  assert.ok(searchEffort);
+  assert.equal(searchEffort.scoredChallenges, 4);
+  assert.equal(searchEffort.unscoredChallenges, 1);
+  assert.equal(searchEffort.original.exhausted, 2);
+  assert.equal(searchEffort.original.meanCasesAttempted, 5 / 4);
 });
 
 test("practice splits keep repeated problems together and run results do not fill missing feedback", () => {
@@ -65,6 +86,7 @@ test("practice splits keep repeated problems together and run results do not fil
   assert.equal(report.methods.trained, null);
   assert.equal(report.methods.original.unlabeledFirst, split.holdout.length);
   assert.equal(report.methods.original.positiveRateAmongLabeledFirst, null);
+  assert.equal(report.searchEffort, null);
   assert.throws(() => compareChallengeRanking(practice, "targeted"), /explicit feedback/);
 });
 

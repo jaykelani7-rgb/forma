@@ -35,6 +35,8 @@ Use **Try another case** in the Problem Desk to select a different input for the
 
 Use **Forma: Run Challenge with Reference** when you have a separate saved C++ solution you trust. With your linked solution active, choose the reference file from an allowed workspace folder and review both file paths and the selected input. After approval, Forma runs the reference first and uses its successful output to check your solution. The receipt records the reference's filename and source fingerprint.
 
+Use **Forma: Find a Counterexample** to check all the suggested cases for the current challenge together. Choose a saved reference, then review both files and every input in one approval. Forma compiles each file once and checks each case locally. If the reference fails on a case, Forma records that failure and continues to the other cases. The Problem Desk shows which outputs differed, which matched, and which cases could not be compared. If saving is interrupted, open the command again and choose **Save previous result** to retry delivery.
+
 ## Transport and limitations
 
 The desktop owns the single writer. Requests are newline-delimited JSON protocol v1, capped at 64 KiB, authenticated with a pairing credential and identified by stable request/command IDs. The endpoint is a per-user Unix socket on macOS/Linux or a per-user named pipe on Windows. The desktop applies commands before acknowledging its durable local revision. Heartbeats occur at most every 30 seconds when paired and idle. Offline retries use exponential backoff capped at 60 seconds.

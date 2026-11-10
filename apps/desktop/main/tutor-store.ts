@@ -3,10 +3,16 @@ import { randomUUID } from 'node:crypto';
 import { basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { canonicalProblemIdentity } from '../../../packages/core/src/codeforces-identity';
+import { MAX_MESSAGE_BYTES } from '../../../packages/integrations/protocol';
 import { availableTutorNotes, freezeTutorContext, parseSharedCode, TUTOR_BUDGET, tutorFields, tutorHash, tutorId, tutorObject, tutorText, validateStatement } from '../../../packages/tutor/context';
 import { buildProviderMessages, hintLevelForAction, parseTutorAction, parseTutorDraftAction } from '../../../packages/tutor/policy';
 import { IDEA_LIMITS, readIdeaChallenge, readIdeaOutline, readIdeaQuestion } from '../../../packages/tutor/idea';
-import { CHALLENGE_RUN_LIMIT, FIRST_CHALLENGE_CASE_ID, challengeOutputEqual, challengeSampleOutput, parseChallengeRunRequest, readChallengeCaseId, readChallengeFeedback, readChallengeRunReceipt, type ChallengeCaseState, type ChallengeRunPlan, type ChallengeRunReceipt } from '../../../packages/tutor/challenge-run';
+import {
+  CHALLENGE_RUN_LIMIT, FIRST_CHALLENGE_CASE_ID, challengeOutputEqual, challengeSampleOutput, parseChallengeRunRequest,
+  readChallengeCaseId, readChallengeFeedback, readChallengeRunReceipt,
+  type ChallengeCaseState, type ChallengeReferenceBatchPlan, type ChallengeReferenceBatchSubmission,
+  type ChallengeRunPlan, type ChallengeRunReceipt,
+} from '../../../packages/tutor/challenge-run';
 import { challengeRankingFeatures, type ChallengeRankingDataset } from '../../../packages/tutor/challenge-ranking';
 import { isDeskIdeaAction } from '../../../packages/tutor/types';
 import type { DeskHintReview, DeskHintTarget, DeskIdeaReview, IdeaChallengeCase, SharedCode, StatementSnapshot, TutorAction, TutorContextView, TutorConversation, TutorProposal, TutorProviderStatus, TutorSendInput, TutorSettings, TutorStoredView, TutorTurn, TutorUsage, TutorDraft, TutorDraftView, TutorDraftSaveInput, TutorDraftSaveResult } from '../../../packages/tutor/types';
@@ -313,7 +319,51 @@ export class TutorStore {
     this.db.prepare('UPDATE tutor_conversations SET updated_at=?,body=? WHERE id=?').run(stamp, JSON.stringify(updated), updated.id);
     this.quota();
   }
-  challengeRun(input: unknown, now = Date.now()): { plan: ChallengeRunPlan } | { receipt: ChallengeRunReceipt; conversationId: string } {
+
+  private recordChallengeBatch(turn: TutorTurn, cases: IdeaChallengeCase[], batch: ChallengeReferenceBatchSubmission, fileName: string, ranAt: string): ChallengeRunReceipt[] {
+    if (batch.cases.length !== cases.length || batch.cases.some((item, index) => item.caseId !== cases[index].id)) {
+      throw new Error('The batch no longer matches all the reviewed cases in order. Reopen the challenge.');
+    }
+    const batchReceipts = batch.cases.map((item, index) => readChallengeRunReceipt({
+      id: tutorHash(JSON.stringify(['challenge-reference-batch', batch.id, item.caseId])),
+      batchId: batch.id, caseId: item.caseId, input: cases[index].input, expectedOutput: item.expectedOutput,
+      expectedSource: 'reference', reference: batch.reference, sourceHash: batch.sourceHash, fileName, output: item.output,
+      outcome: item.outcome === 'exited'
+        ? challengeOutputEqual(item.output, item.expectedOutput) ? 'match' : 'mismatch'
+        : item.outcome,
+      diagnostic: '', ranAt, ...(item.referenceFailed ? { referenceFailed: true } : {}),
+    }));
+    const runs = turn.challengeRuns ?? [];
+    const previous = runs.filter(run => run.batchId === batch.id);
+    if (previous.length) {
+      if (previous.length !== batchReceipts.length || previous.some((run, index) =>
+        JSON.stringify(readChallengeRunReceipt(run)) !== JSON.stringify({ ...batchReceipts[index], ranAt: run.ranAt }))) {
+        throw new Error('This batch already belongs to different saved results.');
+      }
+      return previous;
+    }
+    if (batchReceipts.some(item => runs.some(run => run.id === item.id))) {
+      throw new Error('A result identifier already belongs to another run.');
+    }
+    this.checkChallengeRunCapacity(runs, cases.map(item => item.id));
+    // Use the largest possible acknowledgement envelope before saving the batch.
+    const response = { version: 1, id: 'x'.repeat(128), ok: true, revision: Number.MAX_SAFE_INTEGER, batchReceipts };
+    if (Buffer.byteLength(JSON.stringify(response)) > MAX_MESSAGE_BYTES) {
+      throw new Error('The batch results exceed the local message limit. Run the cases individually.');
+    }
+    this.writeChallengeTurn({ ...turn, challengeRuns: [...runs, ...batchReceipts] }, ranAt);
+    return batchReceipts;
+  }
+
+  private checkChallengeRunCapacity(runs: ChallengeRunReceipt[], caseIds: string[]) {
+    if (caseIds.some(caseId => runs.filter(item => (item.caseId ?? FIRST_CHALLENGE_CASE_ID) === caseId).length >= CHALLENGE_RUN_LIMIT)) {
+      throw new Error('A case has reached its local run limit. Choose an available case for an individual run or request a new challenge.');
+    }
+  }
+
+  challengeRun(input: unknown, now = Date.now()):
+    { plan: ChallengeRunPlan } | { receipt: ChallengeRunReceipt; conversationId: string } |
+    { batchPlan: ChallengeReferenceBatchPlan } | { batchReceipts: ChallengeRunReceipt[]; conversationId: string } {
     const request = parseChallengeRunRequest(input);
     const { target } = request;
     return this.transaction(() => {
@@ -327,7 +377,7 @@ export class TutorStore {
       if (snapshot.data.session && !sessionId) throw new Error('Return to the problem with the current practice session.');
       const recoveryEpoch = this.draftEpoch();
 
-      if (request.operation === 'review') {
+      if (request.operation === 'review' || request.operation === 'review-reference-batch') {
         const row = this.db.prepare(`SELECT body FROM tutor_turns
           WHERE status='completed' AND json_extract(body,'$.action')='challenge-assumption'
             AND json_extract(body,'$.exposed')=1 AND json_extract(body,'$.context.problemId')=?
@@ -337,25 +387,36 @@ export class TutorStore {
         const turn = decodeTurn(row.body);
         const { cases, samples } = this.activeChallengeCases(turn, snapshot);
         const { caseId, runs } = this.challengeCaseState(turn, cases);
+        const planContext = {
+          turnId: turn.id, requestId: turn.requestId, problemTitle: turn.context.title,
+          assumption: readIdeaQuestion(turn.userText).assumption, recoveryEpoch, sessionId,
+        };
+        if (request.operation === 'review-reference-batch') {
+          if (!cases.length) throw new Error('The current challenge has no suggested case to run.');
+          this.checkChallengeRunCapacity(runs, cases.map(item => item.id));
+          return { batchPlan: { ...planContext, cases: cases.map(item => ({ caseId: item.id, input: item.input })) } };
+        }
         const selected = cases.find(item => item.id === caseId);
         if (!selected) throw new Error('The current challenge has no suggested case to run.');
-        if (runs.filter(item => (item.caseId ?? FIRST_CHALLENGE_CASE_ID) === selected.id).length >= CHALLENGE_RUN_LIMIT) {
-          throw new Error('This case has reached its local run limit. Choose another case or request a new challenge.');
-        }
+        this.checkChallengeRunCapacity(runs, [selected.id]);
         return { plan: {
-          turnId: turn.id, requestId: turn.requestId, caseId: selected.id, problemTitle: turn.context.title,
-          assumption: readIdeaQuestion(turn.userText).assumption, input: selected.input,
-          sampleOutput: challengeSampleOutput(selected.input, samples), recoveryEpoch, sessionId,
+          ...planContext, caseId: selected.id, input: selected.input, sampleOutput: challengeSampleOutput(selected.input, samples),
         } };
       }
 
-      const { run } = request;
-      if (run.recoveryEpoch !== recoveryEpoch) throw new Error('The notebook was restored. Review the challenge again before running it.');
-      const turn = this.readTurn(run.turnId);
-      if (turn.requestId !== run.requestId || !turn.exposed || turn.context.workspaceId !== target.workspaceId) {
+      const submission = request.operation === 'record' ? request.run : request.batch;
+      if (submission.recoveryEpoch !== recoveryEpoch) throw new Error('The notebook was restored. Review the challenge again before running it.');
+      const turn = this.readTurn(submission.turnId);
+      if (turn.requestId !== submission.requestId || !turn.exposed || turn.context.workspaceId !== target.workspaceId) {
         throw new Error('The reviewed challenge no longer matches this solution.');
       }
       const { cases, samples } = this.activeChallengeCases(turn, snapshot);
+      const fileName = basename(fileURLToPath(target.fileUri));
+      const ranAt = new Date(now).toISOString();
+      if (request.operation === 'record-reference-batch') {
+        return { batchReceipts: this.recordChallengeBatch(turn, cases, request.batch, fileName, ranAt), conversationId: turn.conversationId };
+      }
+      const { run } = request;
       const caseId = run.caseId ?? FIRST_CHALLENGE_CASE_ID;
       const selected = cases.find(item => item.id === caseId);
       if (!selected) throw new Error('The reviewed challenge case is no longer available.');
@@ -365,11 +426,11 @@ export class TutorStore {
       }
       const receipt = readChallengeRunReceipt({
         id: run.id, caseId, input, expectedOutput: run.expectedOutput, expectedSource: run.expectedSource,
-        sourceHash: run.sourceHash, fileName: basename(fileURLToPath(target.fileUri)), output: run.output,
+        sourceHash: run.sourceHash, fileName, output: run.output,
         outcome: run.outcome === 'exited'
           ? challengeOutputEqual(run.output, run.expectedOutput) ? 'match' : 'mismatch'
           : run.outcome,
-        diagnostic: run.diagnostic, ranAt: new Date(now).toISOString(),
+        diagnostic: run.diagnostic, ranAt,
         ...(run.reference ? { reference: run.reference } : {}),
       });
       const runs = turn.challengeRuns ?? [];
@@ -381,9 +442,7 @@ export class TutorStore {
         }
         return { receipt: previous, conversationId: turn.conversationId };
       }
-      if (runs.filter(item => (item.caseId ?? FIRST_CHALLENGE_CASE_ID) === caseId).length >= CHALLENGE_RUN_LIMIT) {
-        throw new Error('This case has reached its local run limit. Choose another case or request a new challenge.');
-      }
+      this.checkChallengeRunCapacity(runs, [caseId]);
       this.writeChallengeTurn({ ...turn, challengeRuns: [...runs, receipt] }, receipt.ranAt);
       return { receipt, conversationId: turn.conversationId };
     });
@@ -607,7 +666,7 @@ export class TutorStore {
           id: candidate.id,
           ...challengeRankingFeatures(candidate),
           runs: (turn.challengeRuns ?? [])
-            .filter(run => (run.caseId ?? FIRST_CHALLENGE_CASE_ID) === candidate.id)
+            .filter(run => !run.referenceFailed && (run.caseId ?? FIRST_CHALLENGE_CASE_ID) === candidate.id)
             .map(({ outcome, expectedSource }) => ({ outcome, expectedSource })),
           feedback: turn.challengeFeedback?.find(item => item.caseId === candidate.id)?.label ?? null,
           targetedMismatch: null,

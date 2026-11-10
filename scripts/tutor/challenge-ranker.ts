@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { CHALLENGE_CASE_LIMIT } from "../../packages/tutor/challenge-run";
 import {
   CHALLENGE_RANKING_GROUP_LIMIT,
   type ChallengeRankingCase,
@@ -121,31 +122,20 @@ function train(examples: ReturnType<typeof trainingPairs>["examples"]) {
   return weights.map((weight, index) => weight / scale[index]);
 }
 
-type SelectFirst = (group: ChallengeRankingGroup) => ChallengeRankingCase | undefined;
+type OrderCases = (group: ChallengeRankingGroup) => ChallengeRankingCase[];
 
-const original: SelectFirst = group => group.cases[0];
-const shortestFirst: SelectFirst = group => group.cases.reduce<ChallengeRankingCase | undefined>(
-  (best, candidate) => !best || candidate.inputChars < best.inputChars ? candidate : best, undefined,
-);
+const original: OrderCases = group => group.cases;
+const shortestFirst: OrderCases = group => [...group.cases].sort((left, right) => left.inputChars - right.inputChars);
 
-function trainedFirst(weights: number[]): SelectFirst {
-  return group => {
-    let best: ChallengeRankingCase | undefined, bestScore = -Infinity;
-    group.cases.forEach((candidate, position) => {
-      const score = dot(weights, featureVector(candidate, position));
-      if (score > bestScore) {
-        best = candidate;
-        bestScore = score;
-      }
-    });
-    return best;
-  };
+function trainedOrder(weights: number[]): OrderCases {
+  return group => group.cases.map((candidate, position) => ({ candidate, score: dot(weights, featureVector(candidate, position)) }))
+    .sort((left, right) => right.score - left.score).map(({ candidate }) => candidate);
 }
 
-function measure(groups: ChallengeRankingGroup[], select: SelectFirst, label: RankingLabel) {
+function measure(groups: ChallengeRankingGroup[], order: OrderCases, label: RankingLabel) {
   let noCandidate = 0, unlabeledFirst = 0, positiveFirst = 0, negativeFirst = 0;
   for (const group of groups) {
-    const first = select(group);
+    const [first] = order(group);
     if (!first) { noCandidate++; continue; }
     const target = labelFor(first, label);
     if (target === null) unlabeledFirst++;
@@ -158,6 +148,28 @@ function measure(groups: ChallengeRankingGroup[], select: SelectFirst, label: Ra
     positiveRateAmongLabeledFirst: labeledFirst ? positiveFirst / labeledFirst : null,
     firstCaseTargetedMismatchRate: label === "targeted" && !unlabeledFirst && groups.length
       ? positiveFirst / groups.length : null,
+  };
+}
+
+function measureSearchEffort(groups: ChallengeRankingGroup[], order: OrderCases) {
+  const firstMismatchAt = Array.from({ length: CHALLENGE_CASE_LIMIT }, () => 0);
+  let found = 0, attemptsToFind = 0, attempts = 0;
+  for (const group of groups) {
+    const ordered = order(group);
+    const index = ordered.findIndex(candidate => candidate.targetedMismatch === true);
+    if (index === -1) {
+      attempts += ordered.length;
+      continue;
+    }
+    firstMismatchAt[index]++;
+    found++;
+    attemptsToFind += index + 1;
+    attempts += index + 1;
+  }
+  return {
+    found, exhausted: groups.length - found, firstMismatchAt,
+    meanCasesUntilMismatch: found ? attemptsToFind / found : null,
+    meanCasesAttempted: groups.length ? attempts / groups.length : null,
   };
 }
 
@@ -175,14 +187,15 @@ export function compareChallengeRanking(dataset: ChallengeRankingDataset, label:
   if (labeledHoldoutProblems < minHoldoutProblems) reasons.push(`Need labels on at least ${minHoldoutProblems} separate held-out problems.`);
 
   const weights = reasons.length ? null : train(pairs.examples);
-  const ranker = weights ? trainedFirst(weights) : null;
+  const ranker = weights ? trainedOrder(weights) : null;
   const commonLabeled = split.holdout.filter(group => {
-    const chosen = [original(group), shortestFirst(group), ...(ranker ? [ranker(group)] : [])];
+    const chosen = [original, shortestFirst, ...(ranker ? [ranker] : [])].map(order => order(group)[0]);
     return chosen.every(candidate => candidate && labelFor(candidate, label) !== null);
   });
   const challengesWithPositiveCase = split.holdout.filter(group =>
     group.cases.some(candidate => labelFor(candidate, label) === true),
   ).length;
+  const fullyLabeled = split.holdout.filter(group => group.cases.every(candidate => candidate.targetedMismatch !== null));
   return {
     format: "forma-challenge-ranking-comparison" as const,
     version: 1 as const,
@@ -205,6 +218,13 @@ export function compareChallengeRanking(dataset: ChallengeRankingDataset, label:
       trained: ranker ? measure(commonLabeled, ranker, label).positiveRateAmongLabeledFirst : null,
     },
     challengesWithPositiveCase,
+    searchEffort: label === "targeted" ? {
+      scoredChallenges: fullyLabeled.length,
+      unscoredChallenges: split.holdout.length - fullyLabeled.length,
+      original: measureSearchEffort(fullyLabeled, original),
+      shortestFirst: measureSearchEffort(fullyLabeled, shortestFirst),
+      trained: ranker ? measureSearchEffort(fullyLabeled, ranker) : null,
+    } : null,
     training: weights ? {
       status: "trained" as const,
       algorithm: "pairwise-logistic",

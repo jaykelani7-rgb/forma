@@ -12,13 +12,14 @@ import { captureRecoveryEpoch, enqueueCommand, requireCaptureRecoveryEpoch, rest
 import { collectExplicitCode, sameCodeSource, type CodeSourceFence } from "../../../packages/integrations/tutor-code";
 import { companionConnectionError } from "../../../packages/integrations/connection-error";
 import { afterCompanionReady, CompanionLauncher, launchCompanion, resolveCompanionLaunch, userDevelopmentLaunchPath } from "../../../packages/integrations/local-launch";
-import { cppChallengeSupported, readCppChallengeSource, runCppChallenge, runCppReferenceChallenge } from "../../../packages/integrations/cpp-challenge";
-import { CHALLENGE_RUN_LIMITS, FIRST_CHALLENGE_CASE_ID, readChallengeRunPlan, readChallengeRunReceipt, type ChallengeRunRequest } from "../../../packages/tutor/challenge-run";
+import { cppChallengeSupported, readCppChallengeSource, runCppChallenge, runCppReferenceChallenge, runCppReferenceChallengeBatch } from "../../../packages/integrations/cpp-challenge";
+import { CHALLENGE_RUN_LIMITS, FIRST_CHALLENGE_CASE_ID, challengeOutputEqual, readChallengeReferenceBatchPlan, readChallengeReferenceBatchReceipts, readChallengeRunPlan, readChallengeRunReceipt, type ChallengeRunRequest } from "../../../packages/tutor/challenge-run";
 
 const SECRET = "forma-companion.pairing.v1", QUEUE = "forma-companion.queue.v1", FOLDERS = "forma-companion.allowed-folders.v1", BINDINGS = "forma-companion.bindings.v1";
 type Binding = RecognisedBinding & { id?: string; key: string; fileUri: string; sessionId?: string };
 type Target = { fileUri: string; key: string; sessionId?: string; recoveryEpoch?: string | null };
-type ChallengeSubmission = Extract<ChallengeRunRequest, { operation: "record" }>;
+type ChallengeSubmission = Extract<ChallengeRunRequest, { operation: "record" | "record-reference-batch" }>;
+type ChallengeRunMode = "single" | "reference" | "batch";
 type ChallengeOracle =
   | { kind: "reference"; uri: vscode.Uri; file: string; source: Buffer }
   | { kind: "expected"; expectedOutput: string; expectedSource: "statement-sample" | "user" };
@@ -75,7 +76,7 @@ export async function activate(context: vscode.ExtensionContext) {
   let testCommandError: string | null = null;
   let pollAbort: AbortController | undefined, observationAbort = new AbortController();
   let challengeRun: AbortController | undefined;
-  let unsavedChallenge: ChallengeSubmission | undefined;
+  const unsavedChallenges = new Map<string, ChallengeSubmission>();
   const local = () => !disposed && !vscode.env.remoteName && vscode.workspace.isTrusted;
   const enabled = () => vscode.workspace.getConfiguration("formaCompanion").get<boolean>("cphMetadataEnabled", false);
   const warned = new Set<string>();
@@ -231,11 +232,39 @@ export async function activate(context: vscode.ExtensionContext) {
 
   async function saveChallengeRun(submission: ChallengeSubmission, token: string) {
     const response = await send({ version: 1, id: randomUUID(), credential: token, challengeRun: submission });
+    const forget = () => {
+      if (unsavedChallenges.get(submission.target.fileUri) === submission) unsavedChallenges.delete(submission.target.fileUri);
+    };
     // A network failure retains the frozen submission for another acknowledgement attempt.
     // A definite rejection applies to this run and should not block future runs.
     if (!response.ok) {
-      if (unsavedChallenge === submission) unsavedChallenge = undefined;
+      forget();
       throw new Error(response.error);
+    }
+    if (submission.operation === "record-reference-batch") {
+      const { batch } = submission;
+      const receipts = readChallengeReferenceBatchReceipts(response.batchReceipts);
+      if (receipts.length !== batch.cases.length || receipts.some((receipt, index) => {
+        const reviewed = batch.cases[index];
+        const outcome = reviewed.outcome === "exited"
+          ? (challengeOutputEqual(reviewed.output, reviewed.expectedOutput) ? "match" : "mismatch")
+          : reviewed.outcome;
+        return receipt.batchId !== batch.id || receipt.caseId !== reviewed.caseId ||
+          receipt.sourceHash !== batch.sourceHash || receipt.reference?.fileName !== batch.reference.fileName ||
+          receipt.reference?.sourceHash !== batch.reference.sourceHash || receipt.output !== reviewed.output ||
+          receipt.expectedOutput !== reviewed.expectedOutput || receipt.referenceFailed !== reviewed.referenceFailed ||
+          receipt.outcome !== outcome;
+      })) {
+        throw new Error("The saved batch acknowledgement did not match the reviewed cases. Retry saving the results.");
+      }
+      forget();
+      const matched = receipts.filter(receipt => receipt.outcome === "match").length;
+      const differed = receipts.filter(receipt => receipt.outcome === "mismatch").length;
+      const skipped = receipts.length - matched - differed;
+      void vscode.window.setStatusBarMessage(
+        `Forma · ${matched} matched · ${differed} differed${skipped ? ` · ${skipped} could not be compared` : ""}. See the results in the Problem Desk.`, 9000,
+      );
+      return;
     }
     const receipt = readChallengeRunReceipt(response.receipt);
     if (receipt.id !== submission.run.id || receipt.expectedSource !== submission.run.expectedSource ||
@@ -244,7 +273,7 @@ export async function activate(context: vscode.ExtensionContext) {
       receipt.reference?.sourceHash !== submission.run.reference?.sourceHash) {
       throw new Error("The saved run acknowledgement did not match the reviewed case. Retry saving the result.");
     }
-    if (unsavedChallenge === submission) unsavedChallenge = undefined;
+    forget();
     const detail = receipt.outcome === "match" ? "Output matches the expected output."
       : receipt.outcome === "mismatch" ? "Output differs from the expected output."
       : "The run ended before output could be compared.";
@@ -268,9 +297,10 @@ export async function activate(context: vscode.ExtensionContext) {
     return actual;
   }
 
-  async function runChallengeCase(withReference = false) {
+  async function runChallengeCase(mode: ChallengeRunMode = "single") {
     if (challengeRun) throw new Error("A challenge case is already open in VS Code.");
     if (!cppChallengeSupported()) throw new Error("Local C++ challenge runs are available on macOS and Linux.");
+    const withReference = mode !== "single";
     const controller = new AbortController();
     challengeRun = controller;
     let cancelOnEditorChange: vscode.Disposable | undefined;
@@ -297,8 +327,8 @@ export async function activate(context: vscode.ExtensionContext) {
         }
       }
 
-      const previous = unsavedChallenge;
-      if (previous?.target.fileUri === target.fileUri) {
+      const previous = unsavedChallenges.get(target.fileUri);
+      if (previous) {
         const choice = await vscode.window.showQuickPick(["Save previous result", "Review a new run"], {
           title: "Forma · Previous result is awaiting acknowledgement", ignoreFocusOut: true,
         });
@@ -311,9 +341,14 @@ export async function activate(context: vscode.ExtensionContext) {
       }
 
       async function review() {
-        const updateMessage = "Update Forma Companion to run challenges with a reference solution.";
+        const updateMessage = mode === "batch"
+          ? "Update Forma Companion to review and run challenge cases together."
+          : "Update Forma Companion to run challenges with a reference solution.";
+        const challengeReview: ChallengeRunRequest = mode === "batch"
+          ? { operation: "review-reference-batch", target: runTarget }
+          : { operation: "review", target: runTarget, ...(withReference ? { withReference: true } : {}) };
         const response = await send({ version: 1, id: randomUUID(), credential: token,
-          challengeRun: { operation: "review", target: runTarget, ...(withReference ? { withReference: true } : {}) } }, controller.signal).catch((error: unknown) => {
+          challengeRun: challengeReview }, controller.signal).catch((error: unknown) => {
           if (withReference && error instanceof Error && error.message === "Invalid integration acknowledgement.") throw new Error(updateMessage);
           throw error;
         });
@@ -323,9 +358,12 @@ export async function activate(context: vscode.ExtensionContext) {
           }
           throw new Error(response.error);
         }
-        return readChallengeRunPlan(response.plan);
+        return mode === "batch"
+          ? { kind: "batch" as const, value: readChallengeReferenceBatchPlan(response.batchPlan) }
+          : { kind: "case" as const, value: readChallengeRunPlan(response.plan) };
       }
       const plan = await review();
+      const cases = plan.kind === "batch" ? plan.value.cases : [plan.value];
       await checkTarget();
       const { actual: sourceFile } = await permittedFile(target.fileUri);
       const source = await readCppChallengeSource(sourceFile);
@@ -342,12 +380,15 @@ export async function activate(context: vscode.ExtensionContext) {
           filters: { "C++ source": ["cpp", "cc", "cxx", "c++", "C"] },
         }) ?? [];
         if (!reference) return;
+        await checkTarget();
         const file = await savedReferencePath(reference, sourceFile);
         oracle = { kind: "reference", uri: reference, file, source: await readCppChallengeSource(file) };
-      } else if (plan.sampleOutput === null) {
+      } else if (plan.kind === "case" && plan.value.sampleOutput !== null) {
+        oracle = { kind: "expected", expectedOutput: plan.value.sampleOutput, expectedSource: "statement-sample" };
+      } else {
         const entered = await vscode.window.showInputBox({
-          title: `Expected output · ${plan.problemTitle}`,
-          prompt: `Enter the expected output for input ${JSON.stringify(plan.input)}. For multiple lines, enter a JSON string like "3\\n4".`,
+          title: `Expected output · ${plan.value.problemTitle}`,
+          prompt: `Enter the expected output for input ${JSON.stringify(cases[0].input)}. For multiple lines, enter a JSON string like "3\\n4".`,
           ignoreFocusOut: true,
           validateInput: value => {
             try { expectedChallengeOutput(value); }
@@ -356,8 +397,6 @@ export async function activate(context: vscode.ExtensionContext) {
         });
         if (entered === undefined) return;
         oracle = { kind: "expected", expectedOutput: expectedChallengeOutput(entered), expectedSource: "user" };
-      } else {
-        oracle = { kind: "expected", expectedOutput: plan.sampleOutput, expectedSource: "statement-sample" };
       }
       async function checkReviewedFiles() {
         await checkTarget();
@@ -371,18 +410,19 @@ export async function activate(context: vscode.ExtensionContext) {
         await checkTarget();
       }
       if (oracle.kind === "reference") await checkReviewedFiles();
-      const approved = await vscode.window.showWarningMessage(withReference
-        ? "Run this Forma challenge with a reference solution?" : "Run this Forma challenge case locally?", {
+      const approvalTitle = mode === "batch" ? "Find a counterexample with these cases?"
+        : withReference ? "Run this Forma challenge with a reference solution?" : "Run this Forma challenge case locally?";
+      const approved = await vscode.window.showWarningMessage(approvalTitle, {
         modal: true,
         detail: [
-          `${plan.problemTitle} · ${vscode.workspace.asRelativePath(document.uri, true)}`,
-          `Assumption: ${plan.assumption}`,
-          `Case ${plan.caseId.slice("case-".length)} input: ${JSON.stringify(plan.input)}`,
+          `${plan.value.problemTitle} · ${vscode.workspace.asRelativePath(document.uri, true)}`,
+          `Assumption: ${plan.value.assumption}`,
+          ...cases.map(candidate => `Case ${candidate.caseId.slice("case-".length)} input: ${JSON.stringify(candidate.input)}`),
           oracle.kind === "reference"
             ? `Reference solution\n${vscode.workspace.asRelativePath(oracle.uri, true)}`
             : `${oracle.expectedSource === "statement-sample" ? "Statement sample" : "Your expected output"}: ${JSON.stringify(oracle.expectedOutput)}`,
           oracle.kind === "reference"
-            ? "Both saved C++ files run with your local user permissions. The reference output is used as the expected answer."
+            ? "Both saved C++ files run with your local user permissions. Successful reference outputs become the expected answers."
             : "This runs the reviewed saved C++ source with your local user permissions.",
         ].join("\n\n"),
       }, "Run locally");
@@ -391,35 +431,51 @@ export async function activate(context: vscode.ExtensionContext) {
         throw new Error("The challenge changed. Review the new case before running it.");
       }
       await checkReviewedFiles();
-      const result = await vscode.window.withProgress({
-        location: vscode.ProgressLocation.Notification, title: "Forma · Running C++ challenge case", cancellable: true,
-      }, async (_progress, cancellation) => {
+      const submission = await vscode.window.withProgress({
+        location: vscode.ProgressLocation.Notification,
+        title: mode === "batch" ? "Forma · Checking reviewed cases" : "Forma · Running C++ challenge case",
+        cancellable: true,
+      }, async (_progress, cancellation): Promise<ChallengeSubmission> => {
         const subscription = cancellation.onCancellationRequested(() => controller.abort());
         if (cancellation.isCancellationRequested) controller.abort();
         try {
-          const input = { source, input: plan.input, signal: controller.signal };
+          const { turnId, requestId, recoveryEpoch } = plan.value;
+          const base = { id: randomUUID(), turnId, requestId, recoveryEpoch };
+          if (plan.kind === "batch") {
+            if (oracle.kind !== "reference") throw new Error("Choose a saved reference solution before running the cases.");
+            const result = await runCppReferenceChallengeBatch({ source, reference: oracle.source, cases: plan.value.cases, signal: controller.signal });
+            return { operation: "record-reference-batch", target: runTarget, batch: {
+              ...base, sourceHash: result.sourceHash, cases: result.cases,
+              reference: { fileName: path.basename(oracle.uri.fsPath), sourceHash: result.referenceHash },
+            } };
+          }
+          const { caseId, input: caseInput } = plan.value;
+          const selected = { ...base, ...(caseId === FIRST_CHALLENGE_CASE_ID ? {} : { caseId }) };
+          const input = { source, input: caseInput, signal: controller.signal };
           if (oracle.kind === "reference") {
             const { result, expectedOutput, referenceHash } = await runCppReferenceChallenge({ ...input, reference: oracle.source });
             // Compiler messages can include source excerpts. Keep them in VS Code for these runs.
             if (result.outcome !== "exited" && result.diagnostic) void vscode.window.showErrorMessage(result.diagnostic);
-            return {
-              ...result, diagnostic: "", expectedOutput, expectedSource: "reference" as const,
+            return { operation: "record", target: runTarget, run: {
+              ...selected, ...result, diagnostic: "", expectedOutput, expectedSource: "reference",
               reference: { fileName: path.basename(oracle.uri.fsPath), sourceHash: referenceHash },
-            };
+            } };
           }
-          return {
-            ...await runCppChallenge(input), expectedOutput: oracle.expectedOutput, expectedSource: oracle.expectedSource,
-          };
+          return { operation: "record", target: runTarget, run: {
+            ...selected, ...await runCppChallenge(input), expectedOutput: oracle.expectedOutput, expectedSource: oracle.expectedSource,
+          } };
         }
         finally { subscription.dispose(); }
       });
       await checkTarget(false);
-      const submission: ChallengeSubmission = { operation: "record", target: runTarget, run: {
-        id: randomUUID(), turnId: plan.turnId, requestId: plan.requestId, recoveryEpoch: plan.recoveryEpoch,
-        ...(plan.caseId === FIRST_CHALLENGE_CASE_ID ? {} : { caseId: plan.caseId }),
-        ...result,
-      } };
-      unsavedChallenge = submission;
+      if (submission.operation === "record-reference-batch") {
+        try {
+          encodeTransportMessage({ version: 1, id: randomUUID(), credential: token, challengeRun: submission });
+        } catch {
+          throw new Error("These results exceed the local transfer limit. Review and run the cases one at a time.");
+        }
+      }
+      unsavedChallenges.set(target.fileUri, submission);
       await saveChallengeRun(submission, token);
     } catch (error) {
       if (!controller.signal.aborted) throw error;
@@ -648,7 +704,8 @@ export async function activate(context: vscode.ExtensionContext) {
   register("askSelectedCode", askSelectedCode);
   register("pinSelection", pinSelection);
   register("runChallengeCase", () => runChallengeCase());
-  register("runChallengeWithReference", () => runChallengeCase(true));
+  register("runChallengeWithReference", () => runChallengeCase("reference"));
+  register("findCounterexample", () => runChallengeCase("batch"));
   register("memory", () => openCompanion("memory"));
   register("saveThought", async () => { const target = await frozenTarget(); const text = await vscode.window.showInputBox({ title: "Save Thought", prompt: "An observation for this problem", ignoreFocusOut: true, validateInput: value => value.trim() && value.length <= 10000 ? undefined : "Write up to 10,000 characters." }); if (text) await capture("thought", { text }, target); });
   register("start", () => capture("start")); register("pause", () => capture("pause")); register("resume", () => capture("resume"));

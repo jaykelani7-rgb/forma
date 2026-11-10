@@ -51,7 +51,7 @@ async function main() {
   };
   if (values.output) await writeFile(values.output, JSON.stringify(report, null, 2) + "\n", { mode: 0o600, flag: "wx" });
 
-  const { split, methods, training, commonLabeled } = report;
+  const { split, methods, training, commonLabeled, searchEffort } = report;
   const positive = label === "targeted" ? "targeted mismatches" : "helpful cases";
   process.stdout.write(`${paths.length ? "Local dataset" : "Synthetic fixtures"} · ${split.developmentProblems} development problems, ${split.holdoutProblems} held-out problems.\n`);
   for (const [name, method] of [["Original order", methods.original], ["Shortest first", methods.shortestFirst], ["Trained ranker", methods.trained]] as const) {
@@ -62,6 +62,14 @@ async function main() {
   }
   if (split.holdoutChallenges) {
     process.stdout.write(`${report.challengesWithPositiveCase}/${split.holdoutChallenges} held-out challenges had at least one positive case.\n`);
+  }
+  if (searchEffort) {
+    process.stdout.write(`Search effort · ${searchEffort.scoredChallenges} scored challenges, ${searchEffort.unscoredChallenges} with incomplete labels.\n`);
+    const mean = (cases: number | null) => cases === null ? "—" : cases.toFixed(2);
+    for (const [name, method] of [["Original order", searchEffort.original], ["Shortest first", searchEffort.shortestFirst], ["Trained ranker", searchEffort.trained]] as const) {
+      if (!method) continue;
+      process.stdout.write(`${name} · ${method.found}/${searchEffort.scoredChallenges} found the intended bug, ${mean(method.meanCasesUntilMismatch)} cases on average when found, ${mean(method.meanCasesAttempted)} cases attempted overall.\n`);
+    }
   }
   if (label === "feedback") {
     const percent = (rate: number | null) => rate === null ? "—" : `${Math.round(rate * 100)}%`;

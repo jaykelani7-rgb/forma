@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseChallengeRunRequest, readChallengeCaseState, readChallengeRunPlan, readChallengeRunReceipt } from "../packages/tutor/challenge-run";
+import { encodeTransportMessage, parseTransportRequest } from "../packages/integrations/protocol";
+import {
+  CHALLENGE_BATCH_OUTPUT_LIMIT, parseChallengeRunRequest, readChallengeCaseState,
+  readChallengeReferenceBatchPlan, readChallengeReferenceBatchReceipts, readChallengeRunPlan, readChallengeRunReceipt,
+} from "../packages/tutor/challenge-run";
 import { readIdeaChallenge } from "../packages/tutor/idea";
 
 const challenge = { observation: "Check the boundary.", question: "Does the loop see the last element?" };
@@ -72,4 +76,43 @@ test("only a review request can check whether the host supports reference runs",
   assert.throws(() => parseChallengeRunRequest({ ...review, withReference: false }), /invalid fields/);
   assert.throws(() => parseChallengeRunRequest({ ...review, withReference: undefined }), /invalid fields/);
   assert.throws(() => parseChallengeRunRequest({ ...review, operation: "record", run: {} }), /invalid fields/);
+});
+
+test("reference batches preserve ordered bounded cases and separate failed reference output", () => {
+  const target = { fileUri: "file:///practice/main.cpp", workspaceId: "workspace", clientId: "client" };
+  const reference = { fileName: "reference.cpp", sourceHash: "b".repeat(64) };
+  const scope = { turnId: "turn-1", requestId: "request-1", recoveryEpoch: "epoch-1" };
+  const cases = [{ caseId: "case-1", input: "1\n7" }, { caseId: "case-2", input: "2\n8" }];
+  const plan = { ...scope, problemTitle: "Boundary practice", assumption: "The loop examines all indices.", sessionId: null, cases };
+  assert.deepEqual(readChallengeReferenceBatchPlan(plan), plan);
+  assert.throws(() => readChallengeReferenceBatchPlan({ ...plan, cases: [cases[0], cases[0]] }), /invalid fields/);
+
+  const batch = {
+    ...scope, id: "batch-1", sourceHash: "a".repeat(64), reference,
+    cases: [
+      { caseId: "case-1", output: "7\n", expectedOutput: "7", outcome: "exited" },
+      { caseId: "case-2", output: "", expectedOutput: "", outcome: "timeout", referenceFailed: true },
+    ],
+  } as const;
+  const request = { operation: "record-reference-batch" as const, target, batch: { ...batch, cases: [...batch.cases] } };
+  const envelope = { version: 1, id: "wire-1", credential: "a".repeat(32), challengeRun: request } as const;
+  assert.deepEqual(parseTransportRequest(encodeTransportMessage(envelope)), envelope);
+  const corrupt = (item: Record<string, unknown>) => ({ ...request, batch: { ...batch, cases: [batch.cases[0], { ...batch.cases[1], ...item }] } });
+  assert.throws(() => parseChallengeRunRequest(corrupt({ caseId: "case-1" })), /invalid fields/);
+  assert.throws(() => parseChallengeRunRequest(corrupt({ expectedOutput: "8" })), /invalid fields/);
+  assert.throws(() => parseChallengeRunRequest(corrupt({ outcome: "exited" })), /invalid fields/);
+  assert.throws(() => parseChallengeRunRequest(corrupt({ referenceFailed: false })), /invalid fields/);
+  assert.throws(() => parseChallengeRunRequest(corrupt({ referenceFailed: undefined })), /invalid fields/);
+  assert.throws(() => parseChallengeRunRequest(corrupt({ referenceFailed: true, output: "x".repeat(CHALLENGE_BATCH_OUTPUT_LIMIT + 1) })), /invalid fields/);
+
+  const sharedReceipt = {
+    batchId: batch.id, expectedSource: "reference", reference, sourceHash: batch.sourceHash,
+    fileName: "main.cpp", diagnostic: "", ranAt: "2026-11-10T08:00:00.000Z",
+  };
+  const receipts = [
+    { ...sharedReceipt, id: "run-1", ...cases[0], output: "7\n", expectedOutput: "7", outcome: "match" },
+    { ...sharedReceipt, id: "run-2", ...cases[1], output: "", expectedOutput: "", outcome: "timeout", referenceFailed: true },
+  ];
+  assert.deepEqual(readChallengeReferenceBatchReceipts(receipts), receipts);
+  assert.throws(() => readChallengeReferenceBatchReceipts([receipts[0], { ...receipts[1], reference: { ...reference, fileName: "different.cpp" } }]), /invalid fields/);
 });

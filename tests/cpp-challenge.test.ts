@@ -5,8 +5,8 @@ import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { cppChallengeSupported, readCppChallengeSource, runCppChallenge, runCppReferenceChallenge } from "../packages/integrations/cpp-challenge";
-import { CHALLENGE_RUN_LIMITS } from "../packages/tutor/challenge-run";
+import { cppChallengeSupported, readCppChallengeSource, runCppChallenge, runCppReferenceChallenge, runCppReferenceChallengeBatch } from "../packages/integrations/cpp-challenge";
+import { CHALLENGE_BATCH_OUTPUT_LIMIT, CHALLENGE_RUN_LIMITS } from "../packages/tutor/challenge-run";
 
 const compilerAvailable = cppChallengeSupported() &&
   spawnSync(process.platform === "darwin" ? "/usr/bin/clang++" : "/usr/bin/c++", ["--version"], { stdio: "ignore", timeout: 3000 }).status === 0;
@@ -37,6 +37,40 @@ test("reference challenges give both saved sources the same input and retain bot
 test("failed reference output never becomes the expected answer", { skip: !compilerAvailable }, async () => {
   const reference = "#include <cstdio>\nint main() { puts(\"incomplete output\"); return 2; }";
   await assert.rejects(runCppReferenceChallenge({ source: "", reference, input: "" }), /Reference solution failed\. The program exited with code 2/);
+});
+
+test("batch runs reuse the two binaries, isolate each execution directory, and continue after a failed reference", { skip: !compilerAvailable }, async () => {
+  const program = `#include <cstdio>
+int main(int, char** argv) {
+  if (auto* existing = fopen("seen", "r")) { fclose(existing); return 2; }
+  if (auto* marker = fopen("seen", "w")) fclose(marker);
+  int n;
+  if (scanf("%d", &n) != 1) return 3;
+  printf("%s\\n%d", argv[0], n + OFFSET);
+  return n == FAIL_INPUT ? 4 : 0;
+}`;
+  const source = program.replace("OFFSET", "1").replace("FAIL_INPUT", "0");
+  const reference = program.replace("OFFSET", "2").replace("FAIL_INPUT", "4");
+  const result = await runCppReferenceChallengeBatch({ source, reference, cases: [
+    { caseId: "case-1", input: "7\n" },
+    { caseId: "case-2", input: "4\n" },
+    { caseId: "case-3", input: "11\n" },
+  ] });
+  assert.equal(result.sourceHash, createHash("sha256").update(source).digest("hex"));
+  assert.equal(result.referenceHash, createHash("sha256").update(reference).digest("hex"));
+  const [first, failed, last] = result.cases;
+  assert.deepEqual(failed, { caseId: "case-2", outcome: "runtime-error", referenceFailed: true, output: "", expectedOutput: "" });
+  const [solutionPath] = first.output.split("\n"), [referencePath] = first.expectedOutput.split("\n");
+  assert.notEqual(solutionPath, referencePath);
+  assert.deepEqual(first, { caseId: "case-1", outcome: "exited", output: `${solutionPath}\n8`, expectedOutput: `${referencePath}\n9` });
+  assert.deepEqual(last, { caseId: "case-3", outcome: "exited", output: `${solutionPath}\n12`, expectedOutput: `${referencePath}\n13` });
+});
+
+test("batch output is bounded and solution failures remain distinct from reference failures", { skip: !compilerAvailable }, async () => {
+  const source = "#include <cstdio>\nint main() { for (int i = 0; i < 10000; ++i) putchar('a'); }";
+  const result = await runCppReferenceChallengeBatch({ source, reference: "int main() {}", cases: [{ caseId: "case-1", input: "" }] });
+  assert.deepEqual(result.cases, [{ caseId: "case-1", outcome: "output-limit", output: "a".repeat(CHALLENGE_BATCH_OUTPUT_LIMIT), expectedOutput: "" }]);
+  await assert.rejects(runCppReferenceChallengeBatch({ source: "int main( {", reference: "int main() {}", cases: [{ caseId: "case-1", input: "" }] }), /Solution compilation failed/);
 });
 
 test("local challenge runs distinguish compile failure and bound emitted output", { skip: !compilerAvailable }, async () => {

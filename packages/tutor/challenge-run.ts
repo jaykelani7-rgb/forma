@@ -1,5 +1,6 @@
 export const CHALLENGE_RUN_LIMIT = 12;
 export const CHALLENGE_RUN_LIMITS = { input: 600, output: 4_000, expectedOutput: 4_000, diagnostic: 2_000 } as const;
+export const CHALLENGE_BATCH_OUTPUT_LIMIT = 1_300;
 export const CHALLENGE_CASE_LIMIT = 3;
 export const FIRST_CHALLENGE_CASE_ID = "case-1";
 export const CHALLENGE_FEEDBACK_LABELS = ["helpful", "wrong-assumption", "invalid-input"] as const;
@@ -19,6 +20,7 @@ export interface ChallengeCaseState {
 
 const executionOutcomes = ["exited", "compile-error", "runtime-error", "timeout", "output-limit"] as const;
 const receiptOutcomes = ["match", "mismatch", "compile-error", "runtime-error", "timeout", "output-limit"] as const;
+const batchExecutionOutcomes = ["exited", "runtime-error", "timeout", "output-limit"] as const;
 type ExpectedSource = "statement-sample" | "user" | "reference";
 
 export interface ChallengeReference {
@@ -44,6 +46,34 @@ export interface ChallengeRunPlan {
   sessionId: string | null;
 }
 
+export interface ChallengeReferenceBatchPlan {
+  turnId: string;
+  requestId: string;
+  problemTitle: string;
+  assumption: string;
+  recoveryEpoch: string;
+  sessionId: string | null;
+  cases: { caseId: string; input: string }[];
+}
+
+export interface ChallengeReferenceBatchCase {
+  caseId: string;
+  output: string;
+  expectedOutput: string;
+  outcome: typeof batchExecutionOutcomes[number];
+  referenceFailed?: true;
+}
+
+export interface ChallengeReferenceBatchSubmission {
+  id: string;
+  turnId: string;
+  requestId: string;
+  recoveryEpoch: string;
+  sourceHash: string;
+  reference: ChallengeReference;
+  cases: ChallengeReferenceBatchCase[];
+}
+
 export interface ChallengeRunSubmission {
   id: string;
   turnId: string;
@@ -62,6 +92,8 @@ export interface ChallengeRunSubmission {
 export interface ChallengeRunReceipt {
   id: string;
   caseId?: string;
+  batchId?: string;
+  referenceFailed?: true;
   input: string;
   expectedOutput: string;
   expectedSource: ExpectedSource;
@@ -76,7 +108,9 @@ export interface ChallengeRunReceipt {
 
 export type ChallengeRunRequest =
   | { operation: "review"; target: ChallengeRunTarget; withReference?: true }
-  | { operation: "record"; target: ChallengeRunTarget; run: ChallengeRunSubmission };
+  | { operation: "record"; target: ChallengeRunTarget; run: ChallengeRunSubmission }
+  | { operation: "review-reference-batch"; target: ChallengeRunTarget }
+  | { operation: "record-reference-batch"; target: ChallengeRunTarget; batch: ChallengeReferenceBatchSubmission };
 
 function invalid(): never {
   throw new Error("The challenge run has invalid fields.");
@@ -118,7 +152,11 @@ function basenameLabel(value: unknown): string {
 function readReference(value: Record<string, unknown>, source: ExpectedSource): ChallengeReference | undefined {
   if (Object.hasOwn(value, "reference") !== (source === "reference")) return invalid();
   if (source !== "reference") return;
-  const reference = record(value.reference, ["fileName", "sourceHash"]);
+  return referenceMetadata(value.reference);
+}
+
+function referenceMetadata(value: unknown): ChallengeReference {
+  const reference = record(value, ["fileName", "sourceHash"]);
   return { fileName: basenameLabel(reference.fileName), sourceHash: sourceHash(reference.sourceHash) };
 }
 
@@ -155,8 +193,41 @@ function readTarget(input: unknown): ChallengeRunTarget {
   return { fileUri, workspaceId: id(value.workspaceId), clientId: id(value.clientId) };
 }
 
+function batchCases<T extends { caseId: string }>(input: unknown, read: (item: unknown) => T): T[] {
+  if (!Array.isArray(input) || !input.length || input.length > CHALLENGE_CASE_LIMIT) return invalid();
+  const cases = input.map(read);
+  if (new Set(cases.map(item => item.caseId)).size !== cases.length) return invalid();
+  return cases;
+}
+
+function batchCase(input: unknown): ChallengeReferenceBatchCase {
+  const item = record(input, ["caseId", "output", "expectedOutput", "outcome"], ["referenceFailed"]);
+  const caseId = readChallengeCaseId(item.caseId);
+  const output = text(item.output, CHALLENGE_BATCH_OUTPUT_LIMIT);
+  const expectedOutput = text(item.expectedOutput, CHALLENGE_BATCH_OUTPUT_LIMIT);
+  const outcome = oneOf(item.outcome, batchExecutionOutcomes);
+  if (!Object.hasOwn(item, "referenceFailed")) return { caseId, output, expectedOutput, outcome };
+  if (item.referenceFailed !== true || output || expectedOutput || outcome === "exited") return invalid();
+  return { caseId, output, expectedOutput, outcome, referenceFailed: true };
+}
+
 export function parseChallengeRunRequest(input: unknown): ChallengeRunRequest {
   const value = record(input);
+  if (value.operation === "review-reference-batch") {
+    record(value, ["operation", "target"]);
+    return { operation: value.operation, target: readTarget(value.target) };
+  }
+  if (value.operation === "record-reference-batch") {
+    record(value, ["operation", "target", "batch"]);
+    const batch = record(value.batch, ["id", "turnId", "requestId", "recoveryEpoch", "sourceHash", "reference", "cases"]);
+    return {
+      operation: value.operation, target: readTarget(value.target),
+      batch: {
+        id: id(batch.id), turnId: id(batch.turnId), requestId: id(batch.requestId), recoveryEpoch: id(batch.recoveryEpoch),
+        sourceHash: sourceHash(batch.sourceHash), reference: referenceMetadata(batch.reference), cases: batchCases(batch.cases, batchCase),
+      },
+    };
+  }
   if (value.operation === "review") {
     record(value, ["operation", "target"], ["withReference"]);
     const withReference = Object.hasOwn(value, "withReference");
@@ -199,23 +270,59 @@ export function readChallengeRunPlan(input: unknown): ChallengeRunPlan {
   };
 }
 
+export function readChallengeReferenceBatchPlan(input: unknown): ChallengeReferenceBatchPlan {
+  const value = record(input, ["turnId", "requestId", "problemTitle", "assumption", "recoveryEpoch", "sessionId", "cases"]);
+  return {
+    turnId: id(value.turnId), requestId: id(value.requestId), recoveryEpoch: id(value.recoveryEpoch),
+    problemTitle: text(value.problemTitle, 240, 1), assumption: text(value.assumption, 250, 1),
+    sessionId: value.sessionId === null ? null : id(value.sessionId),
+    cases: batchCases(value.cases, input => {
+      const item = record(input, ["caseId", "input"]);
+      return { caseId: readChallengeCaseId(item.caseId), input: text(item.input, CHALLENGE_RUN_LIMITS.input) };
+    }),
+  };
+}
+
 export function readChallengeRunReceipt(input: unknown): ChallengeRunReceipt {
   const value = record(input, [
     "id", "input", "expectedOutput", "expectedSource", "sourceHash", "fileName", "output", "outcome", "diagnostic", "ranAt",
-  ], ["caseId", "reference"]);
+  ], ["caseId", "reference", "batchId", "referenceFailed"]);
   const source = expectedSource(value.expectedSource);
   const reference = readReference(value, source);
   const fileName = basenameLabel(value.fileName);
   const ranAt = text(value.ranAt, 40, 1);
   if (!Number.isFinite(Date.parse(ranAt))) return invalid();
+  const batchId = Object.hasOwn(value, "batchId") ? id(value.batchId) : undefined;
+  const outputLimit = batchId ? CHALLENGE_BATCH_OUTPUT_LIMIT : CHALLENGE_RUN_LIMITS.output;
+  const output = text(value.output, outputLimit);
+  const expectedOutput = text(value.expectedOutput, batchId ? outputLimit : CHALLENGE_RUN_LIMITS.expectedOutput);
+  const outcome = oneOf(value.outcome, receiptOutcomes);
+  const referenceFailed = Object.hasOwn(value, "referenceFailed");
+  if (batchId && (source !== "reference" || !Object.hasOwn(value, "caseId") || outcome === "compile-error" || value.diagnostic !== "")) return invalid();
+  if (referenceFailed && (value.referenceFailed !== true || !batchId || output || expectedOutput || outcome === "match" || outcome === "mismatch")) return invalid();
   return {
     id: id(value.id), input: text(value.input, CHALLENGE_RUN_LIMITS.input),
-    expectedOutput: text(value.expectedOutput, CHALLENGE_RUN_LIMITS.expectedOutput), expectedSource: source,
-    sourceHash: sourceHash(value.sourceHash), fileName, output: text(value.output, CHALLENGE_RUN_LIMITS.output),
-    outcome: oneOf(value.outcome, receiptOutcomes), diagnostic: text(value.diagnostic, CHALLENGE_RUN_LIMITS.diagnostic), ranAt,
+    expectedOutput, expectedSource: source,
+    sourceHash: sourceHash(value.sourceHash), fileName, output,
+    outcome, diagnostic: text(value.diagnostic, CHALLENGE_RUN_LIMITS.diagnostic), ranAt,
     ...(Object.hasOwn(value, "caseId") ? { caseId: readChallengeCaseId(value.caseId) } : {}),
     ...(reference ? { reference } : {}),
+    ...(batchId ? { batchId } : {}),
+    ...(referenceFailed ? { referenceFailed: true as const } : {}),
   };
+}
+
+export function readChallengeReferenceBatchReceipts(input: unknown): ChallengeRunReceipt[] {
+  const receipts = batchCases(input, item => {
+    const receipt = readChallengeRunReceipt(item);
+    if (!receipt.batchId || !receipt.caseId) return invalid();
+    return { ...receipt, caseId: receipt.caseId };
+  });
+  const first = receipts[0];
+  if (receipts.some(receipt => receipt.batchId !== first.batchId || receipt.sourceHash !== first.sourceHash ||
+    receipt.fileName !== first.fileName || receipt.ranAt !== first.ranAt ||
+    receipt.reference?.sourceHash !== first.reference?.sourceHash || receipt.reference?.fileName !== first.reference?.fileName)) return invalid();
+  return receipts;
 }
 
 export function readChallengeCaseState(input: unknown): ChallengeCaseState {

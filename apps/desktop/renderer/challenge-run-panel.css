@@ -85,13 +85,52 @@
   color: var(--muted);
 }
 
+.challenge-batch,
+.challenge-batch-shortest,
+.challenge-batch-input {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.challenge-batch {
+  padding: 8px;
+  border: 1px solid var(--idea-rule);
+  border-radius: 7px;
+}
+
+.challenge-batch h5,
+.challenge-batch h6 {
+  margin: 0;
+  font: inherit;
+  font-weight: 650;
+}
+
+.challenge-batch h5 {
+  color: var(--idea-accent);
+}
+
+.challenge-batch p {
+  margin: 0;
+}
+
+.challenge-batch-shortest {
+  margin-top: 4px;
+}
+
+.challenge-batch-shortest > .challenge-run-result {
+  padding-top: 0;
+  border-top: 0;
+}
+
 .challenge-run-outcome span,
 .challenge-run-provenance span {
   display: block;
 }
 
 .challenge-run-outputs pre,
-.challenge-run-diagnostic pre {
+.challenge-run-diagnostic pre,
+.challenge-batch-input pre {
   padding: 5px;
   max-height: 120px;
   overflow: auto;

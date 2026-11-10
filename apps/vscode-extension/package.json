@@ -100,6 +100,10 @@
         "title": "Forma: Run Challenge with Reference"
       },
       {
+        "command": "formaCompanion.findCounterexample",
+        "title": "Forma: Find a Counterexample"
+      },
+      {
         "command": "formaCompanion.retry",
         "title": "Forma: Retry Pending Captures"
       },

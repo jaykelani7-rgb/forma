@@ -12,7 +12,8 @@ import { ThoughtHostVoice, TutorHostVoice, type ThoughtVoiceContext } from "./tu
 import { ThoughtTakeStore } from "./thought-take-store";
 import { DesktopSessionHandoff } from "./session-handoff-client";
 import { tutorExternalUrl } from "../../../packages/tutor/links";
-import { FIRST_CHALLENGE_CASE_ID, type ChallengeCaseState, type ChallengeRunPlan, type ChallengeRunReceipt, type ChallengeRunRequest } from "../../../packages/tutor/challenge-run";
+import { FIRST_CHALLENGE_CASE_ID, type ChallengeCaseState, type ChallengeRunReceipt, type ChallengeRunRequest } from "../../../packages/tutor/challenge-run";
+import type { TutorStore } from "./tutor-store";
 import type { ChallengeRankingDataset } from "../../../packages/tutor/challenge-ranking";
 import type { DeskHintReview, DeskIdeaReview, SharedCode, StatementSnapshot, TutorConversation, TutorEvent, TutorSendInput, TutorStoredView, TutorTurn } from "../../../packages/tutor/types";
 import { AttentionPolicy } from "./attention";
@@ -187,12 +188,15 @@ function challengeCaseOnWire<T extends { caseId?: string }>(value: T) {
 
 async function handleChallengeRun(request: ChallengeRunRequest) {
   const current = recoveryFence.lease();
-  const result = await database.call<{ plan: ChallengeRunPlan } | { receipt: ChallengeRunReceipt; conversationId: string }>('challenge-run', request);
+  const result = await database.call<ReturnType<TutorStore['challengeRun']>>('challenge-run', request);
   current();
   if ('plan' in result) return { plan: challengeCaseOnWire(result.plan) };
-  if (request.operation !== 'record') throw new Error('The challenge run acknowledgement is invalid.');
-  emitTutor({ kind: 'updated', conversationId: result.conversationId, turnId: request.run.turnId, requestId: request.run.requestId });
-  return { receipt: challengeCaseOnWire(result.receipt) };
+  if ('batchPlan' in result) return { batchPlan: result.batchPlan };
+  const submitted = request.operation === 'record' ? request.run
+    : request.operation === 'record-reference-batch' ? request.batch : null;
+  if (!submitted) throw new Error('The challenge run acknowledgement is invalid.');
+  emitTutor({ kind: 'updated', conversationId: result.conversationId, turnId: submitted.turnId, requestId: submitted.requestId });
+  return 'batchReceipts' in result ? { batchReceipts: result.batchReceipts } : { receipt: challengeCaseOnWire(result.receipt) };
 }
 function voiceReady(capability:'transcription'|'speech'){
   if(tutorService.isConfiguring)throw new TutorProviderError('busy');

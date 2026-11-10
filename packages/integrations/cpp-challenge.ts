@@ -4,7 +4,7 @@ import { constants } from "node:fs";
 import { mkdtemp, open, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CHALLENGE_RUN_LIMITS } from "../tutor/challenge-run";
+import { CHALLENGE_BATCH_OUTPUT_LIMIT, CHALLENGE_CASE_LIMIT, CHALLENGE_RUN_LIMITS, type ChallengeReferenceBatchCase } from "../tutor/challenge-run";
 
 const SOURCE_LIMIT = 256 * 1024;
 const COMPILE_TIMEOUT = 15_000;
@@ -50,7 +50,7 @@ type ProcessResult = {
 };
 
 /** Detached process groups allow cancellation to release descendants holding the pipes. */
-function runProcess(executable: string, args: string[], cwd: string, input: string, timeoutMs: number, signal?: AbortSignal) {
+function runProcess(executable: string, args: string[], cwd: string, input: string, timeoutMs: number, signal?: AbortSignal, outputLimit: number = CHALLENGE_RUN_LIMITS.output) {
   signal?.throwIfAborted();
   return new Promise<ProcessResult>((resolve, reject) => {
     const child = spawn(executable, args, {
@@ -92,11 +92,11 @@ function runProcess(executable: string, args: string[], cwd: string, input: stri
       }, 250);
     });
     child.stdout.on("data", (chunk: Buffer) => {
-      if (outputBytes < CHALLENGE_RUN_LIMITS.output) {
-        stdout.push(chunk.subarray(0, CHALLENGE_RUN_LIMITS.output - outputBytes));
+      if (outputBytes < outputLimit) {
+        stdout.push(chunk.subarray(0, outputLimit - outputBytes));
       }
       outputBytes += chunk.length;
-      if (outputBytes > CHALLENGE_RUN_LIMITS.output) stop("output-limit");
+      if (outputBytes > outputLimit) stop("output-limit");
     });
     child.stderr.on("data", (chunk: Buffer) => {
       if (errorBytes < CHALLENGE_RUN_LIMITS.diagnostic) {
@@ -122,6 +122,62 @@ function runProcess(executable: string, args: string[], cwd: string, input: stri
   });
 }
 
+function sourceBytes(source: Buffer | string) {
+  const bytes = Buffer.from(source);
+  if (bytes.length === 0 || bytes.length > SOURCE_LIMIT) throw new Error("Use a nonempty C++ file up to 256 KiB.");
+  return bytes;
+}
+
+function validateInput(input: string) {
+  if (input.length > CHALLENGE_RUN_LIMITS.input) throw new Error("This case exceeds the local input limit.");
+}
+
+async function compileCppChallenge(bytes: Buffer, directory: string, signal?: AbortSignal): Promise<
+  { executable: string; sourceHash: string } | { failure: CppChallengeResult }
+> {
+  const sourceHash = createHash("sha256").update(bytes).digest("hex");
+  const compiler = process.platform === "darwin" ? "/usr/bin/clang++" : "/usr/bin/c++";
+  await writeFile(join(directory, "solution.cpp"), bytes, { mode: 0o600, flag: "wx" });
+  const compiled = await runProcess(compiler, ["-std=c++17", "solution.cpp", "-o", "solution"], directory, "", COMPILE_TIMEOUT, signal).catch(error => {
+    if ((error as NodeJS.ErrnoException)?.code === "ENOENT") throw new Error("Install your system C++ compiler before running a challenge case.");
+    throw error;
+  });
+  if (compiled.stopped || compiled.code !== 0) {
+    const explanation = compiled.stopped === "timeout" ? "Compilation reached the 15 second limit."
+      : compiled.stopped === "output-limit" ? "Compiler output reached the size limit."
+      : "The source could not be compiled.";
+    return { failure: {
+      sourceHash, output: "", outcome: compiled.stopped ?? "compile-error",
+      diagnostic: compiled.stderr.trim() || explanation,
+    } };
+  }
+  return { executable: join(directory, "solution"), sourceHash };
+}
+
+async function runCompiledChallenge(executable: string, directory: string, input: string, signal?: AbortSignal, outputLimit?: number): Promise<{
+  output: string;
+  outcome: ChallengeReferenceBatchCase["outcome"];
+  diagnostic: string;
+}> {
+  const run = await runProcess(executable, [], directory, input, RUN_TIMEOUT, signal, outputLimit);
+  let output: string;
+  try {
+    output = new TextDecoder("utf-8", { fatal: !run.stopped, ignoreBOM: true }).decode(run.stdout);
+  } catch {
+    return { output: "", outcome: "runtime-error", diagnostic: "The program emitted invalid UTF-8 output." };
+  }
+  if (output.includes("\0")) {
+    if (!run.stopped) return { output: "", outcome: "runtime-error", diagnostic: "The program emitted binary output." };
+    output = "";
+  }
+  const outcome = run.stopped ?? (run.code === 0 ? "exited" : "runtime-error");
+  const diagnostic = outcome === "timeout" ? "The program reached the 3 second limit."
+    : outcome === "output-limit" ? "The program output reached the size limit."
+    : outcome === "runtime-error" ? run.stderr.trim() || (run.signal ? `The program stopped with ${run.signal}.` : `The program exited with code ${run.code}.`)
+    : run.stderr.trim();
+  return { output, outcome, diagnostic };
+}
+
 export async function runCppChallenge({ source, input, signal }: {
   source: Buffer | string;
   input: string;
@@ -129,44 +185,14 @@ export async function runCppChallenge({ source, input, signal }: {
 }): Promise<CppChallengeResult> {
   if (!cppChallengeSupported()) throw new Error("Local C++ challenge runs are available on macOS and Linux.");
   signal?.throwIfAborted();
-  const bytes = Buffer.from(source);
-  if (bytes.length === 0 || bytes.length > SOURCE_LIMIT) throw new Error("Use a nonempty C++ file up to 256 KiB.");
-  if (input.length > CHALLENGE_RUN_LIMITS.input) throw new Error("This case exceeds the local input limit.");
-  const sourceHash = createHash("sha256").update(bytes).digest("hex");
+  const bytes = sourceBytes(source);
+  validateInput(input);
   const directory = await mkdtemp(join(tmpdir(), "forma-challenge-"));
-  const compiler = process.platform === "darwin" ? "/usr/bin/clang++" : "/usr/bin/c++";
   try {
-    await writeFile(join(directory, "solution.cpp"), bytes, { mode: 0o600, flag: "wx" });
-    const compiled = await runProcess(compiler, ["-std=c++17", "solution.cpp", "-o", "solution"], directory, "", COMPILE_TIMEOUT, signal).catch(error => {
-      if ((error as NodeJS.ErrnoException)?.code === "ENOENT") throw new Error("Install your system C++ compiler before running a challenge case.");
-      throw error;
-    });
-    if (compiled.stopped || compiled.code !== 0) {
-      const explanation = compiled.stopped === "timeout" ? "Compilation reached the 15 second limit."
-        : compiled.stopped === "output-limit" ? "Compiler output reached the size limit."
-        : "The source could not be compiled.";
-      return {
-        sourceHash, output: "", outcome: compiled.stopped ?? "compile-error",
-        diagnostic: compiled.stderr.trim() || explanation,
-      };
-    }
-    const run = await runProcess(join(directory, "solution"), [], directory, input, RUN_TIMEOUT, signal);
-    let output: string;
-    try {
-      output = new TextDecoder("utf-8", { fatal: !run.stopped, ignoreBOM: true }).decode(run.stdout);
-    } catch {
-      return { sourceHash, output: "", outcome: "runtime-error", diagnostic: "The program emitted invalid UTF-8 output." };
-    }
-    if (output.includes("\0")) {
-      if (!run.stopped) return { sourceHash, output: "", outcome: "runtime-error", diagnostic: "The program emitted binary output." };
-      output = "";
-    }
-    const outcome = run.stopped ?? (run.code === 0 ? "exited" : "runtime-error");
-    const diagnostic = outcome === "timeout" ? "The program reached the 3 second limit."
-      : outcome === "output-limit" ? "The program output reached the size limit."
-      : outcome === "runtime-error" ? run.stderr.trim() || (run.signal ? `The program stopped with ${run.signal}.` : `The program exited with code ${run.code}.`)
-      : run.stderr.trim();
-    return { sourceHash, output, outcome, diagnostic };
+    const compiled = await compileCppChallenge(bytes, directory, signal);
+    if ("failure" in compiled) return compiled.failure;
+    const result = await runCompiledChallenge(compiled.executable, directory, input, signal);
+    return { sourceHash: compiled.sourceHash, ...result };
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -186,4 +212,57 @@ export async function runCppReferenceChallenge({ source, reference, input, signa
   }
   const result = await runCppChallenge({ source: solution, input, signal });
   return { result, expectedOutput: referenceRun.output, referenceHash: referenceRun.sourceHash };
+}
+
+export async function runCppReferenceChallengeBatch({ source, reference, cases, signal }: {
+  source: Buffer | string;
+  reference: Buffer | string;
+  cases: readonly { caseId: string; input: string }[];
+  signal?: AbortSignal;
+}): Promise<{ sourceHash: string; referenceHash: string; cases: ChallengeReferenceBatchCase[] }> {
+  if (!cppChallengeSupported()) throw new Error("Local C++ challenge runs are available on macOS and Linux.");
+  signal?.throwIfAborted();
+  const solutionBytes = sourceBytes(source), referenceBytes = sourceBytes(reference);
+  if (!cases.length || cases.length > CHALLENGE_CASE_LIMIT || new Set(cases.map(item => item.caseId)).size !== cases.length) {
+    throw new Error("Choose one to three distinct challenge cases.");
+  }
+  const reviewedCases = cases.map(({ caseId, input }) => {
+    validateInput(input);
+    return { caseId, input };
+  });
+  const directory = await mkdtemp(join(tmpdir(), "forma-challenge-batch-"));
+  async function execute(executable: string, input: string) {
+    const runDirectory = await mkdtemp(join(directory, "run-"));
+    try {
+      return await runCompiledChallenge(executable, runDirectory, input, signal, CHALLENGE_BATCH_OUTPUT_LIMIT);
+    } finally {
+      await rm(runDirectory, { recursive: true, force: true });
+    }
+  }
+  try {
+    const referenceProgram = await compileCppChallenge(referenceBytes, await mkdtemp(join(directory, "reference-")), signal);
+    if ("failure" in referenceProgram) throw new Error(`Reference compilation failed. ${referenceProgram.failure.diagnostic}`);
+    const solutionProgram = await compileCppChallenge(solutionBytes, await mkdtemp(join(directory, "solution-")), signal);
+    if ("failure" in solutionProgram) throw new Error(`Solution compilation failed. ${solutionProgram.failure.diagnostic}`);
+
+    // Freeze the expected outputs before any solution process runs with local user permissions.
+    const referenceRuns = [];
+    for (const { caseId, input } of reviewedCases) {
+      const expected = await execute(referenceProgram.executable, input);
+      referenceRuns.push({ caseId, input, expected });
+    }
+    const results: ChallengeReferenceBatchCase[] = [];
+    for (const { caseId, input, expected } of referenceRuns) {
+      if (expected.outcome !== "exited") {
+        results.push({ caseId, outcome: expected.outcome, referenceFailed: true, output: "", expectedOutput: "" });
+        continue;
+      }
+      const actual = await execute(solutionProgram.executable, input);
+      results.push({ caseId, outcome: actual.outcome, output: actual.output, expectedOutput: expected.output });
+    }
+    signal?.throwIfAborted();
+    return { sourceHash: solutionProgram.sourceHash, referenceHash: referenceProgram.sourceHash, cases: results };
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 }
