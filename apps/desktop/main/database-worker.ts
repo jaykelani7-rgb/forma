@@ -64,6 +64,7 @@ parentPort!.on('message', (request: {id:number;method:string;args:unknown[]}) =>
       case 'tutor-finalize': value=store.tutor.finalize(a[0],now); break;
       case 'tutor-delete': value=store.tutor.delete(a[0]); break;
       case 'tutor-export': value=store.tutor.export(a[0]); break;
+      case 'tutor-export-challenge-ranking': value=store.tutor.exportChallengeRanking(); break;
       case 'tutor-settings': value=store.tutor.setSettings(a[0],now); break;
       case 'tutor-propose': value=store.tutor.propose(a[0],now); break;
       case 'tutor-approve': value=store.tutor.approve(a[0],now); break;

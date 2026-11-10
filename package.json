@@ -29,7 +29,8 @@
     "tutor:verify": "node scripts/companion/verify-tutor.mjs",
     "local:verify": "node scripts/companion/verify-local.mjs",
     "tutor:evaluate": "node --import tsx scripts/tutor/evaluate.ts",
-    "tutor:evaluate-challenge": "node --import tsx scripts/tutor/evaluate-challenge.ts"
+    "tutor:evaluate-challenge": "node --import tsx scripts/tutor/evaluate-challenge.ts",
+    "tutor:rank-challenge": "node --import tsx scripts/tutor/rank-challenge.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "2.117.2",

@@ -7,6 +7,7 @@ import { CompanionStore } from '../apps/desktop/main/store';
 import { validateLocalBackup } from '../apps/desktop/main/backup-schema';
 import { buildProviderMessages, hintLevelForAction, policyInstructions } from '../packages/tutor/policy';
 import { parseSharedCode, parseStatementInput, providerContext, tutorHash, validateStatement } from '../packages/tutor/context';
+import { readChallengeRankingDataset } from '../packages/tutor/challenge-ranking';
 import type { SharedCode, StatementInput, TutorAction, TutorProviderStatus, TutorSendInput, TutorTurn } from '../packages/tutor/types';
 import type { ChallengeRunRequest, ChallengeRunSubmission } from '../packages/tutor/challenge-run';
 
@@ -182,6 +183,69 @@ test('challenge cases keep selection and feedback separate from runs recorded du
     assert.throws(() => store.backups.preview(JSON.stringify(tampered)), /does not match the frozen challenge case/);
     assert.deepEqual(label('case-2', null).state.feedback, []);
     assert.deepEqual(store.tutor.deskChallengeState(ids).runs, [late.receipt]);
+  } finally {
+    store.close();
+  }
+});
+
+test('challenge ranking export groups exposed cases and keeps run results separate from feedback', () => {
+  const f = fixture();
+  const { store } = f;
+  try {
+    assert.deepEqual(store.tutor.exportChallengeRanking().groups, []);
+    const shared = store.tutor.code(code('ranking-private-code', 'int main() { /* ranking-private-code */ }'));
+    const context = store.tutor.deskIdeaReview({ problemId: store.snapshot().state.problemId }, deskProvider, now);
+    assert.ok(context.statement && context.conversationId);
+    const completedChallenge = (turnId: string, cases: unknown[]) => show(store, store.tutor.prepare({
+      turnId, requestId: `${turnId}-request`, conversationId: context.conversationId,
+      action: 'challenge-assumption', statementId: context.statement!.id, codeId: shared.id, noteIds: [], deskIdea: context.target,
+      text: JSON.stringify({ approach: 'ranking-private-prompt', assumption: 'Try even weights.', uncertainty: '' }),
+    }, deskProvider.model, now), JSON.stringify({
+      observation: 'ranking-private-observation', question: 'What does the program print?', cases,
+    }));
+    const alternatives = [
+      { input: '8\n', expectedOutput: 'YES', reason: 'ranking-private-reason' },
+      { input: 'ranking-private-input', expectedOutput: null, reason: 'A second case.' },
+      { input: '3\n4\n', expectedOutput: 'ranking-private-output', reason: 'An unrated case.' },
+    ];
+    const first = completedChallenge('ranking-private-turn', alternatives);
+    const ids = { turnId: first.id, requestId: first.requestId };
+    store.tutor.exposed(ids);
+    store.tutor.updateDeskChallenge({ ...ids, caseId: 'case-2', label: 'invalid-input' }, 'feedback', now + 201);
+    const target = { fileUri: 'file:///practice/a.cpp', workspaceId: 'workspace-one', clientId: 'vscode-one' };
+    const reviewed = store.tutor.challengeRun({ operation: 'review', target }, now + 202);
+    assert.ok('plan' in reviewed);
+    store.tutor.challengeRun({ operation: 'record', target, run: {
+      ...ids, id: 'ranking-private-run', recoveryEpoch: reviewed.plan.recoveryEpoch,
+      sourceHash: 'a'.repeat(64), outcome: 'exited', diagnostic: 'ranking-private-diagnostic',
+      output: 'ranking-private-actual', expectedOutput: 'YES', expectedSource: 'statement-sample',
+    } }, now + 203);
+    const sameProblem = completedChallenge('ranking-private-second', [alternatives[0]]);
+    store.tutor.exposed({ turnId: sameProblem.id, requestId: sameProblem.requestId });
+    completedChallenge('ranking-private-unseen', alternatives);
+    show(store, send(f, 'ranking-private-ordinary'), 'ranking-private-reply');
+
+    const snapshot = store.snapshot();
+    const dataset = store.tutor.exportChallengeRanking();
+    const serialized = JSON.stringify(dataset);
+    assert.deepEqual(readChallengeRankingDataset(JSON.parse(serialized)), dataset);
+    assert.equal(dataset.source, 'practice');
+    assert.equal(dataset.groups.length, 2);
+    const [firstGroup, secondGroup] = dataset.groups;
+    assert.equal(firstGroup.problemKey, secondGroup.problemKey);
+    assert.match(firstGroup.problemKey, /^[a-f0-9]{64}$/);
+    assert.notEqual(firstGroup.id, secondGroup.id);
+    assert.equal(firstGroup.split, null);
+    assert.deepEqual(firstGroup.cases.map(({ id, runs, feedback, targetedMismatch }) => ({ id, runs, feedback, targetedMismatch })), [
+      { id: 'case-1', runs: [{ outcome: 'mismatch', expectedSource: 'statement-sample' }], feedback: null, targetedMismatch: null },
+      { id: 'case-2', runs: [], feedback: 'invalid-input', targetedMismatch: null },
+      { id: 'case-3', runs: [], feedback: null, targetedMismatch: null },
+    ]);
+    assert.equal(firstGroup.cases[0].inputChars, 2);
+    assert.equal(firstGroup.cases[1].hasSuggestedOutput, false);
+    assert.doesNotMatch(serialized, /ranking-private-|file:\/\/|contest:4:A|workspace-one|Watermelon|a{64}/);
+    assert.deepEqual(store.tutor.exportChallengeRanking(), dataset);
+    assert.deepEqual(store.snapshot(), snapshot);
   } finally {
     store.close();
   }

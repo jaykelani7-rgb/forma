@@ -1,14 +1,15 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { TUTOR_MODEL_DEFAULTS } from "../../apps/desktop/main/tutor-config";
 import { ConfiguredTutorProvider, tutorProviderError } from "../../apps/desktop/main/tutor-provider";
 import { challengeOutputEqual } from "../../packages/tutor/challenge-run";
+import { challengeRankingFeatures, readChallengeRankingDataset, type ChallengeRankingCase } from "../../packages/tutor/challenge-ranking";
 import { readIdeaChallenge } from "../../packages/tutor/idea";
 import { hintLevelForAction, policyInstructions } from "../../packages/tutor/policy";
 import type { IdeaChallengeCase, TutorProviderId, TutorTurn } from "../../packages/tutor/types";
-import { challengeFixtures, type ChallengeFixture, type ChallengeSplit } from "./challenge-fixtures";
+import { challengeFixtures, challengeRankingFixtureDataset, type ChallengeFixture, type ChallengeSplit } from "./challenge-fixtures";
 
 function scoreCase(fixture: ChallengeFixture, candidate: IdeaChallengeCase) {
   const { id: caseId, input, expectedOutput: modelExpectedOutput, reason } = candidate;
@@ -42,22 +43,32 @@ function targetedMismatch(result: ReturnType<typeof scoreCase>) {
   return result.status === "valid-input" && result.mismatch && result.probesAssumption;
 }
 
+function rankingCase(result: ReturnType<typeof scoreCase>): ChallengeRankingCase {
+  return {
+    id: result.caseId,
+    ...challengeRankingFeatures({ input: result.input, reason: result.reason, expectedOutput: result.modelExpectedOutput }),
+    runs: [],
+    feedback: null,
+    targetedMismatch: targetedMismatch(result),
+  };
+}
+
 function verifyFixtures() {
   assert.equal(new Set(challengeFixtures.map(fixture => fixture.id)).size, challengeFixtures.length);
   for (const split of ["development", "holdout"]) {
-    assert.ok(challengeFixtures.filter(fixture => fixture.split === split).length >= 3);
+    assert.ok(challengeFixtures.filter(fixture => fixture.split === split).length >= 6);
   }
   const response = (input: string | null, expectedOutput: string | null) =>
     JSON.stringify({ observation: "Synthetic benchmark fixture.", question: "What happens for this input?", exampleInput: input, expectedOutput });
 
   for (const fixture of challengeFixtures) {
     const { trigger, control } = fixture;
-    assert.deepEqual(score(fixture, response(trigger.input, control.output)), {
+    assert.deepEqual(score(fixture, response(trigger.input, trigger.buggy)), {
       status: "valid-input",
       caseId: "case-1",
       reason: "Synthetic benchmark fixture.",
       input: trigger.input,
-      modelExpectedOutput: control.output,
+      modelExpectedOutput: trigger.buggy,
       referenceOutput: trigger.correct,
       buggyOutput: trigger.buggy,
       mismatch: true,
@@ -97,6 +108,11 @@ function verifyFixtures() {
     assert.equal(score(fixture, response(null, null)).status, "no-input", fixture.id);
   }
   assert.equal(score(challengeFixtures[0], "{}").status, "invalid-response");
+  const ranking = readChallengeRankingDataset(challengeRankingFixtureDataset());
+  for (const group of ranking.groups) {
+    assert.equal(group.cases.length, 2, group.id);
+    assert.equal(group.cases.filter(candidate => candidate.targetedMismatch).length, 1, group.id);
+  }
   process.stdout.write(`Verified ${challengeFixtures.length} challenge fixtures across development and holdout. No model requests were made.\n`);
 }
 
@@ -216,11 +232,25 @@ async function evaluateLive(split: ChallengeSplit) {
   };
   const at = new Date().toISOString();
   const policyHash = createHash("sha256").update(policyInstructions("challenge-assumption", 1)).digest("hex");
+  const runId = randomUUID();
+  const ranking = readChallengeRankingDataset({
+    format: "forma-challenge-ranking",
+    version: 1,
+    source: "benchmark",
+    groups: scores.map(result => ({
+      id: `${runId}:${result.id}`,
+      problemKey: result.id,
+      split,
+      cases: result.status === "valid-input" || result.status === "invalid-input"
+        ? [result, ...result.alternatives].map(rankingCase)
+        : [],
+    })),
+  });
   const directory = resolve("dist/tutor-evaluation");
   await mkdir(directory, { recursive: true, mode: 0o700 });
   const report = resolve(directory, `challenge-${split}-${at.replace(/[:.]/g, "-")}.json`);
   await writeFile(report, JSON.stringify({
-    benchmarkVersion: 2, at, split, provider, model, policyHash, counts, scores,
+    benchmarkVersion: 3, at, split, provider, model, policyHash, counts, scores, ranking,
   }, null, 2), { flag: "wx", mode: 0o600 });
   process.stdout.write(`${counts.targetedMismatches}/${counts.cases} first cases exposed the intended bug. ${counts.casesWithAnyTargetedMismatch}/${counts.cases} problems had a targeted mismatch anywhere in their case list. Saved ${report}\n`);
 }

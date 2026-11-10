@@ -1,7 +1,7 @@
 import { readRibbonOptions } from "../../../packages/ribbon/options";
 import { app, BrowserWindow, ipcMain, screen, Tray, Menu, nativeImage, globalShortcut, shell, dialog, safeStorage, powerMonitor, nativeTheme, systemPreferences } from "electron";
-import { mkdirSync, readFileSync, writeFileSync, existsSync, statSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { mkdirSync, readFileSync, writeFileSync, existsSync, statSync, renameSync, rmSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from 'node:os';
 import { randomBytes, randomUUID } from "node:crypto";
@@ -13,6 +13,7 @@ import { ThoughtTakeStore } from "./thought-take-store";
 import { DesktopSessionHandoff } from "./session-handoff-client";
 import { tutorExternalUrl } from "../../../packages/tutor/links";
 import { FIRST_CHALLENGE_CASE_ID, type ChallengeCaseState, type ChallengeRunPlan, type ChallengeRunReceipt, type ChallengeRunRequest } from "../../../packages/tutor/challenge-run";
+import type { ChallengeRankingDataset } from "../../../packages/tutor/challenge-ranking";
 import type { DeskHintReview, DeskIdeaReview, SharedCode, StatementSnapshot, TutorConversation, TutorEvent, TutorSendInput, TutorStoredView, TutorTurn } from "../../../packages/tutor/types";
 import { AttentionPolicy } from "./attention";
 import { companionToday } from "../../../packages/core/src/companion-today";
@@ -232,6 +233,26 @@ async function tutorUi(action:string,payload:unknown){
     case 'tutor-export':{
       const json=await database.call<string>(action,payload);const choice=await dialog.showSaveDialog(window,{defaultPath:'forma-tutor-conversation.json',filters:[{name:'Tutor conversation',extensions:['json']}]});
       if(choice.canceled||!choice.filePath)return {saved:false};writeFileSync(choice.filePath,json,{mode:0o600});return {saved:true};
+    }
+    case 'tutor-export-challenge-ranking': {
+      const current = recoveryFence.lease();
+      const dataset = await database.call<ChallengeRankingDataset>(action);
+      current();
+      const caseCount = dataset.groups.reduce((count, group) => count + group.cases.length, 0);
+      if (!caseCount) return { status: 'empty' };
+      const choice = await dialog.showSaveDialog(window, {
+        defaultPath: 'forma-challenge-ranking.json', filters: [{ name: 'Challenge ranking data', extensions: ['json'] }],
+      });
+      current();
+      if (choice.canceled || !choice.filePath) return { status: 'cancelled' };
+      const temporary = join(dirname(choice.filePath), `.forma-challenge-ranking-${randomUUID()}.partial`);
+      try {
+        writeFileSync(temporary, JSON.stringify(dataset, null, 2), { mode: 0o600, flag: 'wx' });
+        renameSync(temporary, choice.filePath);
+      } finally {
+        rmSync(temporary, { force: true });
+      }
+      return { status: 'saved', caseCount };
     }
     case 'tutor-microphone':{
       cancelVoice();const request=hostVoice.begin();

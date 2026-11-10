@@ -7,6 +7,7 @@ import { availableTutorNotes, freezeTutorContext, parseSharedCode, TUTOR_BUDGET,
 import { buildProviderMessages, hintLevelForAction, parseTutorAction, parseTutorDraftAction } from '../../../packages/tutor/policy';
 import { IDEA_LIMITS, readIdeaChallenge, readIdeaOutline, readIdeaQuestion } from '../../../packages/tutor/idea';
 import { CHALLENGE_RUN_LIMIT, FIRST_CHALLENGE_CASE_ID, challengeOutputEqual, challengeSampleOutput, parseChallengeRunRequest, readChallengeCaseId, readChallengeFeedback, readChallengeRunReceipt, type ChallengeCaseState, type ChallengeRunPlan, type ChallengeRunReceipt } from '../../../packages/tutor/challenge-run';
+import { challengeRankingFeatures, type ChallengeRankingDataset } from '../../../packages/tutor/challenge-ranking';
 import { isDeskIdeaAction } from '../../../packages/tutor/types';
 import type { DeskHintReview, DeskHintTarget, DeskIdeaReview, IdeaChallengeCase, SharedCode, StatementSnapshot, TutorAction, TutorContextView, TutorConversation, TutorProposal, TutorProviderStatus, TutorSendInput, TutorSettings, TutorStoredView, TutorTurn, TutorUsage, TutorDraft, TutorDraftView, TutorDraftSaveInput, TutorDraftSaveResult } from '../../../packages/tutor/types';
 import type { LocalSnapshot } from './store';
@@ -584,6 +585,35 @@ export class TutorStore {
   export(conversationId?:unknown):string {
     const conversations=conversationId===undefined?this.view().conversations:[this.conversation(conversationId)];
     return JSON.stringify({format:'forma-tutor',version:1,exportedAt:new Date().toISOString(),conversations:conversations.map(conversation=>({conversation,turns:this.turns(conversation.id),previousRequests:this.db.prepare('SELECT body FROM tutor_requests WHERE turn_id IN (SELECT id FROM tutor_turns WHERE conversation_id=?) ORDER BY rowid').all(conversation.id).map(row=>decodeTurn(row.body)),proposals:this.db.prepare('SELECT body FROM tutor_proposals WHERE conversation_id=?').all(conversation.id).map(row=>decode<TutorProposal>(row.body))}))},null,2);
+  }
+  exportChallengeRanking(): ChallengeRankingDataset {
+    const groups: ChallengeRankingDataset['groups'] = [];
+    const challenges = this.db.prepare(`
+      SELECT body FROM tutor_turns
+      WHERE status = 'completed'
+        AND json_extract(body, '$.action') = 'challenge-assumption'
+        AND json_extract(body, '$.exposed') = 1
+      ORDER BY rowid
+    `);
+    for (const row of challenges.iterate()) {
+      const turn = decodeTurn(row.body);
+      const { cases } = readIdeaChallenge(turn.assistantText);
+      groups.push({
+        id: tutorHash(JSON.stringify(['forma-challenge-ranking:challenge', turn.id, turn.requestId])),
+        problemKey: tutorHash(`forma-challenge-ranking:problem:${turn.context.identity}`),
+        split: null,
+        cases: cases.map(candidate => ({
+          id: candidate.id,
+          ...challengeRankingFeatures(candidate),
+          runs: (turn.challengeRuns ?? [])
+            .filter(run => (run.caseId ?? FIRST_CHALLENGE_CASE_ID) === candidate.id)
+            .map(({ outcome, expectedSource }) => ({ outcome, expectedSource })),
+          feedback: turn.challengeFeedback?.find(item => item.caseId === candidate.id)?.label ?? null,
+          targetedMismatch: null,
+        })),
+      });
+    }
+    return { format: 'forma-challenge-ranking', version: 1, source: 'practice', groups };
   }
   propose(input:unknown,now=Date.now()):TutorProposal {
     const value=tutorObject(input);tutorFields(value,['id','turnId','kind','text']);const id=tutorId(value.id),turn=this.readTurn(value.turnId);
