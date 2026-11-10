@@ -5,7 +5,7 @@ import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { cppChallengeSupported, readCppChallengeSource, runCppChallenge } from "../packages/integrations/cpp-challenge";
+import { cppChallengeSupported, readCppChallengeSource, runCppChallenge, runCppReferenceChallenge } from "../packages/integrations/cpp-challenge";
 import { CHALLENGE_RUN_LIMITS } from "../packages/tutor/challenge-run";
 
 const compilerAvailable = cppChallengeSupported() &&
@@ -21,6 +21,22 @@ test("local challenge runs preserve input and identify the exact compiled source
     outcome: "exited",
     diagnostic: "",
   });
+});
+
+test("reference challenges give both saved sources the same input and retain both fingerprints", { skip: !compilerAvailable }, async () => {
+  const source = Buffer.from("#include <cstdio>\nint main() { int n; if (scanf(\"%d\", &n) == 1) printf(\"%d\\n\", n + 1); }\n");
+  const reference = Buffer.from("#include <cstdio>\nint main() { int n; if (scanf(\"%d\", &n) == 1) printf(\"%d\\n\", n * 2); }\n");
+  const run = await runCppReferenceChallenge({ source, reference, input: "7\n" });
+  assert.equal(run.result.outcome, "exited");
+  assert.equal(run.result.output, "8\n");
+  assert.equal(run.expectedOutput, "14\n");
+  assert.equal(run.result.sourceHash, createHash("sha256").update(source).digest("hex"));
+  assert.equal(run.referenceHash, createHash("sha256").update(reference).digest("hex"));
+});
+
+test("failed reference output never becomes the expected answer", { skip: !compilerAvailable }, async () => {
+  const reference = "#include <cstdio>\nint main() { puts(\"incomplete output\"); return 2; }";
+  await assert.rejects(runCppReferenceChallenge({ source: "", reference, input: "" }), /Reference solution failed\. The program exited with code 2/);
 });
 
 test("local challenge runs distinguish compile failure and bound emitted output", { skip: !compilerAvailable }, async () => {

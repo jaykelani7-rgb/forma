@@ -543,4 +543,34 @@ test("another challenge case keeps its own runs and feedback when the Desk reope
   await expect(verifier.getByText("Output matched", { exact: true })).toBeVisible();
   expect(await page.evaluate(() => window.__deskHintFixture.sends.length)).toBe(2);
   expect(await page.evaluate(() => window.__deskHintFixture.commands)).toEqual([]);
+
+  await card.getByRole("button", { name: "Try another case", exact: true }).click();
+  await expect(verifier.getByText("Forma: Run Challenge with Reference", { exact: true })).toBeVisible();
+  const referenceRun: ChallengeRunReceipt = {
+    ...receipt, id: "reference-case-run", caseId: "case-2", input: second.input, expectedOutput: "2\n",
+    expectedSource: "reference", output: "0\n", outcome: "mismatch", ranAt: "2026-11-08T08:12:00.000Z",
+    reference: { fileName: "reference.cpp", sourceHash: "b".repeat(64) },
+  };
+  await page.evaluate(run => window.__deskHintFixture.recordRun(run), referenceRun);
+  await expect(verifier.getByText("Output differed from reference", { exact: true })).toBeVisible();
+  const referenceOutput = verifier.getByRole("group", { name: "Reference output", exact: true });
+  const solutionOutput = verifier.getByRole("group", { name: "Solution output", exact: true });
+  await expect(referenceOutput.getByText("2", { exact: true })).toBeVisible();
+  await expect(solutionOutput.getByText("0", { exact: true })).toBeVisible();
+  await expect(referenceOutput.getByText("reference.cpp", { exact: true })).toBeVisible();
+  await expect(solutionOutput.getByText("search.cpp", { exact: true })).toBeVisible();
+  await expect(referenceOutput.getByTitle("b".repeat(64))).toBeVisible();
+  await expect(solutionOutput.getByTitle("a".repeat(64))).toBeVisible();
+  expect(await page.evaluate(() => window.__deskHintFixture.commands)).toEqual([]);
+
+  await verifier.getByRole("button", { name: "Save difference to Desk", exact: true }).click();
+  await expect(verifier.getByRole("button", { name: "Difference saved", exact: true })).toBeDisabled();
+  const commands = await page.evaluate(() => window.__deskHintFixture.commands);
+  expect(commands).toMatchObject([{ type: "desk-add", payload: { kind: "counterexample" } }]);
+  const saved = commands[0];
+  if (saved.type !== "desk-add") throw new Error("Expected a Desk evidence write.");
+  expect(saved.payload.text).toContain(`Reference reference.cpp\nSource SHA-256 ${"b".repeat(64)}`);
+  expect(saved.payload.text).toContain(`Solution search.cpp\nSource SHA-256 ${"a".repeat(64)}`);
+  expect(saved.payload.text).toContain("Reference output\n2\n");
+  expect(saved.payload.text).toContain("Solution output\n0\n");
 });

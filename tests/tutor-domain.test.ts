@@ -188,6 +188,52 @@ test('challenge cases keep selection and feedback separate from runs recorded du
   }
 });
 
+test('reference challenge runs keep scoped output and metadata separate from the ranking export', () => {
+  const { store } = fixture();
+  try {
+    const context = store.tutor.deskIdeaReview({ problemId: store.snapshot().state.problemId }, deskProvider, now);
+    assert.ok(context.statement && context.conversationId);
+    const ids = { turnId: 'reference-challenge', requestId: 'reference-request' };
+    show(store, store.tutor.prepare({
+      ...ids, conversationId: context.conversationId, action: 'challenge-assumption', statementId: context.statement.id,
+      codeId: null, noteIds: [], deskIdea: context.target,
+      text: JSON.stringify({ approach: 'Try even weights.', assumption: 'Even weights can be split.', uncertainty: '' }),
+    }, deskProvider.model, now), JSON.stringify({
+      observation: 'Consider smaller weights.', question: 'What does the program print?',
+      cases: [{ input: '2\n', expectedOutput: 'YES', reason: 'The smallest even weight.' }],
+    }));
+    store.tutor.exposed(ids);
+    const target = { fileUri: 'file:///practice/a.cpp', workspaceId: 'workspace-one', clientId: 'vscode-one' };
+    const reviewed = store.tutor.challengeRun({ operation: 'review', target }, now + 200);
+    assert.ok('plan' in reviewed);
+    assert.equal(reviewed.plan.sampleOutput, null);
+    const reference = { fileName: 'private-reference.cpp', sourceHash: 'b'.repeat(64) };
+    const run: ChallengeRunSubmission = {
+      ...ids, id: 'reference-run', recoveryEpoch: reviewed.plan.recoveryEpoch, sourceHash: 'a'.repeat(64),
+      outcome: 'exited', diagnostic: '', output: 'YES\n', expectedOutput: 'NO\n', expectedSource: 'reference', reference,
+    };
+    const record = (submission: ChallengeRunSubmission, at = now + 201) =>
+      store.tutor.challengeRun({ operation: 'record', target, run: submission }, at);
+    const result = record(run);
+    assert.ok('receipt' in result);
+    assert.equal(result.receipt.outcome, 'mismatch');
+    assert.deepEqual(result.receipt.reference, reference);
+    assert.deepEqual(record(run, now + 202), result);
+    assert.throws(() => record({ ...run, reference: { ...reference, sourceHash: 'c'.repeat(64) } }), /different saved result/);
+
+    const backup = store.backups.export({ scope: 'companion', includeTutor: true }, now + 203);
+    assert.deepEqual(validateLocalBackup(backup, store.snapshot().data).backup.tutor!.turns[0].challengeRuns, [result.receipt]);
+    const corrupted = JSON.parse(backup);
+    delete corrupted.tutor.turns[0].challengeRuns[0].reference;
+    assert.throws(() => store.backups.preview(JSON.stringify(corrupted)), /invalid fields/);
+    const ranking = readChallengeRankingDataset(store.tutor.exportChallengeRanking());
+    assert.deepEqual(ranking.groups[0].cases[0].runs, [{ outcome: 'mismatch', expectedSource: 'reference' }]);
+    assert.doesNotMatch(JSON.stringify(ranking), /private-reference\.cpp|b{64}/);
+  } finally {
+    store.close();
+  }
+});
+
 test('challenge ranking export groups exposed cases and keeps run results separate from feedback', () => {
   const f = fixture();
   const { store } = f;

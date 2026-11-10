@@ -19,7 +19,12 @@ export interface ChallengeCaseState {
 
 const executionOutcomes = ["exited", "compile-error", "runtime-error", "timeout", "output-limit"] as const;
 const receiptOutcomes = ["match", "mismatch", "compile-error", "runtime-error", "timeout", "output-limit"] as const;
-type ExpectedSource = "statement-sample" | "user";
+type ExpectedSource = "statement-sample" | "user" | "reference";
+
+export interface ChallengeReference {
+  fileName: string;
+  sourceHash: string;
+}
 
 export interface ChallengeRunTarget {
   fileUri: string;
@@ -51,6 +56,7 @@ export interface ChallengeRunSubmission {
   diagnostic: string;
   expectedOutput: string;
   expectedSource: ExpectedSource;
+  reference?: ChallengeReference;
 }
 
 export interface ChallengeRunReceipt {
@@ -59,6 +65,7 @@ export interface ChallengeRunReceipt {
   input: string;
   expectedOutput: string;
   expectedSource: ExpectedSource;
+  reference?: ChallengeReference;
   sourceHash: string;
   fileName: string;
   output: string;
@@ -68,7 +75,7 @@ export interface ChallengeRunReceipt {
 }
 
 export type ChallengeRunRequest =
-  | { operation: "review"; target: ChallengeRunTarget }
+  | { operation: "review"; target: ChallengeRunTarget; withReference?: true }
   | { operation: "record"; target: ChallengeRunTarget; run: ChallengeRunSubmission };
 
 function invalid(): never {
@@ -98,8 +105,21 @@ function sourceHash(value: unknown): string {
 }
 
 function expectedSource(value: unknown): ExpectedSource {
-  if (value !== "statement-sample" && value !== "user") return invalid();
+  if (value !== "statement-sample" && value !== "user" && value !== "reference") return invalid();
   return value;
+}
+
+function basenameLabel(value: unknown): string {
+  const fileName = text(value, 250, 1);
+  if (/[\\/\r\n]/.test(fileName)) return invalid();
+  return fileName;
+}
+
+function readReference(value: Record<string, unknown>, source: ExpectedSource): ChallengeReference | undefined {
+  if (Object.hasOwn(value, "reference") !== (source === "reference")) return invalid();
+  if (source !== "reference") return;
+  const reference = record(value.reference, ["fileName", "sourceHash"]);
+  return { fileName: basenameLabel(reference.fileName), sourceHash: sourceHash(reference.sourceHash) };
 }
 
 function oneOf<T extends string>(value: unknown, choices: readonly T[]): T {
@@ -138,14 +158,21 @@ function readTarget(input: unknown): ChallengeRunTarget {
 export function parseChallengeRunRequest(input: unknown): ChallengeRunRequest {
   const value = record(input);
   if (value.operation === "review") {
-    record(value, ["operation", "target"]);
-    return { operation: "review", target: readTarget(value.target) };
+    record(value, ["operation", "target"], ["withReference"]);
+    const withReference = Object.hasOwn(value, "withReference");
+    if (withReference && value.withReference !== true) return invalid();
+    return {
+      operation: "review", target: readTarget(value.target),
+      ...(withReference ? { withReference: true as const } : {}),
+    };
   }
   if (value.operation !== "record") return invalid();
   record(value, ["operation", "target", "run"]);
   const run = record(value.run, [
     "id", "turnId", "requestId", "recoveryEpoch", "sourceHash", "output", "outcome", "diagnostic", "expectedOutput", "expectedSource",
-  ], ["caseId"]);
+  ], ["caseId", "reference"]);
+  const source = expectedSource(run.expectedSource);
+  const reference = readReference(run, source);
   return {
     operation: "record",
     target: readTarget(value.target),
@@ -153,8 +180,9 @@ export function parseChallengeRunRequest(input: unknown): ChallengeRunRequest {
       id: id(run.id), turnId: id(run.turnId), requestId: id(run.requestId), recoveryEpoch: id(run.recoveryEpoch),
       sourceHash: sourceHash(run.sourceHash), output: text(run.output, CHALLENGE_RUN_LIMITS.output),
       outcome: oneOf(run.outcome, executionOutcomes), diagnostic: text(run.diagnostic, CHALLENGE_RUN_LIMITS.diagnostic),
-      expectedOutput: text(run.expectedOutput, CHALLENGE_RUN_LIMITS.expectedOutput), expectedSource: expectedSource(run.expectedSource),
+      expectedOutput: text(run.expectedOutput, CHALLENGE_RUN_LIMITS.expectedOutput), expectedSource: source,
       ...(Object.hasOwn(run, "caseId") ? { caseId: readChallengeCaseId(run.caseId) } : {}),
+      ...(reference ? { reference } : {}),
     },
   };
 }
@@ -174,16 +202,19 @@ export function readChallengeRunPlan(input: unknown): ChallengeRunPlan {
 export function readChallengeRunReceipt(input: unknown): ChallengeRunReceipt {
   const value = record(input, [
     "id", "input", "expectedOutput", "expectedSource", "sourceHash", "fileName", "output", "outcome", "diagnostic", "ranAt",
-  ], ["caseId"]);
-  const fileName = text(value.fileName, 250, 1);
+  ], ["caseId", "reference"]);
+  const source = expectedSource(value.expectedSource);
+  const reference = readReference(value, source);
+  const fileName = basenameLabel(value.fileName);
   const ranAt = text(value.ranAt, 40, 1);
-  if (/[\\/\r\n]/.test(fileName) || !Number.isFinite(Date.parse(ranAt))) return invalid();
+  if (!Number.isFinite(Date.parse(ranAt))) return invalid();
   return {
     id: id(value.id), input: text(value.input, CHALLENGE_RUN_LIMITS.input),
-    expectedOutput: text(value.expectedOutput, CHALLENGE_RUN_LIMITS.expectedOutput), expectedSource: expectedSource(value.expectedSource),
+    expectedOutput: text(value.expectedOutput, CHALLENGE_RUN_LIMITS.expectedOutput), expectedSource: source,
     sourceHash: sourceHash(value.sourceHash), fileName, output: text(value.output, CHALLENGE_RUN_LIMITS.output),
     outcome: oneOf(value.outcome, receiptOutcomes), diagnostic: text(value.diagnostic, CHALLENGE_RUN_LIMITS.diagnostic), ranAt,
     ...(Object.hasOwn(value, "caseId") ? { caseId: readChallengeCaseId(value.caseId) } : {}),
+    ...(reference ? { reference } : {}),
   };
 }
 

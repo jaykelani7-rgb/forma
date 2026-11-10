@@ -171,3 +171,19 @@ export async function runCppChallenge({ source, input, signal }: {
     await rm(directory, { recursive: true, force: true });
   }
 }
+
+export async function runCppReferenceChallenge({ source, reference, input, signal }: {
+  source: Buffer | string;
+  reference: Buffer | string;
+  input: string;
+  signal?: AbortSignal;
+}): Promise<{ result: CppChallengeResult; expectedOutput: string; referenceHash: string }> {
+  signal?.throwIfAborted();
+  const solution = Buffer.from(source);
+  const referenceRun = await runCppChallenge({ source: reference, input, signal });
+  if (referenceRun.outcome !== "exited") {
+    throw new Error(`Reference solution failed. ${referenceRun.diagnostic}`.trim());
+  }
+  const result = await runCppChallenge({ source: solution, input, signal });
+  return { result, expectedOutput: referenceRun.output, referenceHash: referenceRun.sourceHash };
+}

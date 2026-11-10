@@ -96,6 +96,10 @@
         "title": "Forma: Run Challenge Case"
       },
       {
+        "command": "formaCompanion.runChallengeWithReference",
+        "title": "Forma: Run Challenge with Reference"
+      },
+      {
         "command": "formaCompanion.retry",
         "title": "Forma: Retry Pending Captures"
       },

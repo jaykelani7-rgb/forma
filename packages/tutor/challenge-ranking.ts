@@ -72,7 +72,7 @@ function readRun(input: unknown): RankingRun {
   const { outcome, expectedSource } = fields(input, ["outcome", "expectedSource"]);
   if (outcome !== "match" && outcome !== "mismatch" && outcome !== "compile-error" &&
     outcome !== "runtime-error" && outcome !== "timeout" && outcome !== "output-limit") return invalid();
-  if (expectedSource !== "statement-sample" && expectedSource !== "user") return invalid();
+  if (expectedSource !== "statement-sample" && expectedSource !== "user" && expectedSource !== "reference") return invalid();
   return { outcome, expectedSource };
 }
 

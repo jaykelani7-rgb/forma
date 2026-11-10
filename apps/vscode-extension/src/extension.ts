@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import { randomUUID, createHash } from "node:crypto";
 import { createConnection } from "node:net";
-import { realpath } from "node:fs/promises";
+import { realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import { normalizeCodeforcesIdentity } from "../../../packages/core/src/codeforces-identity";
 import { parseCommand } from "../../../packages/contracts/src";
@@ -12,13 +12,16 @@ import { captureRecoveryEpoch, enqueueCommand, requireCaptureRecoveryEpoch, rest
 import { collectExplicitCode, sameCodeSource, type CodeSourceFence } from "../../../packages/integrations/tutor-code";
 import { companionConnectionError } from "../../../packages/integrations/connection-error";
 import { afterCompanionReady, CompanionLauncher, launchCompanion, resolveCompanionLaunch, userDevelopmentLaunchPath } from "../../../packages/integrations/local-launch";
-import { cppChallengeSupported, readCppChallengeSource, runCppChallenge } from "../../../packages/integrations/cpp-challenge";
+import { cppChallengeSupported, readCppChallengeSource, runCppChallenge, runCppReferenceChallenge } from "../../../packages/integrations/cpp-challenge";
 import { CHALLENGE_RUN_LIMITS, FIRST_CHALLENGE_CASE_ID, readChallengeRunPlan, readChallengeRunReceipt, type ChallengeRunRequest } from "../../../packages/tutor/challenge-run";
 
 const SECRET = "forma-companion.pairing.v1", QUEUE = "forma-companion.queue.v1", FOLDERS = "forma-companion.allowed-folders.v1", BINDINGS = "forma-companion.bindings.v1";
 type Binding = RecognisedBinding & { id?: string; key: string; fileUri: string; sessionId?: string };
 type Target = { fileUri: string; key: string; sessionId?: string; recoveryEpoch?: string | null };
 type ChallengeSubmission = Extract<ChallengeRunRequest, { operation: "record" }>;
+type ChallengeOracle =
+  | { kind: "reference"; uri: vscode.Uri; file: string; source: Buffer }
+  | { kind: "expected"; expectedOutput: string; expectedSource: "statement-sample" | "user" };
 let testEndpoint: string | undefined;
 
 function expectedChallengeOutput(value: string) {
@@ -82,14 +85,15 @@ export async function activate(context: vscode.ExtensionContext) {
     status.tooltip = `Recognise problems from CPH: ${enabled() ? "on" : "off"}. Supported CPH: ${SUPPORTED_CPH_VERSIONS.join(", ")}. CPH owns test results. Click for setup.`;
   }
   function requireLocal() { if (!local()) throw new Error("Forma needs a trusted local VS Code workspace. Remote workspaces remain in limited mode."); }
-  async function permitted(fileUri: string) {
+  async function permittedFile(fileUri: string) {
     requireLocal(); const uri = vscode.Uri.parse(fileUri);
     if (uri.scheme !== "file" || !vscode.workspace.getWorkspaceFolder(uri)) throw new Error("Use a local solution in this workspace.");
     const actual = await realpath(uri.fsPath), roots = await Promise.all(allowed.map(root => realpath(root).catch(() => "")));
     if (!allowed.some(root => pathWithinFolder(uri.fsPath, root)) || !roots.some(root => root && pathWithinFolder(actual, root))) throw new Error("Select this solution folder in Forma setup first.");
     requireLocal(); if (!allowed.some(root => pathWithinFolder(uri.fsPath, root))) throw new Error("Folder permission changed.");
-    return uri;
+    return { uri, actual };
   }
+  async function permitted(fileUri: string) { return (await permittedFile(fileUri)).uri; }
   async function selected() {
     const uri = vscode.window.activeTextEditor?.document.uri;
     if (!uri) throw new Error("Open a local solution file first.");
@@ -234,8 +238,10 @@ export async function activate(context: vscode.ExtensionContext) {
       throw new Error(response.error);
     }
     const receipt = readChallengeRunReceipt(response.receipt);
-    if (receipt.id !== submission.run.id ||
-      (receipt.caseId ?? FIRST_CHALLENGE_CASE_ID) !== (submission.run.caseId ?? FIRST_CHALLENGE_CASE_ID)) {
+    if (receipt.id !== submission.run.id || receipt.expectedSource !== submission.run.expectedSource ||
+      (receipt.caseId ?? FIRST_CHALLENGE_CASE_ID) !== (submission.run.caseId ?? FIRST_CHALLENGE_CASE_ID) ||
+      receipt.reference?.fileName !== submission.run.reference?.fileName ||
+      receipt.reference?.sourceHash !== submission.run.reference?.sourceHash) {
       throw new Error("The saved run acknowledgement did not match the reviewed case. Retry saving the result.");
     }
     if (unsavedChallenge === submission) unsavedChallenge = undefined;
@@ -245,7 +251,24 @@ export async function activate(context: vscode.ExtensionContext) {
     void vscode.window.setStatusBarMessage(`Forma · ${detail} See the result in the Problem Desk.`, 9000);
   }
 
-  async function runChallengeCase() {
+  async function savedReferencePath(uri: vscode.Uri, sourceFile: string) {
+    const extension = path.extname(uri.fsPath);
+    if (extension !== ".C" && ![".cpp", ".cc", ".cxx", ".c++"].includes(extension.toLowerCase())) {
+      throw new Error("Choose a saved C++ reference file.");
+    }
+    const { actual } = await permittedFile(uri.toString());
+    const [solution, reference] = await Promise.all([stat(sourceFile), stat(actual)]);
+    if (actual === sourceFile || (solution.dev === reference.dev && solution.ino === reference.ino)) {
+      throw new Error("Choose a different file for the reference solution.");
+    }
+    const dirtyFiles = await Promise.all(vscode.workspace.textDocuments
+      .filter(document => document.isDirty && document.uri.scheme === "file")
+      .map(document => realpath(document.uri.fsPath).catch(() => document.uri.fsPath)));
+    if (dirtyFiles.includes(actual)) throw new Error("Save the reference solution before reviewing the challenge case.");
+    return actual;
+  }
+
+  async function runChallengeCase(withReference = false) {
     if (challengeRun) throw new Error("A challenge case is already open in VS Code.");
     if (!cppChallengeSupported()) throw new Error("Local C++ challenge runs are available on macOS and Linux.");
     const controller = new AbortController();
@@ -288,20 +311,40 @@ export async function activate(context: vscode.ExtensionContext) {
       }
 
       async function review() {
+        const updateMessage = "Update Forma Companion to run challenges with a reference solution.";
         const response = await send({ version: 1, id: randomUUID(), credential: token,
-          challengeRun: { operation: "review", target: runTarget } }, controller.signal);
-        if (!response.ok) throw new Error(response.error);
+          challengeRun: { operation: "review", target: runTarget, ...(withReference ? { withReference: true } : {}) } }, controller.signal).catch((error: unknown) => {
+          if (withReference && error instanceof Error && error.message === "Invalid integration acknowledgement.") throw new Error(updateMessage);
+          throw error;
+        });
+        if (!response.ok) {
+          if (withReference && response.error === "The challenge run has invalid fields.") {
+            throw new Error(updateMessage);
+          }
+          throw new Error(response.error);
+        }
         return readChallengeRunPlan(response.plan);
       }
       const plan = await review();
       await checkTarget();
-      const sourceFile = await realpath(document.uri.fsPath);
+      const { actual: sourceFile } = await permittedFile(target.fileUri);
       const source = await readCppChallengeSource(sourceFile);
       if (new TextDecoder("utf-8", { fatal: true }).decode(source) !== document.getText()) {
         throw new Error("The saved file differs from the editor. Reload or save the solution and review the case again.");
       }
-      let expectedOutput = plan.sampleOutput;
-      if (expectedOutput === null) {
+      let oracle: ChallengeOracle;
+      if (withReference) {
+        const [reference] = await vscode.window.showOpenDialog({
+          title: "Choose a saved reference solution",
+          openLabel: "Choose reference solution",
+          defaultUri: vscode.Uri.file(path.dirname(document.uri.fsPath)),
+          canSelectFiles: true, canSelectFolders: false, canSelectMany: false,
+          filters: { "C++ source": ["cpp", "cc", "cxx", "c++", "C"] },
+        }) ?? [];
+        if (!reference) return;
+        const file = await savedReferencePath(reference, sourceFile);
+        oracle = { kind: "reference", uri: reference, file, source: await readCppChallengeSource(file) };
+      } else if (plan.sampleOutput === null) {
         const entered = await vscode.window.showInputBox({
           title: `Expected output · ${plan.problemTitle}`,
           prompt: `Enter the expected output for input ${JSON.stringify(plan.input)}. For multiple lines, enter a JSON string like "3\\n4".`,
@@ -312,41 +355,69 @@ export async function activate(context: vscode.ExtensionContext) {
           },
         });
         if (entered === undefined) return;
-        expectedOutput = expectedChallengeOutput(entered);
+        oracle = { kind: "expected", expectedOutput: expectedChallengeOutput(entered), expectedSource: "user" };
+      } else {
+        oracle = { kind: "expected", expectedOutput: plan.sampleOutput, expectedSource: "statement-sample" };
       }
-      const expectedSource = plan.sampleOutput === null ? "user" : "statement-sample";
-      const approved = await vscode.window.showWarningMessage("Run this Forma challenge case locally?", {
+      async function checkReviewedFiles() {
+        await checkTarget();
+        if ((await permittedFile(target.fileUri)).actual !== sourceFile || !source.equals(await readCppChallengeSource(sourceFile))) {
+          throw new Error("The saved source changed during review. Review the case again for the new source.");
+        }
+        if (oracle.kind === "reference" &&
+          (await savedReferencePath(oracle.uri, sourceFile) !== oracle.file || !oracle.source.equals(await readCppChallengeSource(oracle.file)))) {
+          throw new Error("The saved reference changed during review. Review the case again for the new source.");
+        }
+        await checkTarget();
+      }
+      if (oracle.kind === "reference") await checkReviewedFiles();
+      const approved = await vscode.window.showWarningMessage(withReference
+        ? "Run this Forma challenge with a reference solution?" : "Run this Forma challenge case locally?", {
         modal: true,
         detail: [
-          `${plan.problemTitle} · ${path.basename(sourceFile)}`,
+          `${plan.problemTitle} · ${vscode.workspace.asRelativePath(document.uri, true)}`,
           `Assumption: ${plan.assumption}`,
           `Case ${plan.caseId.slice("case-".length)} input: ${JSON.stringify(plan.input)}`,
-          `${expectedSource === "statement-sample" ? "Statement sample" : "Your expected output"}: ${JSON.stringify(expectedOutput)}`,
-          "This runs the reviewed saved C++ source with your local user permissions.",
+          oracle.kind === "reference"
+            ? `Reference solution\n${vscode.workspace.asRelativePath(oracle.uri, true)}`
+            : `${oracle.expectedSource === "statement-sample" ? "Statement sample" : "Your expected output"}: ${JSON.stringify(oracle.expectedOutput)}`,
+          oracle.kind === "reference"
+            ? "Both saved C++ files run with your local user permissions. The reference output is used as the expected answer."
+            : "This runs the reviewed saved C++ source with your local user permissions.",
         ].join("\n\n"),
       }, "Run locally");
       if (approved !== "Run locally") return;
       if (JSON.stringify(await review()) !== JSON.stringify(plan)) {
         throw new Error("The challenge changed. Review the new case before running it.");
       }
-      await checkTarget();
-      if (await realpath(document.uri.fsPath) !== sourceFile || !source.equals(await readCppChallengeSource(sourceFile))) {
-        throw new Error("The saved source changed during review. Review the case again for the new source.");
-      }
-      await checkTarget();
+      await checkReviewedFiles();
       const result = await vscode.window.withProgress({
         location: vscode.ProgressLocation.Notification, title: "Forma · Running C++ challenge case", cancellable: true,
       }, async (_progress, cancellation) => {
         const subscription = cancellation.onCancellationRequested(() => controller.abort());
         if (cancellation.isCancellationRequested) controller.abort();
-        try { return await runCppChallenge({ source, input: plan.input, signal: controller.signal }); }
+        try {
+          const input = { source, input: plan.input, signal: controller.signal };
+          if (oracle.kind === "reference") {
+            const { result, expectedOutput, referenceHash } = await runCppReferenceChallenge({ ...input, reference: oracle.source });
+            // Compiler messages can include source excerpts. Keep them in VS Code for these runs.
+            if (result.outcome !== "exited" && result.diagnostic) void vscode.window.showErrorMessage(result.diagnostic);
+            return {
+              ...result, diagnostic: "", expectedOutput, expectedSource: "reference" as const,
+              reference: { fileName: path.basename(oracle.uri.fsPath), sourceHash: referenceHash },
+            };
+          }
+          return {
+            ...await runCppChallenge(input), expectedOutput: oracle.expectedOutput, expectedSource: oracle.expectedSource,
+          };
+        }
         finally { subscription.dispose(); }
       });
       await checkTarget(false);
       const submission: ChallengeSubmission = { operation: "record", target: runTarget, run: {
         id: randomUUID(), turnId: plan.turnId, requestId: plan.requestId, recoveryEpoch: plan.recoveryEpoch,
         ...(plan.caseId === FIRST_CHALLENGE_CASE_ID ? {} : { caseId: plan.caseId }),
-        expectedOutput, expectedSource, ...result,
+        ...result,
       } };
       unsavedChallenge = submission;
       await saveChallengeRun(submission, token);
@@ -576,7 +647,8 @@ export async function activate(context: vscode.ExtensionContext) {
   register("open", () => openCompanion());
   register("askSelectedCode", askSelectedCode);
   register("pinSelection", pinSelection);
-  register("runChallengeCase", runChallengeCase);
+  register("runChallengeCase", () => runChallengeCase());
+  register("runChallengeWithReference", () => runChallengeCase(true));
   register("memory", () => openCompanion("memory"));
   register("saveThought", async () => { const target = await frozenTarget(); const text = await vscode.window.showInputBox({ title: "Save Thought", prompt: "An observation for this problem", ignoreFocusOut: true, validateInput: value => value.trim() && value.length <= 10000 ? undefined : "Write up to 10,000 characters." }); if (text) await capture("thought", { text }, target); });
   register("start", () => capture("start")); register("pause", () => capture("pause")); register("resume", () => capture("resume"));

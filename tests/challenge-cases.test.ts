@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readChallengeCaseState, readChallengeRunPlan } from "../packages/tutor/challenge-run";
+import { parseChallengeRunRequest, readChallengeCaseState, readChallengeRunPlan, readChallengeRunReceipt } from "../packages/tutor/challenge-run";
 import { readIdeaChallenge } from "../packages/tutor/idea";
 
 const challenge = { observation: "Check the boundary.", question: "Does the loop see the last element?" };
@@ -37,4 +37,39 @@ test("challenge feedback stays distinct from output receipts and old plans defau
   assert.deepEqual(readChallengeCaseState(state), state);
   assert.throws(() => readChallengeCaseState({ ...state, feedback: [feedback, feedback] }), /invalid fields/);
   assert.throws(() => readChallengeCaseState({ ...state, feedback: [{ ...feedback, label: "mismatch" }] }), /invalid fields/);
+});
+
+test("reference expectations require a source hash and basename at both run boundaries", () => {
+  const target = { fileUri: "file:///practice/main.cpp", workspaceId: "workspace", clientId: "client" };
+  const reference = { fileName: "reference.cpp", sourceHash: "b".repeat(64) };
+  const run = {
+    id: "run-1", turnId: "turn-1", requestId: "request-1", recoveryEpoch: "epoch-1",
+    sourceHash: "a".repeat(64), output: "7\n", outcome: "exited", diagnostic: "",
+    expectedOutput: "7", expectedSource: "reference",
+  };
+  const submission = { operation: "record", target, run: { ...run, reference } };
+  assert.deepEqual(parseChallengeRunRequest(submission), submission);
+  assert.throws(() => parseChallengeRunRequest({ ...submission, run }), /invalid fields/);
+  assert.throws(() => parseChallengeRunRequest({ ...submission, run: { ...run, expectedSource: "user", reference } }), /invalid fields/);
+  assert.throws(() => parseChallengeRunRequest({ ...submission, run: {
+    ...run, reference: { ...reference, fileName: "../reference.cpp" },
+  } }), /invalid fields/);
+
+  const receipt = {
+    id: run.id, input: "1\n7", expectedOutput: run.expectedOutput, expectedSource: "reference",
+    sourceHash: run.sourceHash, fileName: "main.cpp", output: run.output, outcome: "match", diagnostic: "",
+    ranAt: "2026-11-10T08:00:00.000Z", reference,
+  };
+  assert.deepEqual(readChallengeRunReceipt(receipt), receipt);
+  assert.throws(() => readChallengeRunReceipt({ ...receipt, reference: { ...reference, sourceHash: "bad-hash" } }), /invalid fields/);
+  assert.throws(() => readChallengeRunReceipt({ ...receipt, reference: { ...reference, source: "int main() {}" } }), /invalid fields/);
+});
+
+test("only a review request can check whether the host supports reference runs", () => {
+  const target = { fileUri: "file:///practice/main.cpp", workspaceId: "workspace", clientId: "client" };
+  const review = { operation: "review", target, withReference: true };
+  assert.deepEqual(parseChallengeRunRequest(review), review);
+  assert.throws(() => parseChallengeRunRequest({ ...review, withReference: false }), /invalid fields/);
+  assert.throws(() => parseChallengeRunRequest({ ...review, withReference: undefined }), /invalid fields/);
+  assert.throws(() => parseChallengeRunRequest({ ...review, operation: "record", run: {} }), /invalid fields/);
 });

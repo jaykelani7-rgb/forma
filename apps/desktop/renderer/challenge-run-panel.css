@@ -74,6 +74,17 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.challenge-reference-output {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.challenge-reference-output > span {
+  color: var(--muted);
+}
+
 .challenge-run-outcome span,
 .challenge-run-provenance span {
   display: block;

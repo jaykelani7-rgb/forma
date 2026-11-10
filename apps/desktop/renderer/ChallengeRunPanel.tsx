@@ -16,7 +16,11 @@ const labels: Record<ChallengeRunReceipt["outcome"], string> = {
   timeout: "Time limit reached",
   "output-limit": "Output limit reached",
 };
-const expectation = (source: ChallengeRunReceipt["expectedSource"]) => source === "statement-sample" ? "Captured statement sample" : "Your expected answer";
+const expectations: Record<ChallengeRunReceipt["expectedSource"], string> = {
+  "statement-sample": "Captured statement sample",
+  user: "Your expected answer",
+  reference: "Local reference solution",
+};
 
 const feedbackOptions = {
   helpful: "Helped me find the bug",
@@ -25,13 +29,37 @@ const feedbackOptions = {
 } satisfies Record<ChallengeFeedbackLabel, string>;
 
 function evidenceText(run: ChallengeRunReceipt) {
+  if (run.reference) {
+    return [
+      `Compared in VS Code · ${run.ranAt}`,
+      `Solution ${run.fileName}\nSource SHA-256 ${run.sourceHash}`,
+      `Reference ${run.reference.fileName}\nSource SHA-256 ${run.reference.sourceHash}`,
+      `Input\n${run.input}`,
+      `Reference output\n${run.expectedOutput}`,
+      `Solution output\n${run.output}`,
+    ].join("\n\n");
+  }
   return [
     `Run in VS Code · ${run.fileName} · ${run.ranAt}`,
     `Source SHA-256 ${run.sourceHash}`,
     `Input\n${run.input}`,
-    `Expected output (${expectation(run.expectedSource)})\n${run.expectedOutput}`,
+    `Expected output (${expectations[run.expectedSource]})\n${run.expectedOutput}`,
     `Actual output\n${run.output}`,
   ].join("\n\n");
+}
+
+function ReferenceOutput({ label, fileName, sourceHash, output }: {
+  label: string;
+  fileName: string;
+  sourceHash: string;
+  output?: string;
+}) {
+  return <div className="challenge-reference-output" role="group" aria-label={label}>
+    <strong aria-hidden="true">{label}</strong>
+    {output !== undefined && <pre tabIndex={0}>{output || "(empty)"}</pre>}
+    <span>{fileName}</span>
+    <span title={sourceHash}>SHA-256 {sourceHash.slice(0, 12)}…</span>
+  </div>;
 }
 
 function RunResult({ run, saved, saving, disabled, onSave }: {
@@ -42,9 +70,20 @@ function RunResult({ run, saved, saving, disabled, onSave }: {
   onSave: (run: ChallengeRunReceipt) => Promise<void>;
 }) {
   const compared = run.outcome === "match" || run.outcome === "mismatch";
+  const { reference } = run;
+  const outcome = reference && compared
+    ? run.outcome === "match" ? "Output matched reference" : "Output differed from reference"
+    : labels[run.outcome];
+  const saveLabel = reference ? "Save difference to Desk" : "Save failing case to Desk";
+  const savedLabel = reference ? "Difference saved" : "Failing case saved";
   return <div className="challenge-run-result">
-    <p className="challenge-run-outcome"><strong>{labels[run.outcome]}</strong> <span>{expectation(run.expectedSource)}</span></p>
-    {compared && <div className="challenge-run-outputs">
+    <p className="challenge-run-outcome"><strong>{outcome}</strong> <span>{expectations[run.expectedSource]}</span></p>
+    {reference ? <div className="challenge-run-outputs">
+      <ReferenceOutput label={compared ? "Reference output" : "Reference source"}
+        {...reference} output={compared ? run.expectedOutput : undefined} />
+      <ReferenceOutput label={compared ? "Solution output" : "Solution source"}
+        fileName={run.fileName} sourceHash={run.sourceHash} output={compared ? run.output : undefined} />
+    </div> : compared && <div className="challenge-run-outputs">
       <div><span>Expected output</span><pre tabIndex={0}>{run.expectedOutput || "(empty)"}</pre></div>
       <div><span>Actual output</span><pre tabIndex={0}>{run.output || "(empty)"}</pre></div>
     </div>}
@@ -52,13 +91,13 @@ function RunResult({ run, saved, saving, disabled, onSave }: {
       <summary>Run details</summary><pre tabIndex={0}>{run.diagnostic}</pre>
     </details>}
     <p className="challenge-run-provenance">
-      {run.fileName} · <time dateTime={run.ranAt}>{new Date(run.ranAt).toLocaleString()}</time>
-      <span title={run.sourceHash}>SHA-256 {run.sourceHash.slice(0, 12)}…</span>
+      {!reference && `${run.fileName} · `}<time dateTime={run.ranAt}>{new Date(run.ranAt).toLocaleString()}</time>
+      {!reference && <span title={run.sourceHash}>SHA-256 {run.sourceHash.slice(0, 12)}…</span>}
     </p>
     {run.outcome === "mismatch" && <button type="button" className="desk-idea-quiet"
       disabled={disabled || saved} onClick={() => void onSave(run)}>
       {saved && <Check size={13} aria-hidden="true"/>}
-      {saved ? "Failing case saved" : saving ? "Saving case…" : "Save failing case to Desk"}
+      {saved ? savedLabel : saving ? "Saving case…" : saveLabel}
     </button>}
   </div>;
 }
@@ -176,6 +215,7 @@ export function ChallengeRunPanel({ bridge, turn, challenge, blocked, savedEvide
     </div>
     <div className="challenge-run-heading"><Code2 size={15} aria-hidden="true"/><h4>Verify in VS Code</h4></div>
     <p>With your saved C++ solution open, choose <strong>Forma: Run Challenge Case</strong> in VS Code to run the case shown here.</p>
+    <p>Choose <strong>Forma: Run Challenge with Reference</strong> to compare with a C++ reference solution you select.</p>
     {latest && <RunResult run={latest} saved={savedEvidence.has(evidenceText(latest))}
       saving={saving === latest.id} disabled={disabled} onSave={save} />}
     {history.length > 0 && <details className="challenge-run-history" key={candidate.id}>

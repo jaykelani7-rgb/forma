@@ -370,6 +370,7 @@ export class TutorStore {
           ? challengeOutputEqual(run.output, run.expectedOutput) ? 'match' : 'mismatch'
           : run.outcome,
         diagnostic: run.diagnostic, ranAt: new Date(now).toISOString(),
+        ...(run.reference ? { reference: run.reference } : {}),
       });
       const runs = turn.challengeRuns ?? [];
       const previous = runs.find(item => item.id === run.id);

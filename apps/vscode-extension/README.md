@@ -33,6 +33,8 @@ After viewing an assumption challenge with an input in Forma, save the linked C+
 
 Use **Try another case** in the Problem Desk to select a different input for the same assumption. The updated extension reviews the selected case, and each case keeps its own run history and optional feedback.
 
+Use **Forma: Run Challenge with Reference** when you have a separate saved C++ solution you trust. With your linked solution active, choose the reference file from an allowed workspace folder and review both file paths and the selected input. After approval, Forma runs the reference first and uses its successful output to check your solution. The receipt records the reference's filename and source fingerprint.
+
 ## Transport and limitations
 
 The desktop owns the single writer. Requests are newline-delimited JSON protocol v1, capped at 64 KiB, authenticated with a pairing credential and identified by stable request/command IDs. The endpoint is a per-user Unix socket on macOS/Linux or a per-user named pipe on Windows. The desktop applies commands before acknowledging its durable local revision. Heartbeats occur at most every 30 seconds when paired and idle. Offline retries use exponential backoff capped at 60 seconds.
