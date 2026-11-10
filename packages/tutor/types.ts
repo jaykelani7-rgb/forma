@@ -1,5 +1,5 @@
 /** Local-only Tutor boundary. Provider keys/audio never belong in these records. */
-import type { ChallengeRunReceipt } from './challenge-run';
+import type { ChallengeFeedback, ChallengeRunReceipt } from './challenge-run';
 
 export const TUTOR_VERSION = 1 as const;
 const DESK_IDEA_ACTIONS = ['outline-idea', 'challenge-assumption'] as const;
@@ -35,6 +35,8 @@ export interface TutorTurn {
   hintLevel:number;exposed:boolean;usage:TutorUsage|null;model:string;provider?:TutorProviderId;responseModel?:string;
   standalone?:true;
   challengeRuns?:ChallengeRunReceipt[];
+  challengeCaseId?:string;
+  challengeFeedback?:ChallengeFeedback[];
 }
 export interface TutorSettings {contestMode:boolean;retentionDays:number;voiceOutput:boolean}
 export interface TutorStoredView { conversations:TutorConversation[];settings:TutorSettings;pendingCode:SharedCode|null;lastConversationId?:string|null }
@@ -48,7 +50,8 @@ export interface DeskHintReview {
 }
 export interface DeskIdeaReview extends DeskHintReview {code:SharedCode|null}
 export interface IdeaOutline {approach:string;assumptions:string[];uncertainty:string}
-export interface IdeaChallenge {observation:string;question:string;exampleInput:string|null;expectedOutput:string|null}
+export interface IdeaChallengeCase {id:string;input:string;expectedOutput:string|null;reason:string}
+export interface IdeaChallenge {observation:string;question:string;cases:IdeaChallengeCase[]}
 export interface TutorSendInput {
   turnId:string;requestId:string;conversationId:string;action:TutorAction;text:string;
   statementId:string|null;codeId:string|null;noteIds:string[];

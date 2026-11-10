@@ -31,6 +31,8 @@ Enable **Forma Companion: CPH Metadata Enabled** deliberately after pairing. The
 
 After viewing an assumption challenge with an input in Forma, save the linked C++ solution and run **Forma: Run Challenge Case**. Review the input, expected output, and file in VS Code, then approve the local run. The expected output comes from the captured statement sample when available, or from the value you enter. Forma compiles a snapshot of the saved file with the system C++ compiler on macOS or Linux. Check the result in the Problem Desk. The runner supports single-file C++17 solutions with standard headers.
 
+Use **Try another case** in the Problem Desk to select a different input for the same assumption. The updated extension reviews the selected case, and each case keeps its own run history and optional feedback.
+
 ## Transport and limitations
 
 The desktop owns the single writer. Requests are newline-delimited JSON protocol v1, capped at 64 KiB, authenticated with a pairing credential and identified by stable request/command IDs. The endpoint is a per-user Unix socket on macOS/Linux or a per-user named pipe on Windows. The desktop applies commands before acknowledging its durable local revision. Heartbeats occur at most every 30 seconds when paired and idle. Offline retries use exponential backoff capped at 60 seconds.

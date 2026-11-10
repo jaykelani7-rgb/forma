@@ -222,15 +222,6 @@ export function DeskIdeaCard({
         {challengedAssumption && <p className="desk-idea-muted">{challengedAssumption}</p>}
         <p>{challenge.observation}</p>
         <blockquote>{challenge.question}</blockquote>
-        {challenge.exampleInput !== null && <div className="desk-idea-example">
-          <span className="eyebrow">SUGGESTED CASE · UNVERIFIED</span>
-          <span>Input</span>
-          <pre>{challenge.exampleInput}</pre>
-          {challenge.expectedOutput !== null && <>
-            <span>Suggested output</span>
-            <pre>{challenge.expectedOutput}</pre>
-          </>}
-        </div>}
         {verification}
         <button className="button button--secondary desk-idea-primary" type="button" onClick={onKeepChallenge}
           disabled={blocked || editingDisabled}>
@@ -243,7 +234,7 @@ export function DeskIdeaCard({
 
       {!contestMode && pending && <div className="desk-idea-actions">
         <p className="desk-idea-muted" role="status">
-          {pending === "outline" ? "Outlining your idea…" : "Finding one way to test your assumption…"}
+          {pending === "outline" ? "Outlining your idea…" : "Finding cases to test your assumption…"}
         </p>
         <button className="desk-idea-quiet" type="button" onClick={onStop}>
           <Square size={12} aria-hidden="true" /> Stop request

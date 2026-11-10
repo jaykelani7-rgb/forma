@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CompanionStore } from '../apps/desktop/main/store';
+import { validateLocalBackup } from '../apps/desktop/main/backup-schema';
 import { buildProviderMessages, hintLevelForAction, policyInstructions } from '../packages/tutor/policy';
 import { parseSharedCode, parseStatementInput, providerContext, tutorHash, validateStatement } from '../packages/tutor/context';
 import type { SharedCode, StatementInput, TutorAction, TutorProviderStatus, TutorSendInput, TutorTurn } from '../packages/tutor/types';
@@ -70,6 +71,7 @@ test('challenge verification records exact input, reviewed expected output and a
     const reviewed = store.tutor.challengeRun(review, now);
     assert.ok('plan' in reviewed);
     assert.equal(reviewed.plan.input, '8\r\n');
+    assert.equal(reviewed.plan.caseId, 'case-1');
     assert.equal(reviewed.plan.sampleOutput, 'YES');
     assert.equal(reviewed.plan.sessionId, store.snapshot().data.session?.id);
 
@@ -94,6 +96,9 @@ test('challenge verification records exact input, reviewed expected output and a
 
     const exported = store.backups.export({ scope: 'companion', includeTutor: true }, now + 300);
     assert.doesNotThrow(() => store.backups.preview(exported));
+    const legacy = JSON.parse(exported);
+    delete legacy.tutor.turns[0].challengeRuns[0].caseId;
+    assert.doesNotThrow(() => store.backups.preview(JSON.stringify(legacy)));
     const altered = JSON.parse(exported);
     altered.tutor.turns[0].challengeRuns[0].outcome = 'match';
     assert.throws(() => store.backups.preview(JSON.stringify(altered)), /inconsistent output evidence/);
@@ -109,6 +114,76 @@ test('challenge verification records exact input, reviewed expected output and a
     assert.throws(() => store.tutor.challengeRun(review, now), /Contest mode disables/);
   } finally {
     f.store.close();
+  }
+});
+
+test('challenge cases keep selection and feedback separate from runs recorded during a switch', () => {
+  const { store } = fixture();
+  try {
+    const context = store.tutor.deskIdeaReview({ problemId: store.snapshot().state.problemId }, deskProvider, now);
+    assert.ok(context.statement && context.conversationId);
+    const ids = { turnId: 'multiple-cases', requestId: 'multiple-cases-request' };
+    const challenge = store.tutor.prepare({
+      ...ids, conversationId: context.conversationId, action: 'challenge-assumption',
+      text: JSON.stringify({ approach: 'Try even weights.', assumption: 'Even weights can be split.', uncertainty: '' }),
+      statementId: context.statement.id, codeId: null, noteIds: [], deskIdea: context.target,
+    }, deskProvider.model, now);
+    show(store, challenge, JSON.stringify({
+      observation: 'Try different even weights.', question: 'What does the program print?',
+      cases: [
+        { input: '8\n', expectedOutput: 'YES', reason: 'A weight with multiple valid splits.' },
+        { input: '2\n', expectedOutput: 'NO', reason: 'The smallest even weight.' },
+      ],
+    }));
+    store.tutor.exposed(ids);
+    const target = { fileUri: 'file:///practice/a.cpp', workspaceId: 'workspace-one', clientId: 'vscode-one' };
+    const review = () => store.tutor.challengeRun({ operation: 'review', target }, now);
+    const first = review();
+    assert.ok('plan' in first);
+    assert.equal(first.plan.caseId, 'case-1');
+    const select = (caseId: string) => store.tutor.updateDeskChallenge({ ...ids, caseId }, 'select', now + 200);
+    const label = (caseId: string, label: string | null, at = now + 201) =>
+      store.tutor.updateDeskChallenge({ ...ids, caseId, label }, 'feedback', at);
+    assert.equal(select('case-2').state.caseId, 'case-2');
+    assert.equal(select('case-2').changed, false);
+    assert.throws(() => select('case-3'), /no longer available/);
+    assert.throws(() => label('case-2', 'made-up-label'), /invalid fields/);
+    const marked = label('case-2', 'wrong-assumption');
+    assert.equal(marked.state.feedback[0]?.label, 'wrong-assumption');
+    assert.deepEqual(label('case-2', 'wrong-assumption', now + 202).state.feedback, marked.state.feedback);
+    const second = review();
+    assert.ok('plan' in second);
+    assert.equal(second.plan.caseId, 'case-2');
+    assert.equal(second.plan.input, '2\n');
+    assert.equal(second.plan.sampleOutput, null);
+
+    const run: ChallengeRunSubmission = {
+      ...ids, id: 'run-before-switch', caseId: first.plan.caseId, recoveryEpoch: first.plan.recoveryEpoch,
+      sourceHash: 'a'.repeat(64), outcome: 'exited', diagnostic: '', output: 'NO\n',
+      expectedOutput: 'YES', expectedSource: 'statement-sample',
+    };
+    const late = store.tutor.challengeRun({ operation: 'record', target, run }, now + 203);
+    assert.ok('receipt' in late);
+    assert.equal(late.receipt.caseId, 'case-1');
+    assert.equal(late.receipt.input, '8\n');
+    assert.equal(late.receipt.outcome, 'mismatch');
+    const state = store.tutor.deskChallengeState(ids);
+    assert.equal(state.caseId, 'case-2');
+    assert.deepEqual(state.runs, [late.receipt]);
+    assert.deepEqual(state.feedback, marked.state.feedback);
+
+    const exported = store.backups.export({ scope: 'companion', includeTutor: true }, now + 204);
+    const saved = validateLocalBackup(exported, store.snapshot().data).backup.tutor!.turns[0];
+    assert.equal(saved.challengeCaseId, 'case-2');
+    assert.deepEqual(saved.challengeFeedback, marked.state.feedback);
+    assert.deepEqual(saved.challengeRuns, [late.receipt]);
+    const tampered = JSON.parse(exported);
+    tampered.tutor.turns[0].challengeRuns[0].caseId = 'case-2';
+    assert.throws(() => store.backups.preview(JSON.stringify(tampered)), /does not match the frozen challenge case/);
+    assert.deepEqual(label('case-2', null).state.feedback, []);
+    assert.deepEqual(store.tutor.deskChallengeState(ids).runs, [late.receipt]);
+  } finally {
+    store.close();
   }
 });
 
@@ -231,7 +306,7 @@ test('Desk ideas outline without a statement and challenge only with the reviewe
     assert.equal(challenged.context.code?.id, updatedCode.id);
     const messages = buildProviderMessages(challenged, [outlined]);
     assert.equal(messages.length, 2);
-    assert.match(messages[0].content, /has not been run/);
+    assert.match(messages[0].content, /has yet to be run/);
     assert.ok(messages[1].content.includes(updatedCode.text));
     assert.doesNotMatch(messages[1].content, /Look for an even weight|file:\/\/|workspace-one|explicitlyIncludedNotes|evidence/);
     assert.deepEqual(challenged.context.evidence.submissions, []);

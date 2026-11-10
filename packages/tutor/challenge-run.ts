@@ -1,5 +1,21 @@
 export const CHALLENGE_RUN_LIMIT = 12;
 export const CHALLENGE_RUN_LIMITS = { input: 600, output: 4_000, expectedOutput: 4_000, diagnostic: 2_000 } as const;
+export const CHALLENGE_CASE_LIMIT = 3;
+export const FIRST_CHALLENGE_CASE_ID = "case-1";
+export const CHALLENGE_FEEDBACK_LABELS = ["helpful", "wrong-assumption", "invalid-input"] as const;
+
+export type ChallengeFeedbackLabel = typeof CHALLENGE_FEEDBACK_LABELS[number];
+export interface ChallengeFeedback {
+  caseId: string;
+  label: ChallengeFeedbackLabel;
+  recordedAt: string;
+}
+
+export interface ChallengeCaseState {
+  caseId: string | null;
+  runs: ChallengeRunReceipt[];
+  feedback: ChallengeFeedback[];
+}
 
 const executionOutcomes = ["exited", "compile-error", "runtime-error", "timeout", "output-limit"] as const;
 const receiptOutcomes = ["match", "mismatch", "compile-error", "runtime-error", "timeout", "output-limit"] as const;
@@ -14,6 +30,7 @@ export interface ChallengeRunTarget {
 export interface ChallengeRunPlan {
   turnId: string;
   requestId: string;
+  caseId: string;
   problemTitle: string;
   assumption: string;
   input: string;
@@ -26,6 +43,7 @@ export interface ChallengeRunSubmission {
   id: string;
   turnId: string;
   requestId: string;
+  caseId?: string;
   recoveryEpoch: string;
   sourceHash: string;
   output: string;
@@ -37,6 +55,7 @@ export interface ChallengeRunSubmission {
 
 export interface ChallengeRunReceipt {
   id: string;
+  caseId?: string;
   input: string;
   expectedOutput: string;
   expectedSource: ExpectedSource;
@@ -56,9 +75,10 @@ function invalid(): never {
   throw new Error("The challenge run has invalid fields.");
 }
 
-function record(value: unknown, keys?: readonly string[]): Record<string, unknown> {
+function record(value: unknown, keys?: readonly string[], optional: readonly string[] = []): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return invalid();
-  if (keys && (Object.keys(value).length !== keys.length || keys.some(key => !Object.hasOwn(value, key)))) return invalid();
+  if (keys && (keys.some(key => !Object.hasOwn(value, key)) ||
+    Object.keys(value).some(key => !keys.includes(key) && !optional.includes(key)))) return invalid();
   return value as Record<string, unknown>;
 }
 
@@ -87,6 +107,22 @@ function oneOf<T extends string>(value: unknown, choices: readonly T[]): T {
   return found ?? invalid();
 }
 
+export function readChallengeCaseId(value: unknown): string {
+  if (typeof value !== "string" || !/^case-[1-3]$/.test(value)) return invalid();
+  return value;
+}
+
+export function readChallengeFeedbackLabel(value: unknown): ChallengeFeedbackLabel {
+  return oneOf(value, CHALLENGE_FEEDBACK_LABELS);
+}
+
+export function readChallengeFeedback(input: unknown): ChallengeFeedback {
+  const value = record(input, ["caseId", "label", "recordedAt"]);
+  const recordedAt = text(value.recordedAt, 40, 1);
+  if (!Number.isFinite(Date.parse(recordedAt))) return invalid();
+  return { caseId: readChallengeCaseId(value.caseId), label: readChallengeFeedbackLabel(value.label), recordedAt };
+}
+
 function readTarget(input: unknown): ChallengeRunTarget {
   const value = record(input, ["fileUri", "workspaceId", "clientId"]);
   const fileUri = text(value.fileUri, 4_000, 1);
@@ -109,7 +145,7 @@ export function parseChallengeRunRequest(input: unknown): ChallengeRunRequest {
   record(value, ["operation", "target", "run"]);
   const run = record(value.run, [
     "id", "turnId", "requestId", "recoveryEpoch", "sourceHash", "output", "outcome", "diagnostic", "expectedOutput", "expectedSource",
-  ]);
+  ], ["caseId"]);
   return {
     operation: "record",
     target: readTarget(value.target),
@@ -118,14 +154,16 @@ export function parseChallengeRunRequest(input: unknown): ChallengeRunRequest {
       sourceHash: sourceHash(run.sourceHash), output: text(run.output, CHALLENGE_RUN_LIMITS.output),
       outcome: oneOf(run.outcome, executionOutcomes), diagnostic: text(run.diagnostic, CHALLENGE_RUN_LIMITS.diagnostic),
       expectedOutput: text(run.expectedOutput, CHALLENGE_RUN_LIMITS.expectedOutput), expectedSource: expectedSource(run.expectedSource),
+      ...(Object.hasOwn(run, "caseId") ? { caseId: readChallengeCaseId(run.caseId) } : {}),
     },
   };
 }
 
 export function readChallengeRunPlan(input: unknown): ChallengeRunPlan {
-  const value = record(input, ["turnId", "requestId", "problemTitle", "assumption", "input", "sampleOutput", "recoveryEpoch", "sessionId"]);
+  const value = record(input, ["turnId", "requestId", "problemTitle", "assumption", "input", "sampleOutput", "recoveryEpoch", "sessionId"], ["caseId"]);
   return {
     turnId: id(value.turnId), requestId: id(value.requestId), recoveryEpoch: id(value.recoveryEpoch),
+    caseId: Object.hasOwn(value, "caseId") ? readChallengeCaseId(value.caseId) : FIRST_CHALLENGE_CASE_ID,
     problemTitle: text(value.problemTitle, 240, 1), assumption: text(value.assumption, 250, 1),
     input: text(value.input, CHALLENGE_RUN_LIMITS.input),
     sampleOutput: value.sampleOutput === null ? null : text(value.sampleOutput, CHALLENGE_RUN_LIMITS.expectedOutput),
@@ -136,7 +174,7 @@ export function readChallengeRunPlan(input: unknown): ChallengeRunPlan {
 export function readChallengeRunReceipt(input: unknown): ChallengeRunReceipt {
   const value = record(input, [
     "id", "input", "expectedOutput", "expectedSource", "sourceHash", "fileName", "output", "outcome", "diagnostic", "ranAt",
-  ]);
+  ], ["caseId"]);
   const fileName = text(value.fileName, 250, 1);
   const ranAt = text(value.ranAt, 40, 1);
   if (/[\\/\r\n]/.test(fileName) || !Number.isFinite(Date.parse(ranAt))) return invalid();
@@ -145,7 +183,21 @@ export function readChallengeRunReceipt(input: unknown): ChallengeRunReceipt {
     expectedOutput: text(value.expectedOutput, CHALLENGE_RUN_LIMITS.expectedOutput), expectedSource: expectedSource(value.expectedSource),
     sourceHash: sourceHash(value.sourceHash), fileName, output: text(value.output, CHALLENGE_RUN_LIMITS.output),
     outcome: oneOf(value.outcome, receiptOutcomes), diagnostic: text(value.diagnostic, CHALLENGE_RUN_LIMITS.diagnostic), ranAt,
+    ...(Object.hasOwn(value, "caseId") ? { caseId: readChallengeCaseId(value.caseId) } : {}),
   };
+}
+
+export function readChallengeCaseState(input: unknown): ChallengeCaseState {
+  const value = record(input, ["caseId", "runs", "feedback"]);
+  if (!Array.isArray(value.runs) || value.runs.length > CHALLENGE_RUN_LIMIT * CHALLENGE_CASE_LIMIT ||
+    !Array.isArray(value.feedback) || value.feedback.length > CHALLENGE_CASE_LIMIT) return invalid();
+  const caseId = value.caseId === null ? null : readChallengeCaseId(value.caseId);
+  const runs = value.runs.map(readChallengeRunReceipt);
+  const feedback = value.feedback.map(readChallengeFeedback);
+  if ((caseId === null && (runs.length || feedback.length)) ||
+    new Set(runs.map(run => run.id)).size !== runs.length ||
+    new Set(feedback.map(entry => entry.caseId)).size !== feedback.length) return invalid();
+  return { caseId, runs, feedback };
 }
 
 /** Normalize platform newlines and one optional final newline. Keep other whitespace. */

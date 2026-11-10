@@ -42,13 +42,15 @@ function IdeaReply({ turn }: { turn: TutorTurn }) {
     {outline.assumptions.length > 0 && <ul>{outline.assumptions.map((value, index) => <li key={index}>{value}</li>)}</ul>}
     {outline.uncertainty && <p>{outline.uncertainty}</p>}
   </div>;
+  const candidate = challenge.cases.find(item => item.id === turn.challengeCaseId) ?? challenge.cases[0];
   return <div className="tutor-answer" data-tutor-turn-id={turn.id}>
     <p>{challenge.observation}</p>
     <p>{challenge.question}</p>
-    {challenge.exampleInput !== null && <details>
+    {candidate && <details>
       <summary>Suggested test · Unverified</summary>
-      <pre>{challenge.exampleInput}</pre>
-      {challenge.expectedOutput !== null && <><p>Suggested expected output</p><pre>{challenge.expectedOutput}</pre></>}
+      {candidate.reason !== challenge.observation && <p>{candidate.reason}</p>}
+      <pre>{candidate.input || "(empty)"}</pre>
+      {candidate.expectedOutput !== null && <><p>Suggested expected output</p><pre>{candidate.expectedOutput || "(empty)"}</pre></>}
     </details>}
   </div>;
 }

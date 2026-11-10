@@ -6,9 +6,9 @@ import { canonicalProblemIdentity } from '../../../packages/core/src/codeforces-
 import { availableTutorNotes, freezeTutorContext, parseSharedCode, TUTOR_BUDGET, tutorFields, tutorHash, tutorId, tutorObject, tutorText, validateStatement } from '../../../packages/tutor/context';
 import { buildProviderMessages, hintLevelForAction, parseTutorAction, parseTutorDraftAction } from '../../../packages/tutor/policy';
 import { IDEA_LIMITS, readIdeaChallenge, readIdeaOutline, readIdeaQuestion } from '../../../packages/tutor/idea';
-import { CHALLENGE_RUN_LIMIT, challengeOutputEqual, challengeSampleOutput, parseChallengeRunRequest, readChallengeRunReceipt, type ChallengeRunPlan, type ChallengeRunReceipt } from '../../../packages/tutor/challenge-run';
+import { CHALLENGE_RUN_LIMIT, FIRST_CHALLENGE_CASE_ID, challengeOutputEqual, challengeSampleOutput, parseChallengeRunRequest, readChallengeCaseId, readChallengeFeedback, readChallengeRunReceipt, type ChallengeCaseState, type ChallengeRunPlan, type ChallengeRunReceipt } from '../../../packages/tutor/challenge-run';
 import { isDeskIdeaAction } from '../../../packages/tutor/types';
-import type { DeskHintReview, DeskHintTarget, DeskIdeaReview, SharedCode, StatementSnapshot, TutorAction, TutorContextView, TutorConversation, TutorProposal, TutorProviderStatus, TutorSendInput, TutorSettings, TutorStoredView, TutorTurn, TutorUsage, TutorDraft, TutorDraftView, TutorDraftSaveInput, TutorDraftSaveResult } from '../../../packages/tutor/types';
+import type { DeskHintReview, DeskHintTarget, DeskIdeaReview, IdeaChallengeCase, SharedCode, StatementSnapshot, TutorAction, TutorContextView, TutorConversation, TutorProposal, TutorProviderStatus, TutorSendInput, TutorSettings, TutorStoredView, TutorTurn, TutorUsage, TutorDraft, TutorDraftView, TutorDraftSaveInput, TutorDraftSaveResult } from '../../../packages/tutor/types';
 import type { LocalSnapshot } from './store';
 
 interface TutorOwner {snapshot():LocalSnapshot;approveTutorLearning(proposal:TutorProposal,now:number):void}
@@ -244,7 +244,7 @@ export class TutorStore {
     const code = conversation ? this.pendingCode(conversation.identity, conversation.workspaceId) : null;
     return { ...review, statement: review.statement?.complete ? review.statement : null, conversationId: conversation?.id ?? null, code };
   }
-  private activeChallengeCase(turn: TutorTurn, snapshot: LocalSnapshot) {
+  private activeChallengeCases(turn: TutorTurn, snapshot: LocalSnapshot) {
     if (this.settings().contestMode) throw new Error('Contest mode disables challenge verification.');
     if (turn.action !== 'challenge-assumption' || turn.status !== 'completed' || !turn.standalone || !turn.context.statement?.complete) {
       throw new Error('Open a completed challenge in the Problem Desk first.');
@@ -253,16 +253,64 @@ export class TutorStore {
     if (turn.context.identity !== identity || turn.context.sessionId !== sessionId) {
       throw new Error('The practice session changed. Review a challenge for the active session.');
     }
-    const { exampleInput } = readIdeaChallenge(turn.assistantText);
-    return { input: exampleInput, samples: turn.context.statement.samples };
+    const { cases } = readIdeaChallenge(turn.assistantText);
+    return { cases, samples: turn.context.statement.samples };
   }
-  deskChallengeRuns(input: unknown): ChallengeRunReceipt[] {
-    const value = tutorObject(input);
-    tutorFields(value, ['turnId', 'requestId']);
+
+  private reviewedChallenge(value: Record<string, unknown>) {
     const turn = this.readTurn(value.turnId);
     if (turn.requestId !== tutorId(value.requestId)) throw new Error('The challenge request changed. Reopen it in the Problem Desk.');
-    this.activeChallengeCase(turn, this.owner.snapshot());
-    return turn.challengeRuns ?? [];
+    const { cases } = this.activeChallengeCases(turn, this.owner.snapshot());
+    return { turn, cases };
+  }
+
+  private challengeCaseState(turn: TutorTurn, cases: IdeaChallengeCase[]): ChallengeCaseState {
+    return { caseId: turn.challengeCaseId ?? cases[0]?.id ?? null, runs: turn.challengeRuns ?? [], feedback: turn.challengeFeedback ?? [] };
+  }
+
+  deskChallengeState(input: unknown): ChallengeCaseState {
+    const value = tutorObject(input);
+    tutorFields(value, ['turnId', 'requestId']);
+    const { turn, cases } = this.reviewedChallenge(value);
+    return this.challengeCaseState(turn, cases);
+  }
+
+  deskChallengeRuns(input: unknown): ChallengeRunReceipt[] {
+    return this.deskChallengeState(input).runs;
+  }
+
+  updateDeskChallenge(input: unknown, action: 'select' | 'feedback', now = Date.now()) {
+    const value = tutorObject(input);
+    tutorFields(value, action === 'select' ? ['turnId', 'requestId', 'caseId'] : ['turnId', 'requestId', 'caseId', 'label']);
+    const caseId = readChallengeCaseId(value.caseId);
+    const stamp = new Date(now).toISOString();
+    return this.transaction(() => {
+      const { turn, cases } = this.reviewedChallenge(value);
+      if (!cases.some(item => item.id === caseId)) throw new Error('This case is no longer available. Reopen the challenge.');
+      const state = this.challengeCaseState(turn, cases);
+      let next = turn;
+      if (action === 'select' && caseId !== state.caseId) {
+        next = { ...turn, challengeCaseId: caseId };
+      }
+      if (action === 'feedback') {
+        const selected = value.label === null ? null : readChallengeFeedback({ caseId, label: value.label, recordedAt: stamp });
+        const previous = state.feedback.find(item => item.caseId === caseId);
+        if (previous?.label !== selected?.label) {
+          const others = state.feedback.filter(item => item.caseId !== caseId);
+          next = { ...turn, challengeFeedback: selected ? [...others, selected] : others };
+        }
+      }
+      if (next !== turn) this.writeChallengeTurn(next, stamp);
+      return { state: this.challengeCaseState(next, cases), conversationId: turn.conversationId, turnId: turn.id, requestId: turn.requestId, changed: next !== turn };
+    });
+  }
+
+  private writeChallengeTurn(turn: TutorTurn, stamp: string) {
+    this.writeTurn(turn);
+    const conversation = this.conversation(turn.conversationId);
+    const updated = { ...conversation, updatedAt: stamp };
+    this.db.prepare('UPDATE tutor_conversations SET updated_at=?,body=? WHERE id=?').run(stamp, JSON.stringify(updated), updated.id);
+    this.quota();
   }
   challengeRun(input: unknown, now = Date.now()): { plan: ChallengeRunPlan } | { receipt: ChallengeRunReceipt; conversationId: string } {
     const request = parseChallengeRunRequest(input);
@@ -286,13 +334,17 @@ export class TutorStore {
           ORDER BY rowid DESC LIMIT 1`).get(binding.problemId, target.workspaceId, sessionId);
         if (!row) throw new Error('Open an assumption challenge with a suggested case in the Problem Desk for this solution.');
         const turn = decodeTurn(row.body);
-        const { input, samples } = this.activeChallengeCase(turn, snapshot);
-        if (input === null) throw new Error('The current challenge has no suggested case to run.');
-        if ((turn.challengeRuns?.length ?? 0) >= CHALLENGE_RUN_LIMIT) throw new Error('This challenge has reached its local run limit. Request a new challenge to continue.');
+        const { cases, samples } = this.activeChallengeCases(turn, snapshot);
+        const { caseId, runs } = this.challengeCaseState(turn, cases);
+        const selected = cases.find(item => item.id === caseId);
+        if (!selected) throw new Error('The current challenge has no suggested case to run.');
+        if (runs.filter(item => (item.caseId ?? FIRST_CHALLENGE_CASE_ID) === selected.id).length >= CHALLENGE_RUN_LIMIT) {
+          throw new Error('This case has reached its local run limit. Choose another case or request a new challenge.');
+        }
         return { plan: {
-          turnId: turn.id, requestId: turn.requestId, problemTitle: turn.context.title,
-          assumption: readIdeaQuestion(turn.userText).assumption, input,
-          sampleOutput: challengeSampleOutput(input, samples), recoveryEpoch, sessionId,
+          turnId: turn.id, requestId: turn.requestId, caseId: selected.id, problemTitle: turn.context.title,
+          assumption: readIdeaQuestion(turn.userText).assumption, input: selected.input,
+          sampleOutput: challengeSampleOutput(selected.input, samples), recoveryEpoch, sessionId,
         } };
       }
 
@@ -302,13 +354,16 @@ export class TutorStore {
       if (turn.requestId !== run.requestId || !turn.exposed || turn.context.workspaceId !== target.workspaceId) {
         throw new Error('The reviewed challenge no longer matches this solution.');
       }
-      const { input, samples } = this.activeChallengeCase(turn, snapshot);
-      if (input === null) throw new Error('The reviewed challenge has no suggested case to run.');
+      const { cases, samples } = this.activeChallengeCases(turn, snapshot);
+      const caseId = run.caseId ?? FIRST_CHALLENGE_CASE_ID;
+      const selected = cases.find(item => item.id === caseId);
+      if (!selected) throw new Error('The reviewed challenge case is no longer available.');
+      const { input } = selected;
       if (run.expectedSource === 'statement-sample' && challengeSampleOutput(input, samples) !== run.expectedOutput) {
         throw new Error('The expected output does not match the captured statement sample.');
       }
       const receipt = readChallengeRunReceipt({
-        id: run.id, input, expectedOutput: run.expectedOutput, expectedSource: run.expectedSource,
+        id: run.id, caseId, input, expectedOutput: run.expectedOutput, expectedSource: run.expectedSource,
         sourceHash: run.sourceHash, fileName: basename(fileURLToPath(target.fileUri)), output: run.output,
         outcome: run.outcome === 'exited'
           ? challengeOutputEqual(run.output, run.expectedOutput) ? 'match' : 'mismatch'
@@ -318,17 +373,16 @@ export class TutorStore {
       const runs = turn.challengeRuns ?? [];
       const previous = runs.find(item => item.id === run.id);
       if (previous) {
-        if (JSON.stringify(previous) !== JSON.stringify({ ...receipt, ranAt: previous.ranAt })) {
+        const normalized = readChallengeRunReceipt({ ...previous, caseId: previous.caseId ?? FIRST_CHALLENGE_CASE_ID });
+        if (JSON.stringify(normalized) !== JSON.stringify({ ...receipt, ranAt: previous.ranAt })) {
           throw new Error('This run already belongs to a different saved result.');
         }
         return { receipt: previous, conversationId: turn.conversationId };
       }
-      if (runs.length >= CHALLENGE_RUN_LIMIT) throw new Error('This challenge has reached its local run limit. Request a new challenge to continue.');
-      this.writeTurn({ ...turn, challengeRuns: [...runs, receipt] });
-      const conversation = this.conversation(turn.conversationId);
-      const updated = { ...conversation, updatedAt: receipt.ranAt };
-      this.db.prepare('UPDATE tutor_conversations SET updated_at=?,body=? WHERE id=?').run(updated.updatedAt, JSON.stringify(updated), updated.id);
-      this.quota();
+      if (runs.filter(item => (item.caseId ?? FIRST_CHALLENGE_CASE_ID) === caseId).length >= CHALLENGE_RUN_LIMIT) {
+        throw new Error('This case has reached its local run limit. Choose another case or request a new challenge.');
+      }
+      this.writeChallengeTurn({ ...turn, challengeRuns: [...runs, receipt] }, receipt.ranAt);
       return { receipt, conversationId: turn.conversationId };
     });
   }

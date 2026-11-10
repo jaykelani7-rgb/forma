@@ -13,7 +13,7 @@ import { collectExplicitCode, sameCodeSource, type CodeSourceFence } from "../..
 import { companionConnectionError } from "../../../packages/integrations/connection-error";
 import { afterCompanionReady, CompanionLauncher, launchCompanion, resolveCompanionLaunch, userDevelopmentLaunchPath } from "../../../packages/integrations/local-launch";
 import { cppChallengeSupported, readCppChallengeSource, runCppChallenge } from "../../../packages/integrations/cpp-challenge";
-import { CHALLENGE_RUN_LIMITS, readChallengeRunPlan, readChallengeRunReceipt, type ChallengeRunRequest } from "../../../packages/tutor/challenge-run";
+import { CHALLENGE_RUN_LIMITS, FIRST_CHALLENGE_CASE_ID, readChallengeRunPlan, readChallengeRunReceipt, type ChallengeRunRequest } from "../../../packages/tutor/challenge-run";
 
 const SECRET = "forma-companion.pairing.v1", QUEUE = "forma-companion.queue.v1", FOLDERS = "forma-companion.allowed-folders.v1", BINDINGS = "forma-companion.bindings.v1";
 type Binding = RecognisedBinding & { id?: string; key: string; fileUri: string; sessionId?: string };
@@ -233,10 +233,14 @@ export async function activate(context: vscode.ExtensionContext) {
       if (unsavedChallenge === submission) unsavedChallenge = undefined;
       throw new Error(response.error);
     }
-    const { outcome } = readChallengeRunReceipt(response.receipt);
+    const receipt = readChallengeRunReceipt(response.receipt);
+    if (receipt.id !== submission.run.id ||
+      (receipt.caseId ?? FIRST_CHALLENGE_CASE_ID) !== (submission.run.caseId ?? FIRST_CHALLENGE_CASE_ID)) {
+      throw new Error("The saved run acknowledgement did not match the reviewed case. Retry saving the result.");
+    }
     if (unsavedChallenge === submission) unsavedChallenge = undefined;
-    const detail = outcome === "match" ? "Output matches the expected output."
-      : outcome === "mismatch" ? "Output differs from the expected output."
+    const detail = receipt.outcome === "match" ? "Output matches the expected output."
+      : receipt.outcome === "mismatch" ? "Output differs from the expected output."
       : "The run ended before output could be compared.";
     void vscode.window.setStatusBarMessage(`Forma · ${detail} See the result in the Problem Desk.`, 9000);
   }
@@ -316,7 +320,7 @@ export async function activate(context: vscode.ExtensionContext) {
         detail: [
           `${plan.problemTitle} · ${path.basename(sourceFile)}`,
           `Assumption: ${plan.assumption}`,
-          `Input: ${JSON.stringify(plan.input)}`,
+          `Case ${plan.caseId.slice("case-".length)} input: ${JSON.stringify(plan.input)}`,
           `${expectedSource === "statement-sample" ? "Statement sample" : "Your expected output"}: ${JSON.stringify(expectedOutput)}`,
           "This runs the reviewed saved C++ source with your local user permissions.",
         ].join("\n\n"),
@@ -341,6 +345,7 @@ export async function activate(context: vscode.ExtensionContext) {
       await checkTarget(false);
       const submission: ChallengeSubmission = { operation: "record", target: runTarget, run: {
         id: randomUUID(), turnId: plan.turnId, requestId: plan.requestId, recoveryEpoch: plan.recoveryEpoch,
+        ...(plan.caseId === FIRST_CHALLENGE_CASE_ID ? {} : { caseId: plan.caseId }),
         expectedOutput, expectedSource, ...result,
       } };
       unsavedChallenge = submission;

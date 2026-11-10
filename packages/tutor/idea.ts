@@ -1,4 +1,5 @@
-import type { IdeaChallenge, IdeaOutline } from "./types";
+import { CHALLENGE_CASE_LIMIT, FIRST_CHALLENGE_CASE_ID, challengeOutputEqual } from "./challenge-run";
+import type { IdeaChallenge, IdeaChallengeCase, IdeaOutline } from "./types";
 
 export const IDEA_LIMITS = {
   explanation: 4_000,
@@ -9,9 +10,18 @@ export const IDEA_LIMITS = {
   observation: 500,
   question: 300,
   example: 600,
+  reason: 300,
 } as const;
 
-function readResult(text: string, keys: readonly string[]) {
+function readFields(value: unknown, keys?: readonly string[]) {
+  if (
+    !value || typeof value !== "object" || Array.isArray(value) ||
+    (keys && (Object.keys(value).length !== keys.length || keys.some(key => !Object.hasOwn(value, key))))
+  ) throw new Error("Tutor returned an incomplete result. Try the request again.");
+  return value as Record<string, unknown>;
+}
+
+function readResult(text: string, keys?: readonly string[]) {
   const clean = text.trim();
   const fenced = /^```(?:json)?\s*\n([\s\S]*?)\n```$/i.exec(clean);
   let value: unknown;
@@ -20,11 +30,7 @@ function readResult(text: string, keys: readonly string[]) {
   } catch {
     throw new Error("Tutor did not return a readable result. Try the request again.");
   }
-  if (
-    !value || typeof value !== "object" || Array.isArray(value) ||
-    Object.keys(value).length !== keys.length || keys.some(key => !Object.hasOwn(value, key))
-  ) throw new Error("Tutor returned an incomplete result. Try the request again.");
-  return value as Record<string, unknown>;
+  return readFields(value, keys);
 }
 
 function line(value: unknown, limit: number, optional = false) {
@@ -68,14 +74,33 @@ export function readIdeaQuestion(text: string) {
 }
 
 export function readIdeaChallenge(text: string): IdeaChallenge {
-  const { observation, question, exampleInput, expectedOutput } = readResult(text, ["observation", "question", "exampleInput", "expectedOutput"]);
-  if (exampleInput === null && expectedOutput !== null) {
-    throw new Error("Tutor returned an expected output without an input. Try the challenge again.");
+  const result = readResult(text);
+  const observation = line(result.observation, IDEA_LIMITS.observation);
+  const question = line(result.question, IDEA_LIMITS.question);
+  if (!Object.hasOwn(result, "cases")) {
+    const { exampleInput, expectedOutput } = readFields(result, ["observation", "question", "exampleInput", "expectedOutput"]);
+    const input = sample(exampleInput);
+    const output = sample(expectedOutput);
+    if (input === null && output !== null) {
+      throw new Error("Tutor returned an expected output without an input. Try the challenge again.");
+    }
+    const cases = input === null ? [] : [{ id: FIRST_CHALLENGE_CASE_ID, input, expectedOutput: output, reason: observation }];
+    return { observation, question, cases };
   }
-  return {
-    observation: line(observation, IDEA_LIMITS.observation),
-    question: line(question, IDEA_LIMITS.question),
-    exampleInput: sample(exampleInput),
-    expectedOutput: sample(expectedOutput),
-  };
+
+  const { cases: candidates } = readFields(result, ["observation", "question", "cases"]);
+  if (!Array.isArray(candidates) || candidates.length > CHALLENGE_CASE_LIMIT) {
+    throw new Error("Tutor returned an invalid list of cases. Try the challenge again.");
+  }
+  const cases: IdeaChallengeCase[] = [];
+  for (const candidate of candidates) {
+    const { input, expectedOutput, reason } = readFields(candidate, ["input", "expectedOutput", "reason"]);
+    const caseInput = sample(input);
+    if (caseInput === null) throw new Error("Tutor returned a case without an input. Try the challenge again.");
+    const output = sample(expectedOutput);
+    const explanation = line(reason, IDEA_LIMITS.reason);
+    if (cases.some(existing => challengeOutputEqual(existing.input, caseInput))) continue;
+    cases.push({ id: `case-${cases.length + 1}`, input: caseInput, expectedOutput: output, reason: explanation });
+  }
+  return { observation, question, cases };
 }

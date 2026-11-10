@@ -251,8 +251,9 @@ export function DeskIdeaFlow({
     review={review} explanation={explanation} outline={outline} selectedAssumption={selected}
     includeStatement={includeStatement} includeCode={includeCode} challenge={result?.value ?? null}
     challengedAssumption={result?.assumption}
-    verification={result?.value.exampleInput != null && <ChallengeRunPanel key={result.turn.requestId}
-      bridge={bridge} turn={result.turn} blocked={blocked || covered || saving} savedEvidence={savedRunEvidence} onSave={onSaveRun} />}
+    verification={result && result.value.cases.length > 0 && <ChallengeRunPanel key={result.turn.requestId}
+      bridge={bridge} turn={result.turn} challenge={result.value}
+      blocked={blocked || covered || saving} savedEvidence={savedRunEvidence} onSave={onSaveRun} />}
     loading={loading} pending={pending} error={error} covered={covered} blocked={blocked}
     saving={saving} outlineKept={outlineKept}
     voiceControls={renderVoiceControls(text => changeExplanation([explanation.trimEnd(), text].filter(Boolean).join("\n\n")), !!pending || saving)}

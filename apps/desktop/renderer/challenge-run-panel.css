@@ -21,6 +21,37 @@
   font-weight: 650;
 }
 
+.challenge-case-heading,
+.challenge-case-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.challenge-case-heading > [role="status"] {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.challenge-case-feedback {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+}
+
+.challenge-case-feedback select {
+  min-width: 0;
+  width: 100%;
+  padding: 5px 7px;
+  color: var(--ink);
+  background: var(--paper-raised);
+  border: 1px solid var(--idea-rule);
+  border-radius: 6px;
+  font: inherit;
+}
+
 .challenge-run-panel > p,
 .challenge-run-provenance,
 .challenge-run-outcome span {

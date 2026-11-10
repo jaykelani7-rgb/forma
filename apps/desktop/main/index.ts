@@ -12,7 +12,7 @@ import { ThoughtHostVoice, TutorHostVoice, type ThoughtVoiceContext } from "./tu
 import { ThoughtTakeStore } from "./thought-take-store";
 import { DesktopSessionHandoff } from "./session-handoff-client";
 import { tutorExternalUrl } from "../../../packages/tutor/links";
-import type { ChallengeRunPlan, ChallengeRunReceipt, ChallengeRunRequest } from "../../../packages/tutor/challenge-run";
+import { FIRST_CHALLENGE_CASE_ID, type ChallengeCaseState, type ChallengeRunPlan, type ChallengeRunReceipt, type ChallengeRunRequest } from "../../../packages/tutor/challenge-run";
 import type { DeskHintReview, DeskIdeaReview, SharedCode, StatementSnapshot, TutorConversation, TutorEvent, TutorSendInput, TutorStoredView, TutorTurn } from "../../../packages/tutor/types";
 import { AttentionPolicy } from "./attention";
 import { companionToday } from "../../../packages/core/src/companion-today";
@@ -178,14 +178,20 @@ async function shareTutorCode(code:SharedCode){
   if(panelRequest?.panel!=='tutor')await openTutor({conversationId:conversation.id});
   return {revision:local.revision};
 }
+// Preserve the original wire shape for extensions that support only the first case.
+function challengeCaseOnWire<T extends { caseId?: string }>(value: T) {
+  const { caseId, ...rest } = value;
+  return caseId && caseId !== FIRST_CHALLENGE_CASE_ID ? { ...rest, caseId } : rest;
+}
+
 async function handleChallengeRun(request: ChallengeRunRequest) {
   const current = recoveryFence.lease();
   const result = await database.call<{ plan: ChallengeRunPlan } | { receipt: ChallengeRunReceipt; conversationId: string }>('challenge-run', request);
   current();
-  if ('plan' in result) return result;
+  if ('plan' in result) return { plan: challengeCaseOnWire(result.plan) };
   if (request.operation !== 'record') throw new Error('The challenge run acknowledgement is invalid.');
   emitTutor({ kind: 'updated', conversationId: result.conversationId, turnId: request.run.turnId, requestId: request.run.requestId });
-  return { receipt: result.receipt };
+  return { receipt: challengeCaseOnWire(result.receipt) };
 }
 function voiceReady(capability:'transcription'|'speech'){
   if(tutorService.isConfiguring)throw new TutorProviderError('busy');
@@ -473,6 +479,22 @@ async function ui(action:string,payload:unknown){
       const runs = await database.call<ChallengeRunReceipt[]>(action, payload);
       current();
       return runs;
+    }
+    case 'desk-challenge-state': {
+      const current = recoveryFence.lease();
+      const state = await database.call<ChallengeCaseState>(action, payload);
+      current();
+      return state;
+    }
+    case 'desk-challenge-select':
+    case 'desk-challenge-feedback': {
+      const current = recoveryFence.lease();
+      const { state, conversationId, turnId, requestId, changed } = await database.call<{
+        state: ChallengeCaseState; conversationId: string; turnId: string; requestId: string; changed: boolean;
+      }>(action, payload);
+      current();
+      if (changed) emitTutor({ kind: 'updated', conversationId, turnId, requestId });
+      return state;
     }
     case 'desk-hint-review':
     case 'desk-idea-review': {

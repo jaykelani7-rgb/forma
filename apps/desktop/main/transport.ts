@@ -12,7 +12,7 @@ export function sameCredential(expected:string|null,actual:string) {
   const a=Buffer.from(expected), b=Buffer.from(actual);
   return a.length===b.length&&timingSafeEqual(a,b);
 }
-export async function startTransport(options:{endpoint?:string;credential:()=>string|null;command:(command:unknown,expectedRecoveryEpoch?:string)=>Promise<{revision:number}>;recoveryEpoch?:()=>string|Promise<string>;action:(action:string)=>Promise<number>;recognition?:(request:RecognitionRequest)=>Promise<Record<string,unknown>>;tutorCode?:(code:SharedCode)=>Promise<{revision:number}>;challengeRun?:(request:ChallengeRunRequest)=>Promise<{plan:ChallengeRunPlan}|{receipt:ChallengeRunReceipt}>;context?:()=>Promise<{identity:string|null;sessionId:string|null}>;connected:(value:boolean)=>void}) {
+export async function startTransport(options:{endpoint?:string;credential:()=>string|null;command:(command:unknown,expectedRecoveryEpoch?:string)=>Promise<{revision:number}>;recoveryEpoch?:()=>string|Promise<string>;action:(action:string)=>Promise<number>;recognition?:(request:RecognitionRequest)=>Promise<Record<string,unknown>>;tutorCode?:(code:SharedCode)=>Promise<{revision:number}>;challengeRun?:(request:ChallengeRunRequest)=>Promise<{plan:Omit<ChallengeRunPlan,'caseId'>}|{receipt:ChallengeRunReceipt}>;context?:()=>Promise<{identity:string|null;sessionId:string|null}>;connected:(value:boolean)=>void}) {
   const endpoint=options.endpoint??defaultCompanionEndpoint();
   if(process.platform!=='win32') {
     mkdirSync(dirname(endpoint),{recursive:true,mode:0o700});chmodSync(dirname(endpoint),0o700);

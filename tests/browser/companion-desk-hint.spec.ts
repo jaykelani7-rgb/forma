@@ -4,7 +4,7 @@ import { resolve, sep } from "node:path";
 import type { CompanionSnapshot } from "../../apps/desktop/renderer/api";
 import type { CompanionCommand } from "../../packages/contracts/src";
 import { applyCompanionCommand, initialCompanionState } from "../../packages/core/src/companion";
-import type { ChallengeRunReceipt } from "../../packages/tutor/challenge-run";
+import type { ChallengeCaseState, ChallengeFeedbackLabel, ChallengeRunReceipt } from "../../packages/tutor/challenge-run";
 import type { SharedCode, StatementSnapshot, TutorEvent, TutorProviderStatus, TutorSendInput, TutorTurn } from "../../packages/tutor/types";
 import { emptyData } from "../../src/lib/model";
 
@@ -106,6 +106,15 @@ async function openDesk(page: Page, options: { contestMode?: boolean; timed?: bo
         kind: "updated", conversationId: turn.conversationId, turnId: turn.id, requestId: turn.requestId,
       });
     };
+    function caseState(turn: TutorTurn): ChallengeCaseState {
+      const response = JSON.parse(turn.assistantText);
+      const hasCase = Array.isArray(response.cases) ? response.cases.length > 0 : typeof response.exampleInput === "string";
+      return structuredClone({
+        caseId: turn.challengeCaseId ?? (hasCase ? "case-1" : null),
+        runs: turn.challengeRuns ?? [],
+        feedback: turn.challengeFeedback ?? [],
+      });
+    }
     const controls: DeskHintFixture = {
       reviews: [],
       sends: [],
@@ -211,6 +220,27 @@ async function openDesk(page: Page, options: { contestMode?: boolean; timed?: bo
             const { turnId, requestId } = payload as { turnId: string; requestId: string };
             const turn = turns.find(row => row.id === turnId && row.requestId === requestId && row.context.problemId === currentProblem().id);
             return structuredClone(turn?.challengeRuns ?? []);
+          }
+          case "desk-challenge-state":
+          case "desk-challenge-select":
+          case "desk-challenge-feedback": {
+            const { turnId, requestId, caseId, label } = payload as {
+              turnId: string; requestId: string; caseId?: string; label?: ChallengeFeedbackLabel | null;
+            };
+            const turn = turns.find(row => row.id === turnId && row.requestId === requestId && row.context.problemId === currentProblem().id);
+            if (!turn || turn.action !== "challenge-assumption" || turn.status !== "completed") {
+              throw new Error("The fixture challenge is unavailable.");
+            }
+            if (action === "desk-challenge-select" && caseId) {
+              turn.challengeCaseId = caseId;
+              notify(turn);
+            }
+            if (action === "desk-challenge-feedback" && caseId && label !== undefined) {
+              turn.challengeFeedback = (turn.challengeFeedback ?? []).filter(entry => entry.caseId !== caseId);
+              if (label !== null) turn.challengeFeedback.push({ caseId, label, recordedAt: snapshot.savedAt });
+              notify(turn);
+            }
+            return caseState(turn);
           }
           case "tutor-stop": {
             controls.stops.push(String(payload));
@@ -448,5 +478,69 @@ test("switching problems stops an idea request and keeps its result off the new 
   await openIdea();
   await expect(card.getByRole("textbox", { name: "Your explanation", exact: true })).toHaveValue("");
   await expect(card.getByRole("heading", { name: "Your working idea", exact: true })).toHaveCount(0);
+  expect(await page.evaluate(() => window.__deskHintFixture.commands)).toEqual([]);
+});
+
+test("another challenge case keeps its own runs and feedback when the Desk reopens", async ({ page }) => {
+  await openDesk(page, { timed: true });
+  const openIdea = () => page.getByRole("button", { name: "Explain my idea", exact: true }).click();
+  const card = page.getByRole("region", { name: "Explain my idea", exact: true });
+  await openIdea();
+  await card.getByRole("textbox", { name: "Your explanation", exact: true }).fill("I check the items between both boundaries.");
+  await card.getByRole("button", { name: "Outline my idea", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => window.__deskHintFixture.sends.length)).toBe(1);
+  await page.evaluate(() => window.__deskHintFixture.finish(JSON.stringify({
+    approach: "Scan the interval.", assumptions: ["The final item is included."], uncertainty: "",
+  })));
+  await card.getByRole("radio", { name: "Challenge assumption 1", exact: true }).check();
+  await card.getByRole("button", { name: "Challenge this assumption", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => window.__deskHintFixture.sends.length)).toBe(2);
+  const first = { input: "1 1 1", expectedOutput: "1", reason: "The boundaries meet at the target." };
+  const second = { input: "1 2 2", expectedOutput: "2", reason: "Only the right endpoint contains the target." };
+  await page.evaluate(cases => window.__deskHintFixture.finish(JSON.stringify({
+    observation: "The endpoint comparison controls whether the last item is checked.",
+    question: "Which endpoint gets inspected?", cases,
+  })), [first, second]);
+  const verifier = card.getByRole("region", { name: "Verify in VS Code", exact: true });
+  const feedback = card.getByRole("combobox", { name: "How useful was this case?", exact: true });
+  await expect(card.getByText(first.reason, { exact: true })).toBeVisible();
+  await expect(card.getByText(second.reason, { exact: true })).toHaveCount(0);
+  const receipt: ChallengeRunReceipt = {
+    id: "first-case-run", caseId: "case-1", input: first.input, expectedOutput: first.expectedOutput,
+    expectedSource: "statement-sample", output: "1\n", outcome: "match", diagnostic: "",
+    sourceHash: "a".repeat(64), fileName: "search.cpp", ranAt: "2026-11-08T08:10:00.000Z",
+  };
+  await page.evaluate(run => window.__deskHintFixture.recordRun(run), receipt);
+  await expect(verifier.getByText("Output matched", { exact: true })).toBeVisible();
+  await feedback.selectOption({ label: "Missed my assumption" });
+  await expect(feedback).toHaveValue("wrong-assumption");
+
+  await card.getByRole("button", { name: "Try another case", exact: true }).click();
+  await expect(card.getByText(second.reason, { exact: true })).toBeVisible();
+  await expect(card.getByText(first.reason, { exact: true })).toHaveCount(0);
+  await expect(verifier.getByText("Output matched", { exact: true })).toHaveCount(0);
+  await expect(feedback).toHaveValue("");
+  await page.evaluate(run => window.__deskHintFixture.recordRun(run), {
+    ...receipt, id: "second-case-run", caseId: "case-2", input: second.input, expectedOutput: second.expectedOutput,
+    expectedSource: "user", output: "-1\n", outcome: "mismatch", ranAt: "2026-11-08T08:11:00.000Z",
+  } satisfies ChallengeRunReceipt);
+  await expect(verifier.getByText("Output differed", { exact: true })).toBeVisible();
+  await feedback.selectOption({ label: "Helped me find the bug" });
+  await expect(feedback).toHaveValue("helpful");
+
+  await openIdea();
+  await openIdea();
+  await expect(card.getByText(second.reason, { exact: true })).toBeVisible();
+  await expect(verifier.getByText("Output differed", { exact: true })).toBeVisible();
+  await expect(feedback).toHaveValue("helpful");
+  await card.getByRole("button", { name: "Previous case", exact: true }).click();
+  await expect(card.getByText(first.reason, { exact: true })).toBeVisible();
+  await expect(verifier.getByText("Output matched", { exact: true })).toBeVisible();
+  await expect(verifier.getByText("Output differed", { exact: true })).toHaveCount(0);
+  await expect(feedback).toHaveValue("wrong-assumption");
+  await feedback.selectOption({ label: "No feedback" });
+  await expect(feedback).toHaveValue("");
+  await expect(verifier.getByText("Output matched", { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => window.__deskHintFixture.sends.length)).toBe(2);
   expect(await page.evaluate(() => window.__deskHintFixture.commands)).toEqual([]);
 });
