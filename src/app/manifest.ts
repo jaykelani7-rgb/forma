@@ -1,4 +1,7 @@
 import type { MetadataRoute } from "next";
+import { macDownloadUrl } from "@/lib/mac-download";
+
+export const dynamic = "force-dynamic";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
@@ -7,7 +10,7 @@ export default function manifest(): MetadataRoute.Manifest {
     short_name: "Forma",
     description: "Your daily competitive programming and DSA notebook.",
     lang: "en",
-    start_url: "/",
+    start_url: macDownloadUrl() ? "/today" : "/",
     scope: "/",
     display: "standalone",
     background_color: "#090909",

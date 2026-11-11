@@ -91,7 +91,7 @@ function readRemote(value: unknown, accountId: string): HandoffRemote {
 }
 
 export function SessionHandoff() {
-  const { account, mode, workspaceKey } = useWorkspace();
+  const { account, mode, todayHref, workspaceKey } = useWorkspace();
   const [ticket, setTicket] = useState<Ticket | null | undefined>(undefined);
   const initialized = useRef(false);
   useEffect(() => {
@@ -118,7 +118,7 @@ export function SessionHandoff() {
         <div className={styles.panel}>
           <h2>Open a transfer from the Ribbon.</h2>
           <p>Choose Pause and continue on web on a paused desktop session.</p>
-          <Link href="/" className="text-link">Back to Today <ArrowRight size={16} aria-hidden="true" /></Link>
+          <Link href={todayHref} className="text-link">Back to Today <ArrowRight size={16} aria-hidden="true" /></Link>
         </div>
       )}
     </section>

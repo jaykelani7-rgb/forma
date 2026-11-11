@@ -11,6 +11,7 @@
     "main.cjs",
     "database-worker.cjs",
     "preload.cjs",
+    "workspace-preload.cjs",
     "renderer/**/*",
     "assets/**/*",
     "package.json"

@@ -4,6 +4,7 @@ import { usePathname } from "next/navigation";
 import {
   ArrowLeft,
   ArrowRight,
+  Activity,
   BookMarked,
   BookOpen,
   CalendarDays,
@@ -19,6 +20,7 @@ import {
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { BRAND } from "@/lib/model";
+import { desktopWorkspace } from "@/lib/desktop-workspace";
 import { useWorkspace } from "./provider";
 import { AddProblem } from "./problem-form";
 import { Modal } from "./ui";
@@ -45,9 +47,17 @@ const journalTabs = [
 export function BrandMark({ small = false }: { small?: boolean }) {
   return <RibbonMark size={small ? 36 : 45} />;
 }
+export function OpenRibbonButton() {
+  const bridge = desktopWorkspace();
+  if (!bridge) return null;
+  return <button className="icon-button" aria-label="Open Ribbon" title="Open Ribbon" onClick={() => void bridge.openRibbon()}>
+    <Activity size={18} strokeWidth={1.6} aria-hidden="true" />
+  </button>;
+}
 export function Shell({ children }: { children: ReactNode }) {
   const path = usePathname();
-  const sectionPath = "/" + (path.split("/")[1] ?? "");
+  const onToday = path === "/" || path === "/today";
+  const sectionPath = onToday ? "/" : "/" + (path.split("/")[1] ?? "");
   const activePath =
     sectionPath === "/revisit"
       ? "/problems"
@@ -62,6 +72,7 @@ export function Shell({ children }: { children: ReactNode }) {
         : [];
   const {
     data,
+    todayHref,
     ready,
     mode,
     resolvedTheme,
@@ -80,7 +91,7 @@ export function Shell({ children }: { children: ReactNode }) {
     <>
       {!focused && (
         <aside className="sidebar">
-          <Link href="/" className="brand" aria-label={`${BRAND} home`}>
+          <Link href={todayHref} className="brand" aria-label={`${BRAND} home`}>
             <BrandMark />
             <span>{BRAND.toLowerCase()}</span>
           </Link>
@@ -89,7 +100,7 @@ export function Shell({ children }: { children: ReactNode }) {
             {navigation.map(({ href, label, icon: Icon }) => (
               <Link
                 key={href}
-                href={href}
+                href={href === "/" ? todayHref : href}
                 aria-current={activePath === href ? "page" : undefined}
                 className={`nav-link ${activePath === href ? "active" : ""}`}
               >
@@ -154,11 +165,12 @@ export function Shell({ children }: { children: ReactNode }) {
         {!focused && (
           <>
             <div className="mobile-top">
-              <Link href="/" className="brand">
+              <Link href={todayHref} className="brand">
                 <BrandMark small />
                 <span>{BRAND.toLowerCase()}</span>
               </Link>
               <div>
+                <OpenRibbonButton />
                 <button
                   className="icon-button"
                   onClick={() =>
@@ -181,7 +193,7 @@ export function Shell({ children }: { children: ReactNode }) {
                 </Link>
               </div>
             </div>
-            <div className={path === "/" ? "topbar ribbon-home-bar" : "topbar"}>
+            <div className={onToday ? "topbar ribbon-home-bar" : "topbar"}>
               <div className="breadcrumb">
                 Your workspace<span>/</span>
                 <strong>
@@ -202,6 +214,7 @@ export function Shell({ children }: { children: ReactNode }) {
                       ? `Account · ${cloudStatus}`
                       : "On this device"}
                 </span>
+                <OpenRibbonButton />
                 <button
                   className="icon-button"
                   onClick={() => setHelp(true)}
@@ -238,6 +251,7 @@ export function Shell({ children }: { children: ReactNode }) {
         {ready ? (
           <main
             id="main-content"
+            tabIndex={-1}
             className={focused ? "focus-main" : "main-content"}
           >
             {sectionTabs.length > 0 && (
@@ -326,10 +340,10 @@ export function Shell({ children }: { children: ReactNode }) {
   );
 }
 export function FocusBack() {
-  return (
-    <Link href="/" className="text-link">
+  const { todayHref } = useWorkspace();
+  const back = <Link href={todayHref} className="text-link">
       <ArrowLeft size={16} />
       Back to Today
-    </Link>
-  );
+    </Link>;
+  return desktopWorkspace() ? <div className="focus-header-actions"><OpenRibbonButton />{back}</div> : back;
 }

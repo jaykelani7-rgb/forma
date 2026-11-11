@@ -13,7 +13,7 @@ export interface CompanionSnapshot {
   integration: { connected: boolean; paired: boolean; browserEnabled?: boolean; browserSupported?: boolean; status: string };
   preferences: { theme: "light" | "ink" | "system"; reducedMotion: boolean; snoozedUntil: string | null; shortcut?: string; thoughtShortcut?: string | null; paletteShortcut?: string | null; ribbon?: import("../../../packages/ribbon/options").RibbonOptions };
   codeforces: { checking: boolean; checkedAt: string | null; error: string | null };
-  presentation?: { expanded: boolean; handoffPending?: boolean; shortcutPress?: number; thoughtShortcutPress?: number; thoughtShortcutAvailable?: boolean; paletteShortcutPress?: number; paletteShortcutWasExpanded?: boolean; paletteShortcutAvailable?: boolean; verdict?: {id:string;title:string;message:string}|null; activeFileUri?: string | null; recognition?: RecognitionView; panelRequest?: { id: number; panel: "home" | "memory" | "today" | "tutor";conversationId?:string } };
+  presentation?: { expanded: boolean; handoffPending?: boolean; shortcutPress?: number; thoughtShortcutPress?: number; thoughtShortcutAvailable?: boolean; paletteShortcutPress?: number; paletteShortcutWasExpanded?: boolean; paletteShortcutAvailable?: boolean; verdict?: {id:string;title:string;message:string}|null; activeFileUri?: string | null; recognition?: RecognitionView; panelRequest?: { id: number; panel: "home" | "memory" | "today" | "tutor" | "settings";conversationId?:string } };
 }
 export interface FormaBridge {
   getSnapshot(): Promise<CompanionSnapshot>;

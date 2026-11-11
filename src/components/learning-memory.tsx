@@ -40,9 +40,9 @@ import {
 } from "./revision";
 import styles from "./memory.module.css";
 
-function returnDestination(from?: string) {
+function returnDestination(todayHref: string, from?: string) {
   if (from === "/journal") return { href: "/journal", label: "Back to journal" };
-  if (from === "/") return { href: "/", label: "Back to Today" };
+  if (from === "/" || from === "/today") return { href: todayHref, label: "Back to Today" };
   if (!from || !from.startsWith("/") || from.startsWith("//"))
     return { href: "/problems", label: "Back to problems" };
   try {
@@ -262,7 +262,7 @@ export function LearningMemory({
   initialRevision?: string;
   profile?: string;
 }) {
-  const { data, update, retryLocalSave, guardWorkspace, notify, startSession } =
+  const { data, todayHref, update, retryLocalSave, guardWorkspace, notify, startSession } =
     useWorkspace();
   // Route segments can retain percent encoding; prefer the exact saved ID so
   // legacy notebook IDs containing literal percent sequences remain addressable.
@@ -275,7 +275,7 @@ export function LearningMemory({
   const problem =
     data.problems.find((item) => item.id === problemId) ??
     data.problems.find((item) => item.id === decodedId);
-  const destination = returnDestination(from);
+  const destination = returnDestination(todayHref, from);
   const [timedEditing, setTimedEditing] = useState<Attempt | null>(null);
   const [importedEditing, setImportedEditing] = useState<string | null>(null);
   const [revision, setRevision] = useState<RevisionRecord["activity"] | null>(

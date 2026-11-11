@@ -1,2 +1,8 @@
 import { Today } from "@/components/today";
-export default function Page(){return <Today/>;}
+import { MacHome } from "@/components/mac-site";
+import { macDownloadUrl } from "@/lib/mac-download";
+
+export default function Page() {
+  const downloadUrl = macDownloadUrl();
+  return downloadUrl ? <MacHome downloadUrl={downloadUrl} /> : <Today />;
+}

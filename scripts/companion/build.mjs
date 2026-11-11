@@ -9,6 +9,7 @@ await copyFile('packages/ribbon/ribbon-tray.png','.companion-build/assets/ribbon
 await Promise.all([
   ...['index','database-worker'].map(name=>build({entryPoints:[`apps/desktop/main/${name}.ts`],outfile:`.companion-build/${name==='index'?'main':name}.cjs`,bundle:true,platform:'node',format:'cjs',target:'node24',external:['electron','node:*'],logLevel:'warning'})),
   build({entryPoints:['apps/desktop/preload/index.ts'],outfile:'.companion-build/preload.cjs',bundle:true,platform:'node',format:'cjs',external:['electron'],target:'node24'}),
+  build({entryPoints:['apps/desktop/preload/workspace.ts'],outfile:'.companion-build/workspace-preload.cjs',bundle:true,platform:'node',format:'cjs',external:['electron'],target:'node24'}),
   buildRenderer({configFile:resolve(root,'apps/desktop/vite.config.mjs')}),
 ]);
 const htmlPath='.companion-build/renderer/index.html';

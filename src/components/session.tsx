@@ -45,6 +45,7 @@ import { recordPracticeReflection } from "../../packages/core/src/companion";
 export function FocusedSession() {
   const {
     data,
+    todayHref,
     update,
     retryLocalSave,
     notify,
@@ -303,7 +304,7 @@ export function FocusedSession() {
       setDiscard(false);
       setClosingDraft(null);
       notify("Session ended without adding an attempt.");
-      router.push("/");
+      router.push(todayHref);
     } catch (failure) {
       if (isCurrent())
         setError(
@@ -412,7 +413,7 @@ export function FocusedSession() {
   if (completed)
     return (
       <div className="session-complete page-enter">
-        <Link href="/" className="brand">
+        <Link href={todayHref} className="brand">
           <BrandMark />
           <span>{BRAND.toLowerCase()}.</span>
         </Link>
@@ -473,7 +474,7 @@ export function FocusedSession() {
               Return to stage
             </Link>
           )}
-          <Link href="/" className="button primary">
+          <Link href={todayHref} className="button primary">
             Back to Today
             <ArrowRight size={16} />
           </Link>
@@ -510,7 +511,7 @@ export function FocusedSession() {
           title="A little space to focus."
           description="Choose a problem from Today or your notebook to begin a session."
           action={
-            <Link href="/" className="button primary">
+            <Link href={todayHref} className="button primary">
               Find your next step
               <ArrowRight size={16} />
             </Link>
@@ -532,7 +533,7 @@ export function FocusedSession() {
   return (
     <div className="session-page page-enter">
       <header className="focus-header">
-        <Link href="/" className="brand">
+        <Link href={todayHref} className="brand">
           <BrandMark small />
           <span>{BRAND.toLowerCase()}.</span>
         </Link>

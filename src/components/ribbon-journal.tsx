@@ -23,6 +23,8 @@ import { JournalTakeawayPractice } from "./journal-takeaway-practice";
 import { useWorkspace } from "./provider";
 import { TakeawayConnection } from "./takeaway-connection";
 import { Modal } from "./ui";
+import { desktopWorkspace } from "@/lib/desktop-workspace";
+import { DesktopJournalThoughts } from "./desktop-journal-thoughts";
 import styles from "./ribbon-journal.module.css";
 
 const SOURCES: Record<LearningRecord["source"], string> = {
@@ -656,11 +658,12 @@ export function RibbonJournal({ recent = false }: { recent?: boolean }) {
   }, [savedData]);
   return recent ? (
     <RecentJournal entries={entries} />
-  ) : (
+  ) : (<>
     <JournalBrowser
       key={workspaceKey}
       entries={entries}
       today={localDay || localDate()}
     />
-  );
+    {desktopWorkspace() && <DesktopJournalThoughts />}
+  </>);
 }

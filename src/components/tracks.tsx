@@ -15,6 +15,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { desktopWorkspace } from "@/lib/desktop-workspace";
 import type { Track, TrackEntry } from "@/lib/tracks-types";
 import {
   nextTrackEntry,
@@ -103,6 +104,7 @@ function TracksWorkspace({
   stageId?: string;
   linkedToken?: string;
 }) {
+  const desktop = desktopWorkspace();
   const {
     data,
     update,
@@ -278,7 +280,7 @@ function TracksWorkspace({
             }
           />
           <div className={styles.actions}>
-            <Link className="button secondary" href="/tracks/shared">
+            {!desktop && <><Link className="button secondary" href="/tracks/shared">
               My shared tracks
             </Link>
             <button
@@ -286,7 +288,7 @@ function TracksWorkspace({
               onClick={() => setImporting("shared")}
             >
               Import shared track
-            </button>
+            </button></>}
             <button
               className="button secondary"
               onClick={() => setImporting("paste")}
@@ -339,7 +341,7 @@ function TracksWorkspace({
                       Open track
                       <ArrowRight size={16} />
                     </Link>
-                    <button
+                    {!desktop && <button
                       className="button ghost"
                       disabled={pending}
                       aria-label={`Share track: ${value.title}`}
@@ -347,7 +349,7 @@ function TracksWorkspace({
                     >
                       <Share2 size={16} />
                       Share track
-                    </button>
+                    </button>}
                     <button
                       className="button ghost"
                       disabled={pending}
@@ -414,14 +416,14 @@ function TracksWorkspace({
                     <Pencil size={16} />
                     Edit track
                   </button>
-                  <button
+                  {!desktop && <button
                     className="button secondary"
                     disabled={pending}
                     onClick={() => setSharing(track.id)}
                   >
                     <Share2 size={16} />
                     Share track
-                  </button>
+                  </button>}
                   <button
                     className="button ghost"
                     disabled={pending}

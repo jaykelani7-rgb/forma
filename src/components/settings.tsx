@@ -26,8 +26,10 @@ import { recoveriesFor, Recovery } from "@/lib/storage";
 import { DailyAccessSettings } from "./install";
 import { RecallDefaults } from "./recall-defaults";
 import { PracticePlanPreferences } from "./practice-plan-preferences";
+import { desktopWorkspace } from "@/lib/desktop-workspace";
 
 export function Settings() {
+  const desktop = desktopWorkspace();
   const {
     data,
     mode,
@@ -51,6 +53,7 @@ export function Settings() {
   const [focus, setFocus] = useState<Focus>(data.settings.focus);
   const [error, setError] = useState("");
   const [importError, setImportError] = useState("");
+  const [webImportError, setWebImportError] = useState("");
   const [pending, setPending] = useState<{
     data: Data;
     theme: Theme | null;
@@ -349,7 +352,10 @@ export function Settings() {
           </div>
         </section>
       </form>
-      <WebRibbonSettings />
+      {desktop ? <section className="settings-section">
+        <h2>Ribbon</h2>
+        <button className="button secondary" onClick={() => void desktop.openRibbon("settings")}>Open Ribbon settings</button>
+      </section> : <WebRibbonSettings />}
       <PracticePlanPreferences />
       <section className="settings-section">
         <div className="settings-section-heading">
@@ -534,8 +540,21 @@ export function Settings() {
           ))}
         </div>
       </section>
-      <AccountSettings />
-      <DailyAccessSettings />
+      {desktop ? mode === "personal" && <section className="settings-section">
+        <h2>Bring your web notebook to Forma</h2>
+        <p>Export a notebook from the web workspace’s Settings, then import the JSON file here to merge it with your Mac notebook.</p>
+        <button className="button secondary" disabled={importing || storagePending} onClick={async () => {
+          setImporting(true);
+          setWebImportError("");
+          try {
+            const result = await desktop.importNotebook();
+            if (result.imported) notify("Web notebook imported.");
+          } catch (error) {
+            setWebImportError(error instanceof Error ? error.message : "Forma could not import the notebook.");
+          } finally { setImporting(false); }
+        }}>Import web notebook</button>
+        {webImportError && <p role="alert">{webImportError}</p>}
+      </section> : <><AccountSettings /><DailyAccessSettings /></>}
       <div className="settings-demo-note">
         <div>
           <h3>

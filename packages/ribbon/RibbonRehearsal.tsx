@@ -34,10 +34,12 @@ export function RibbonRehearsal({
   onExit,
   shortcut,
   shortcutPress = 0,
+  focusOnOpen = true,
 }: {
   onExit: () => void;
   shortcut?: string;
   shortcutPress?: number;
+  focusOnOpen?: boolean;
 }) {
   const [book, setBook] = useState(sampleNotebook);
   const [step, setStep] = useState<
@@ -53,8 +55,8 @@ export function RibbonRehearsal({
       setStep("ready");
   }, [shortcutPress, step]);
   useEffect(() => {
-    heading.current?.focus({ preventScroll: true });
-  }, [step]);
+    if (step !== "open" || focusOnOpen) heading.current?.focus({ preventScroll: true });
+  }, [focusOnOpen, step]);
   useEffect(() => {
     if (step !== "focus") return;
     const timer = setInterval(() => setNow(Date.now()), 500);

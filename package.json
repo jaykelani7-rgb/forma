@@ -20,6 +20,7 @@
     "companion:start": "node scripts/companion/start.mjs",
     "companion:preview": "vite --config apps/desktop/vite.config.mjs",
     "companion:package": "npm run companion:build && electron-builder --projectDir .companion-build --config ../apps/desktop/electron-builder.json --dir --mac --arm64",
+    "companion:release:mac": "npm run companion:build && node scripts/companion/release.mjs",
     "extension:build": "node scripts/companion/build-extension.mjs",
     "companion:verify": "node scripts/companion/verify-native.mjs",
     "browser:build": "node scripts/browser/build.mjs",

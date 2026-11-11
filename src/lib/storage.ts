@@ -1,5 +1,6 @@
 import { Data, emptyData, validateData } from "./model";
 import { encodeBackup, mergeWorkspaces } from "./concurrency";
+import { desktopWorkspace } from "./desktop-workspace";
 
 export type Mode = "personal" | "demo";
 export type WorkspaceKey = Mode | `account:${string}`;
@@ -14,6 +15,7 @@ export interface WorkspaceRevision {
   revision: number;
   data: Data;
   savedAt: string;
+  recoveryEpoch?: string;
 }
 export interface Recovery {
   id: string;
@@ -52,6 +54,8 @@ export async function loadWorkspace(
   key: WorkspaceKey,
   fallback = emptyData(),
 ): Promise<WorkspaceRevision> {
+  const desktop = desktopWorkspace();
+  if (desktop && key === "personal") return desktop.read();
   const db = await openDatabase();
   return new Promise((resolve, reject) => {
     const tx = db.transaction("workspaces", "readwrite");
@@ -104,6 +108,11 @@ export async function commitWorkspace(
   replace = false,
 ): Promise<CommitResult> {
   encodeBackup(proposed);
+  const desktop = desktopWorkspace();
+  if (desktop && key === "personal") {
+    if (!base.recoveryEpoch) throw new Error("Reopen the workspace before saving to the local notebook.");
+    return desktop.commit({ base: { ...base, key, recoveryEpoch: base.recoveryEpoch }, proposed, replace });
+  }
   const db = await openDatabase();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(["workspaces", "recoveries"], "readwrite");
@@ -155,6 +164,8 @@ export async function commitWorkspace(
   });
 }
 export async function recoveriesFor(key: WorkspaceKey): Promise<Recovery[]> {
+  const desktop = desktopWorkspace();
+  if (desktop && key === "personal") return desktop.recoveries();
   const db = await openDatabase();
   return new Promise((resolve, reject) => {
     const r = db.transaction("recoveries").objectStore("recoveries").getAll();
@@ -203,6 +214,8 @@ export async function preserveRecovery(
   data: Data,
   reason: string,
 ): Promise<void> {
+  const desktop = desktopWorkspace();
+  if (desktop && key === "personal") return desktop.preserveRecovery({ data, reason });
   const db = await openDatabase();
   return new Promise((resolve, reject) => {
     const tx = db.transaction("recoveries", "readwrite");

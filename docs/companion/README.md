@@ -1,6 +1,12 @@
 # Forma Companion
 
-A quiet desktop face for the existing Forma notebook. This first milestone is local-only and unsigned. It preserves the standalone website.
+Forma for Mac opens a full practice workspace with a separate Ribbon window. Both read and write the same local notebook. Open either window from the menu bar, or open the active problem or session from the Ribbon.
+
+To move an existing web notebook, export its JSON from web Settings. In the Mac workspace, open Settings and choose **Import web notebook**. Forma merges the file with existing records, keeps a recovery copy, and reports conflicting records for review. Finish open sessions before merging. Hosted sign-in, shared-track publishing, and account sync still use the web workspace.
+
+The public site offers `/preview` and `/download`. Set `FORMA_MAC_DOWNLOAD_URL` on the website server to the HTTPS URL of the published Apple Silicon DMG to put the Mac preview on the homepage. Existing browser notebooks can be exported from `/settings`, and `/today` opens the browser workspace.
+
+For a local Apple Silicon build, run `npm run companion:package`. For public distribution, configure a Developer ID Application certificate and Apple notarization credentials, then run `npm run companion:release:mac`. This builds the versioned DMG under `dist/forma-mac`. The release script accepts an `APPLE_KEYCHAIN_PROFILE`, the Apple ID credentials, or the App Store Connect API credentials supported by electron-builder. Verify the downloaded installer on a clean Mac before setting the website download URL.
 
 ## Run
 

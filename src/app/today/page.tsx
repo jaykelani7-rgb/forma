@@ -1,2 +1,5 @@
-import { redirect } from "next/navigation";
-export default function Page(){redirect("/");}
+import { Today } from "@/components/today";
+
+export default function TodayPage() {
+  return <Today />;
+}

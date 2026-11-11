@@ -27,6 +27,7 @@ export function InstallSupport() {
     sync,
     update,
     mode,
+    todayHref,
     cloudStatus,
     cloudError,
   } = useWorkspace();
@@ -94,7 +95,7 @@ export function InstallSupport() {
     // The new application code is loaded only when the user next opens the app.
   }
   const reminder =
-    ready && mode !== "demo" && pathname === "/" && inAppReminderDue(data, now);
+    ready && mode !== "demo" && pathname === todayHref && inAppReminderDue(data, now);
   if (!offline && !waiting && !activated && !reminder) return null;
   return (
     <aside className={styles.notices} aria-label="Daily access notices">

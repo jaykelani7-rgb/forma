@@ -289,7 +289,7 @@ export function validateCompanionState(input: unknown, data: Data): CompanionSta
     const problem = target ? data.problems.find((p) => p.id === target.problemId) : undefined;
     if (!target || !problem || canonicalProblemIdentity(problem) !== s.identity || (problem.cfHandle && problem.cfHandle.toLowerCase() !== s.handle.toLowerCase()) || s.submittedAt < target.startedAt || s.submittedAt > ("completedAt" in target ? target.completedAt : s.observedAt)) throw new Error("Platform evidence does not belong to its recorded session.");
   }
-  if (state.problemId && canonicalProblemIdentity(data.problems.find((p) => p.id === state.problemId)!) !== state.identity) throw new Error("The companion problem identity changed.");
+  if (state.problemId && (canonicalProblemIdentity(data.problems.find((p) => p.id === state.problemId)!) ?? null) !== state.identity) throw new Error("The companion problem identity changed.");
   if (state.followups !== undefined) {
     if (!Array.isArray(state.followups) || state.followups.length > 1000 || new Set(state.followups.map(f => f.id)).size !== state.followups.length) throw new Error("Invalid verdict follow-ups.");
     for (const f of state.followups) if (!f || typeof f.id !== 'string' || !ids.has(f.problemId) || !/^(contest|gym):\d+:[A-Z]\d*$/.test(f.identity) || !/^[A-Za-z0-9_.-]{3,24}$/.test(f.handle) || !stamp(f.startedAt) || !stamp(f.nextCheckAt) || ![f.finishedAt,f.discoveryUntil,f.pendingUntil,f.checkedAt].every(v=>v===null||stamp(v)) || !['searching','pending','final','temporary-failure','expired'].includes(f.status) || !(f.error===null||typeof f.error==='string')) throw new Error("Invalid verdict follow-up fields.");

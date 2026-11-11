@@ -1,0 +1,15 @@
+.focus-header-actions { display: flex; align-items: center; gap: 16px; }
+
+.desktop-journal-thoughts {
+  margin: 24px 0;
+  padding: 18px 22px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.desktop-journal-thoughts summary { font-weight: 600; cursor: pointer; }
+.desktop-journal-thoughts ul { margin: 12px 0 0; max-height: 360px; overflow: auto; }
+.desktop-journal-thoughts li { padding: 12px 0; border-top: 1px solid var(--line); }
+.desktop-journal-thoughts li div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; }
+.desktop-journal-thoughts a { text-decoration: underline; text-underline-offset: 3px; }
+.desktop-journal-thoughts time { color: var(--muted); font-size: 13px; }
+.desktop-journal-thoughts p { margin: 8px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }

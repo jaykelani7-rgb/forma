@@ -3,6 +3,7 @@ import { app, BrowserWindow, ipcMain, screen, Tray, Menu, nativeImage, globalSho
 import { mkdirSync, readFileSync, writeFileSync, existsSync, statSync, renameSync, rmSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { readFile } from "node:fs/promises";
 import { homedir } from 'node:os';
 import { randomBytes, randomUUID } from "node:crypto";
 import { TutorConfiguration } from "./tutor-config";
@@ -34,8 +35,12 @@ import { createLoginStartup } from './login-startup';
 import { deriveSetupStatus, type BackupRestorePreview } from '../../../packages/setup/status';
 import { BACKUP_LIMIT } from './backup-schema';
 import { RecoveryFence, writeVerifiedRecovery } from './local-recovery';
+import { createWorkspaceWindow, isWorkspaceSender, loadWorkspaceWindow, registerWorkspaceScheme, serveWorkspace } from './workspace-window';
+import { MAX_BACKUP_BYTES } from '../../../src/lib/concurrency';
+import type { CommitResult } from '../../../src/lib/storage';
 
 app.setName('Forma Companion');
+registerWorkspaceScheme();
 const developmentData = !app.isPackaged || process.argv.includes('--companion-smoke') ? process.env.FORMA_COMPANION_DATA_DIR : undefined;
 if(developmentData)app.setPath('userData',resolve(developmentData));
 const lock=app.requestSingleInstanceLock();
@@ -49,6 +54,9 @@ let paletteShortcutWasExpanded = false;
 let lastPaletteShortcutEvent = -Infinity;
 const ribbonWindow = { width: 216, height: 78 };
 let window: BrowserWindow;
+let workspaceWindow: BrowserWindow | undefined;
+let workspaceLoading: Promise<void> | undefined;
+let workspaceRevision = -1;
 let tray: Tray;
 let database: DatabaseClient;
 const desktopHandoff = new DesktopSessionHandoff({
@@ -68,7 +76,7 @@ let connected=false;
 const attention=new AttentionPolicy();
 let plannerDay="";
 let expanded=false;
-let panelRequest:{id:number;panel:'home'|'memory'|'today'|'tutor';conversationId?:string}|undefined;
+let panelRequest:{id:number;panel:'home'|'memory'|'today'|'tutor'|'settings';conversationId?:string}|undefined;
 let quitting=false;
 let checkPromise:Promise<void>|null=null;
 let codeforces:{checking:boolean;checkedAt:string|null;error:string|null}={checking:false,checkedAt:null,error:null};
@@ -314,6 +322,10 @@ const snapshot=async()=>{
 async function broadcast() {
   if(!window||window.isDestroyed())return;
   const next=await snapshot();
+  if (workspaceWindow && !workspaceWindow.isDestroyed() && next.revision > workspaceRevision) {
+    workspaceRevision = next.revision;
+    workspaceWindow.webContents.send('workspace:changed');
+  }
   if(!expanded){
     const bubble=!!(next.presentation.recognition||next.presentation.verdict)&&!(preferences.snoozedUntil&&Date.parse(preferences.snoozedUntil)>Date.now());
     const b=window.getBounds();
@@ -347,6 +359,89 @@ function expand(value:boolean,focus=false,glance=false){
   void broadcast();
 }
 function show(){expand(true,true);void broadcast();}
+
+async function openWorkspace(path?: string) {
+  if (!workspaceWindow || workspaceWindow.isDestroyed()) {
+    const created = createWorkspaceWindow(join(__dirname, 'workspace-preload.cjs'));
+    workspaceWindow = created;
+    workspaceRevision = -1;
+    created.on('closed', () => { if (workspaceWindow === created) workspaceWindow = undefined; });
+    workspaceLoading = loadWorkspaceWindow(created, path ?? '/').finally(() => { workspaceLoading = undefined; });
+    try { await workspaceLoading; } catch (error) { created.destroy(); throw error; }
+  } else {
+    await workspaceLoading;
+    if (path && workspaceWindow && !workspaceWindow.isDestroyed()) workspaceWindow.webContents.send('workspace:navigate', path);
+  }
+  if (!workspaceWindow || workspaceWindow.isDestroyed()) return;
+  if (workspaceWindow.isMinimized()) workspaceWindow.restore();
+  workspaceWindow.show();
+}
+
+function showWorkspace(path?: string) {
+  void openWorkspace(path).catch(() => dialog.showErrorBox('Forma could not open the workspace', 'Rebuild or reinstall Forma and try again.'));
+}
+
+function registerWorkspaceIpc() {
+  const handle = (action: string, callback: (input: unknown) => unknown) => {
+    ipcMain.handle(`workspace:${action}`, (event, input) => {
+      if (!isWorkspaceSender(event, workspaceWindow)) throw new Error('Untrusted workspace sender.');
+      recoveryFence.lease();
+      return callback(input);
+    });
+  };
+  handle('read', () => database.call('workspace-read'));
+  handle('thoughts', async () => (await database.call<LocalSnapshot>('snapshot')).state.thoughts);
+  handle('recoveries', () => database.call('workspace-recoveries'));
+  handle('preserve-recovery', input => database.call('workspace-preserve-recovery', input));
+  handle('commit', async input => {
+    const current = recoveryFence.lease();
+    if ((input as { replace?: unknown } | null)?.replace === true) {
+      await flushTutorDrafts();
+      current();
+      const release = recoveryFence.begin();
+      let result: CommitResult;
+      try {
+        cancelVoice();
+        result = await tutorService.configure(() => database.call<CommitResult>('workspace-commit', input));
+        if (result.conflicts.length === 0) {
+          hostEpoch = randomUUID();
+          transport?.revoke();
+          recognition.reset();
+          pendingRestore = null;
+        }
+      } finally { release(); }
+      if (result.conflicts.length === 0) {
+        emitTutor({ kind: 'recovery' });
+        void broadcast().catch(() => {});
+      }
+      return result;
+    }
+    const result = await database.call<CommitResult>('workspace-commit', input);
+    current();
+    if (result.conflicts.length === 0) void broadcast().catch(() => {});
+    return result;
+  });
+  handle('open-ribbon', panel => {
+    if (panel !== undefined && panel !== 'settings') throw new Error('Choose a Ribbon panel.');
+    if (panel) panelRequest = { id: (panelRequest?.id ?? 0) + 1, panel };
+    show();
+  });
+  handle('import-notebook', async () => {
+    const current = recoveryFence.lease();
+    const owner = workspaceWindow!;
+    const choice = await dialog.showOpenDialog(owner, { properties: ['openFile'], filters: [{ name: 'Forma notebook', extensions: ['json'] }] });
+    if (choice.canceled) return { imported: false };
+    const file = choice.filePaths[0];
+    const stat = statSync(file);
+    if (!stat.isFile() || stat.size > MAX_BACKUP_BYTES) throw new Error('Choose a Forma notebook JSON file within the supported size.');
+    const json = await readFile(file, 'utf8');
+    current();
+    await database.call('importNotebook', json);
+    current();
+    void broadcast().catch(() => {});
+    return { imported: true };
+  });
+}
 function credentialPath(){return join(app.getPath('userData'),'pairing.enc');}
 function secureAvailable(){return safeStorage.isEncryptionAvailable() && (process.platform!=='linux'||safeStorage.getSelectedStorageBackend()!=='basic_text');}
 function saveCredential(value:string|null){
@@ -586,7 +681,14 @@ async function ui(action:string,payload:unknown){
       return null;
     }
     case 'open-vscode':await shell.openExternal('vscode://');return null;
-    case 'open-forma':await shell.openExternal('http://localhost:3001');return null;
+    case 'open-forma': {
+      if (payload === 'problem') {
+        const { data, state } = await database.call<LocalSnapshot>('snapshot');
+        const path = data.session ? '/session' : state.problemId ? `/problems/${encodeURIComponent(state.problemId)}` : '/problems';
+        await openWorkspace(path);
+      } else await openWorkspace();
+      return null;
+    }
     case 'export-notebook':return saveFile('notebook');
     case 'export-companion':return saveFile('companion');
     case 'import-notebook':{
@@ -613,6 +715,8 @@ async function ui(action:string,payload:unknown){
 
 async function main(){
   await app.whenReady();
+  serveWorkspace(join(__dirname, 'renderer'));
+  registerWorkspaceIpc();
   const userData=app.getPath('userData');mkdirSync(userData,{recursive:true,mode:0o700});
   database=new DatabaseClient(join(userData,'notebook.sqlite'));
   thoughtTakes = new ThoughtTakeStore(join(userData, "thought-takes.sqlite"), {
@@ -632,7 +736,7 @@ async function main(){
   if(existsSync(credentialPath())&&secureAvailable())try{credential=safeStorage.decryptString(readFileSync(credentialPath()))||null;}catch{credential=null;}
   const a=screen.getPrimaryDisplay().workArea;
   const size=ribbonWindow;const position=clampPosition(preferences.position??{x:a.x+a.width-180,y:a.y+a.height-200},size,a);
-  window=new BrowserWindow({...size,...position,frame:false,transparent:true,resizable:false,show:false,hasShadow:false,alwaysOnTop:true,skipTaskbar:true,title:'Forma Companion — unsigned development build',webPreferences:{preload:join(__dirname,'preload.cjs'),contextIsolation:true,sandbox:true,nodeIntegration:false,webSecurity:true,backgroundThrottling:true}});
+  window=new BrowserWindow({...size,...position,frame:false,transparent:true,resizable:false,show:false,hasShadow:false,alwaysOnTop:true,skipTaskbar:true,title:'Forma Ribbon',webPreferences:{preload:join(__dirname,'preload.cjs'),contextIsolation:true,sandbox:true,nodeIntegration:false,webSecurity:true,backgroundThrottling:true}});
   window.setVisibleOnAllWorkspaces(true,{visibleOnFullScreen:true});
   window.webContents.setWindowOpenHandler(()=>({action:'deny'}));
   window.webContents.on('will-navigate',event=>event.preventDefault());
@@ -652,7 +756,7 @@ async function main(){
   const icon=nativeImage.createFromPath(join(__dirname,'assets','ribbon-tray.png'));
   if(icon.isEmpty())throw new Error('The menu-bar recovery icon is missing from this build.');
   icon.setTemplateImage(true);tray=new Tray(icon);tray.setToolTip('Forma Companion');
-  tray.setContextMenu(Menu.buildFromTemplate([{label:'Open Forma Ribbon',click:show},{label:'Compact ribbon',click:()=>expand(false)},{label:'Hide companion',click:()=>window.hide()},{label:'Snooze for an hour',click:()=>void setPreferences({snoozedUntil:new Date(Date.now()+3600000).toISOString()})},{type:'separator'},{label:'Export notebook…',click:()=>void saveFile('notebook')},{label:'Unsigned development build',enabled:false},{label:'Quit Forma Companion',click:()=>app.quit()}]));
+  tray.setContextMenu(Menu.buildFromTemplate([{label:'Open Forma Workspace',click:()=>showWorkspace()},{label:'Open Forma Ribbon',click:show},{label:'Compact ribbon',click:()=>expand(false)},{label:'Hide companion',click:()=>window.hide()},{label:'Snooze for an hour',click:()=>void setPreferences({snoozedUntil:new Date(Date.now()+3600000).toISOString()})},{type:'separator'},{label:'Export notebook…',click:()=>void saveFile('notebook')},{label:'Quit Forma',click:()=>app.quit()}]));
   tray.on('click',show);
   for (const action of shortcutOrder) {
     const shortcut = preferences[action];
@@ -679,6 +783,9 @@ async function main(){
     if(day!==plannerDay){plannerDay=day;await database.call('reconcile');await broadcast();}
     if((local.state.followups??[]).some(f=>followupDue(f,now))&&now-lastCheck>=30000)void checkCodeforces().catch(()=>{});
   },15000);timer.unref();
+  if (!developmentData && !(process.platform === 'darwin' && app.getLoginItemSettings().wasOpenedAtLogin) && !process.argv.includes('--companion-smoke')) {
+    showWorkspace();
+  }
   if(process.argv.includes('--companion-smoke')){
     expand(true,true);await new Promise(r=>setTimeout(r,1500));
     const out=join(userData,'smoke.png');writeFileSync(out,(await window.webContents.capturePage()).toPNG());
@@ -686,7 +793,7 @@ async function main(){
   }
 }
 app.on('second-instance',()=>{if(window)show();});
-app.on('activate',()=>{if(window)show();});
+app.on('activate',()=>{if(window)showWorkspace();});
 app.on('before-quit',event=>{
   if(quitting)return;
   quitting=true;globalShortcut.unregisterAll();transport?.close();browserTransport?.close();recognition?.reset();

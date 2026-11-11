@@ -11,6 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import { useRouter } from "next/navigation";
+import { desktopWorkspace } from "@/lib/desktop-workspace";
 import { validateWorkspaceProposal } from "@/lib/workspace-proposal";
 import { Check, X } from "lucide-react";
 import {
@@ -83,6 +84,7 @@ import {
 
 interface Workspace {
   data: Data;
+  todayHref: "/" | "/today";
   savedData: Data;
   ready: boolean;
   mode: Mode;
@@ -137,7 +139,7 @@ export function useWorkspace() {
   if (!value) throw new Error("Workspace provider is missing.");
   return value;
 }
-export function WorkspaceProvider({ children }: { children: ReactNode }) {
+export function WorkspaceProvider({ children, todayHref = "/" }: { children: ReactNode; todayHref?: Workspace["todayHref"] }) {
   const router = useRouter();
   const [bundle, setBundle] = useState<{
     data: Data;
@@ -242,18 +244,19 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         record.current = result.record;
         if (result.conflicts.length) {
           setStorageError(
-            "Another tab changed the same records. The newer workspace is kept; your proposed changes are saved as a recovery copy in Settings. Review both before restoring.",
+            "The same records changed elsewhere. Your proposed changes are saved as a recovery copy in Settings. Review both versions before restoring.",
           );
         }
         if (pendingWrites.current === 1 && isCurrent())
           showBundle({ data: result.record.data, mode, ready: true });
         channel.current?.postMessage({ key, revision: result.record.revision });
         return result.conflicts.length === 0 && isCurrent();
-      } catch {
+      } catch (error) {
         if (keyRef.current === key) {
           persistBlocked.current = true;
           setStorageError(
-            "Storage is unavailable, full, or beyond the 64 MB capacity. Unsaved changes remain in this tab; export them before closing it. Original saved records are preserved.",
+            desktopWorkspace() && error instanceof Error ? error.message :
+              "Storage is unavailable, full, or beyond the 64 MB capacity. Unsaved changes remain in this tab; export them before closing it. Original saved records are preserved.",
           );
         }
         return false;
@@ -395,7 +398,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           !operationIsCurrent(operation, captureOperation()) ||
           persistBlocked.current ||
           pendingWrites.current ||
-          latest.revision === record.current?.revision
+          latest.revision <= (record.current?.revision ?? -1)
         )
           return;
         record.current = latest;
@@ -406,8 +409,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       }
     }
     updates.onmessage = refresh;
+    const stopDesktopUpdates = desktopWorkspace()?.onChange(() => { void queue.current.then(refresh); });
     window.addEventListener("focus", refresh);
     return () => {
+      stopDesktopUpdates?.();
       updates.close();
       window.removeEventListener("focus", refresh);
     };
@@ -522,7 +527,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     } catch {
       /* local workspace remains usable */
     }
-    router.push("/");
+    router.push(todayHref);
     notify(
       mode === "demo"
         ? "Sample data is separate from your personal workspace."
@@ -726,7 +731,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     );
   }
   useEffect(() => {
-    if (!bundle.ready || bundle.mode === "demo") return;
+    if (!bundle.ready || bundle.mode === "demo" || desktopWorkspace()) return;
     let cancelled = false;
     const auth = getBrowserAuth();
     if (!auth) return;
@@ -1178,6 +1183,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   return (
     <Context.Provider
       value={{
+        todayHref,
         ...bundle,
         savedData: record.current?.data ?? emptyData(),
         theme,

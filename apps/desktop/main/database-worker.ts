@@ -20,6 +20,10 @@ parentPort!.on('message', (request: {id:number;method:string;args:unknown[]}) =>
         value=store.updateEvidence(String(a[1]),(data,state)=>({data,state:reconcileFollowups(state,e.handle,e.submissions,now,e.error??null,data)}),e,now); break;
       }
       case 'snapshot': value=store.snapshot(); break;
+      case 'workspace-read': value=store.readWorkspace(); break;
+      case 'workspace-commit': value=store.commitWorkspace(a[0],now); break;
+      case 'workspace-recoveries': value=store.workspaceRecoveries(); break;
+      case 'workspace-preserve-recovery': value=store.preserveWorkspaceRecovery(a[0],now); break;
       case 'handoff-current': value=store.currentHandoff(); break;
       case 'handoff-begin': value=store.beginHandoff(a[0] as Parameters<CompanionStore['beginHandoff']>[0]); break;
       case 'handoff-mark-sending': value=store.markHandoffSending(a[0] as Parameters<CompanionStore['markHandoffSending']>[0]); break;

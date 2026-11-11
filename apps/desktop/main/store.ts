@@ -2,20 +2,22 @@ import { DatabaseSync } from "node:sqlite";
 import { chmodSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
-import { emptyData, elapsed, validateData, type Data } from "../../../src/lib/model";
-import { decodeBackup, encodeBackup, mergeWorkspaces } from "../../../src/lib/concurrency";
+import { emptyData, elapsed, validateData, type Data, type Session } from "../../../src/lib/model";
+import { decodeBackup, encodeBackup, mergeWorkspaces, type MergeResult } from "../../../src/lib/concurrency";
 import { applyCompanionCommand, applySessionFollowup, initialCompanionState, recordPracticeReflection, validateCompanionState, type CompanionState } from "../../../packages/core/src/companion";
 import { canonicalProblemIdentity } from "../../../packages/core/src/codeforces-identity";
 import type { TutorProposal } from "../../../packages/tutor/types";
 import { parseCommand, parseEvent } from "../../../packages/contracts/src/index";
 import { reconcilePracticePlan } from "../../../src/lib/practice-plan";
 import { isHandoffAccountId, isHandoffId, isHandoffKey, makeSessionHandoffPacket, parseSessionHandoffPacket, type SessionHandoffPacket } from "../../../src/lib/session-handoff";
-import { expireFollowups } from "../../../packages/core/src/verdict-followup";
+import { DISCOVERY_MS, expireFollowups } from "../../../packages/core/src/verdict-followup";
+import type { CommitResult, Recovery, WorkspaceRevision } from "../../../src/lib/storage";
 import { defaultPreferences, validatePreferences } from "./preferences";
 import { TutorStore } from './tutor-store';
 import { BackupStore } from './backup-store';
 
 export interface LocalSnapshot { data: Data; state: CompanionState; revision: number; savedAt: string }
+type PersonalRevision = WorkspaceRevision & { key: "personal"; recoveryEpoch: string };
 export interface PendingSessionHandoff {
   id: string;
   sourceKey: string;
@@ -29,6 +31,39 @@ const HANDOFF_SCHEMA_VERSION = 6;
 const HANDOFF_PENDING = "Finish or cancel the web handoff before changing this session.";
 const MAX_DEVICE_BYTES = 8 * 1024 * 1024;
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
+const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+const sessionClock = (session: Session) => [session.phase, session.runningSince, session.elapsedMs];
+
+/** A running checkpoint moves the clock origin without changing measured time. */
+function mergeDesktopWorkspace(base: Data, proposed: Data, current: Data): MergeResult {
+  const prior = base.session;
+  const local = proposed.session;
+  const remote = current.session;
+  if (prior && local && (
+    local.id !== prior.id || local.problemId !== prior.problemId || local.startedAt !== prior.startedAt ||
+    !same(local.trackContext, prior.trackContext) || !same(local.takeawayPractice, prior.takeawayPractice) ||
+    local.elapsedMs < prior.elapsedMs || (remote && remote.id !== prior.id && !same(prior, local))
+  )) return { data: current, conflicts: ["workspace.session.identity"] };
+  if (!prior || !remote) return mergeWorkspaces(base, proposed, current);
+
+  const checkpoint = prior.id === remote.id && prior.phase === remote.phase && prior.runningSince !== null &&
+    remote.runningSince !== null && remote.runningSince >= prior.runningSince &&
+    remote.elapsedMs - prior.elapsedMs === remote.runningSince - prior.runningSince;
+  const equivalentRemote = checkpoint
+    ? { ...remote, elapsedMs: prior.elapsedMs, runningSince: prior.runningSince }
+    : remote;
+  if (local && prior.id === remote.id && !same(sessionClock(prior), sessionClock(local)) &&
+    !same(sessionClock(prior), sessionClock(equivalentRemote)) && !same(sessionClock(local), sessionClock(equivalentRemote))) {
+    return { data: current, conflicts: ["workspace.session.timer"] };
+  }
+  const merged = mergeWorkspaces(base, proposed, checkpoint ? { ...current, session: equivalentRemote } : current);
+  if (!merged.conflicts.length && checkpoint && merged.data.session?.id === remote.id &&
+    same(sessionClock(merged.data.session), sessionClock(equivalentRemote))) {
+    merged.data = { ...merged.data, session: { ...merged.data.session, elapsedMs: remote.elapsedMs, runningSince: remote.runningSince } };
+  }
+  return merged;
+}
+
 function validHandoffOrigin(value: unknown): value is string {
   if (typeof value !== "string" || value.length > 256) return false;
   try {
@@ -82,6 +117,166 @@ export class CompanionStore {
     const row = this.db.prepare('SELECT * FROM workspace WHERE id=1').get()!;
     const data=validateData(JSON.parse(String(row.notebook)));
     return {data, state: validateCompanionState(JSON.parse(String(row.device)),data), revision:Number(row.revision), savedAt:String(row.saved_at)};
+  }
+  private workspaceRecord({ data, revision, savedAt }: LocalSnapshot): PersonalRevision {
+    const recoveryEpoch = String(this.db.prepare('SELECT epoch FROM tutor_draft_state WHERE id=1').get()!.epoch);
+    return { key: "personal", data, revision, savedAt, recoveryEpoch };
+  }
+  readWorkspace(): PersonalRevision {
+    return this.workspaceRecord(this.snapshot());
+  }
+  private saveWorkspaceRecovery(data: Data, reason: string, now: number): string {
+    const id = randomUUID();
+    this.db.prepare('INSERT INTO recoveries VALUES(?,?,?,?)').run(id, encodeBackup(data), reason, new Date(now).toISOString());
+    return id;
+  }
+  workspaceRecoveries(): Recovery[] {
+    return this.db.prepare('SELECT * FROM recoveries ORDER BY created_at DESC, rowid DESC').all().map(row => ({
+      id: String(row.id), key: "personal", data: decodeBackup(String(row.notebook)), createdAt: String(row.created_at), reason: String(row.reason),
+    }));
+  }
+  preserveWorkspaceRecovery(input: unknown, now = Date.now()): void {
+    if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("Invalid recovery copy.");
+    const { data, reason } = input as { data: unknown; reason: unknown };
+    if (typeof reason !== "string" || !reason.trim() || reason.length > 2000) throw new Error("Choose a valid reason for this recovery copy.");
+    this.saveWorkspaceRecovery(validateData(data), reason, now);
+  }
+  commitWorkspace(input: unknown, now = Date.now()): CommitResult {
+    if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("Invalid workspace edit.");
+    const { base, proposed, replace } = input as { base?: PersonalRevision; proposed?: Data; replace?: unknown };
+    if (base?.key !== "personal" || !Number.isSafeInteger(base.revision) || base.revision < 0 ||
+      typeof base.recoveryEpoch !== "string" || typeof replace !== "boolean") throw new Error("Invalid workspace revision.");
+    const baseline = validateData(base.data);
+    const proposal = validateData(proposed);
+    return this.transaction(() => {
+      const before = this.snapshot();
+      const record = this.workspaceRecord(before);
+      const conflict = (conflicts: string[]): CommitResult => ({
+        record, conflicts, recoveryId: this.saveWorkspaceRecovery(proposal, conflicts.join(", "), now),
+      });
+      if (base.recoveryEpoch !== record.recoveryEpoch) return conflict(["The notebook was restored while this edit was pending"]);
+      if (base.revision > record.revision) return conflict(["The workspace revision is no longer current"]);
+      if (replace && base.revision !== record.revision) return conflict(["Workspace changed while replacement was pending"]);
+      if (replace && before.data.session) return conflict(["Finish the active session before replacing this notebook"]);
+      const merged = replace ? { data: proposal, conflicts: [] } : mergeDesktopWorkspace(baseline, proposal, before.data);
+      if (merged.conflicts.length) return conflict(merged.conflicts);
+      const data = replace && merged.data.session ? { ...merged.data, session: { ...merged.data.session, runningSince: null } } : merged.data;
+      if (this.pendingSession() && (replace || !same(data.session, before.data.session))) return conflict([HANDOFF_PENDING]);
+      if (before.data.session && data.codeforces.connectedHandle?.toLowerCase() !== before.data.codeforces.connectedHandle?.toLowerCase()) {
+        return conflict(["Finish the active session before changing the Codeforces profile"]);
+      }
+      let state: CompanionState;
+      try {
+        state = this.reconcileWorkspaceState(before, data, now);
+      } catch (error) {
+        if (!(error instanceof Error)) throw error;
+        return conflict([error.message]);
+      }
+      if (same(data, before.data) && same(state, before.state) && !replace) return { record, conflicts: [] };
+      const recoveryId = replace ? this.saveWorkspaceRecovery(before.data, "Before backup replacement", now) : undefined;
+      const saved = this.persist({ data, state }, before.revision + 1, now);
+      if (replace) this.tutor.rotateRecoveryEpoch();
+      return { record: this.workspaceRecord(saved), conflicts: [], ...(recoveryId ? { recoveryId } : {}) };
+    });
+  }
+  private reconcileWorkspaceState(before: LocalSnapshot, data: Data, now: number): CompanionState {
+    const previous = before.data.session;
+    const session = data.session;
+    const handle = data.codeforces.connectedHandle;
+    const problems = new Map(data.problems.map(problem => [problem.id, problem]));
+    const chosen = problems.get(session?.problemId ?? previous?.problemId ?? before.state.problemId ?? "");
+    const foreign = !!chosen?.cfHandle && chosen.cfHandle.toLowerCase() !== handle?.toLowerCase();
+    if (session && foreign) throw new Error("This session belongs to another Codeforces profile");
+    const problem = foreign ? undefined : chosen;
+    const problemId = problem?.id ?? null;
+    const identity = problem ? canonicalProblemIdentity(problem) ?? null : null;
+    const changedProblem = problemId !== before.state.problemId || identity !== before.state.identity;
+    const changedHandle = handle?.toLowerCase() !== before.state.handle?.toLowerCase();
+    const started = !!session && session.id !== previous?.id;
+    const ended = !!previous && !session;
+    const attempt = ended ? data.attempts.find(row => row.id === previous.id && row.problemId === previous.problemId) : undefined;
+    const reset = changedProblem || started || (ended && !attempt);
+    let state: CompanionState = {
+      ...before.state, problemId, identity, handle,
+      lifecycle: session ? (session.runningSince === null ? "paused" : "working")
+        : attempt ? "closed" : reset ? "ready" : before.state.lifecycle,
+      learning: attempt?.outcome ?? (reset ? "unrecorded" : before.state.learning),
+      platform: reset || changedHandle ? "unknown" : before.state.platform,
+      localTests: reset ? "unknown" : before.state.localTests,
+      checkedAt: changedHandle ? null : before.state.checkedAt,
+    };
+    if (ended && !attempt) {
+      const withoutSession = <T extends { sessionId?: string }>(item: T): T => {
+        if (item.sessionId !== previous.id) return item;
+        const result = { ...item };
+        delete result.sessionId;
+        return result;
+      };
+      state = {
+        ...state,
+        ...(state.desk ? { desk: state.desk.map(withoutSession) } : {}),
+        ...(state.followups ? { followups: state.followups.filter(row => row.id !== previous.id) } : {}),
+        submissions: state.submissions.map(withoutSession),
+      };
+    }
+    if (started && session.phase !== "reflection") state = applySessionFollowup(data, state, now).state;
+    if (previous?.phase === "reflection" && session?.phase === "focus" && state.followups) {
+      state = {
+        ...state,
+        followups: state.followups.map(row => row.id === session.id ? {
+          ...row, finishedAt: null, discoveryUntil: null, nextCheckAt: new Date(now).toISOString(),
+          status: row.status === "expired" ? "searching" : row.status,
+        } : row),
+      };
+    }
+    const finishing = session?.phase === "reflection" && previous?.phase !== "reflection";
+    const finishedAt = attempt?.completedAt ?? (finishing ? new Date(Math.max(now, Date.parse(session.startedAt))).toISOString() : undefined);
+    const finishingId = attempt?.id ?? (finishing ? session.id : undefined);
+    if (finishedAt && state.followups) {
+      state = {
+        ...state,
+        followups: state.followups.map(row => row.id === finishingId && !row.finishedAt ? {
+          ...row, finishedAt, discoveryUntil: new Date(Date.parse(finishedAt) + DISCOVERY_MS).toISOString(), nextCheckAt: finishedAt,
+        } : row),
+      };
+    }
+    if (finishedAt && finishingId) {
+      state = {
+        ...state,
+        submissions: state.submissions.map(row => {
+          if (row.sessionId !== finishingId || row.submittedAt <= finishedAt) return row;
+          const evidence = { ...row };
+          delete evidence.sessionId;
+          return evidence;
+        }),
+      };
+    }
+    if (!same(data.problems, before.data.problems)) {
+      const oldProblems = new Map(before.data.problems.map(problem => [problem.id, problem]));
+      const capturedIds = new Set([...state.thoughts, ...(state.desk ?? [])].map(item => item.problemId));
+      for (const id of capturedIds) {
+        const old = oldProblems.get(id);
+        const next = problems.get(id);
+        if (!old || !next) throw new Error("This edit would disconnect saved Ribbon notes or code from their problem");
+        const oldIdentity = canonicalProblemIdentity(old);
+        const newIdentity = canonicalProblemIdentity(next);
+        const sameIdentity = oldIdentity || newIdentity ? oldIdentity === newIdentity
+          : old.platform.toLowerCase() === next.platform.toLowerCase() && old.url === next.url && old.problemCode === next.problemCode;
+        if (!sameIdentity) throw new Error("This edit would disconnect saved Ribbon notes or code from their problem");
+      }
+      for (const row of this.db.prepare('SELECT body FROM tutor_conversations').all()) {
+        const conversation = JSON.parse(String(row.body)) as { problemId: string; identity: string };
+        const linked = problems.get(conversation.problemId);
+        if (!linked || canonicalProblemIdentity(linked) !== conversation.identity) {
+          throw new Error("This edit would disconnect saved Tutor history from its problem");
+        }
+      }
+    }
+    try {
+      return validateCompanionState(state, data);
+    } catch {
+      throw new Error("This edit would disconnect saved Ribbon notes, code, or practice evidence from their records");
+    }
   }
   private transaction<T>(work: () => T): T {
     // Tutor approval joins this same synchronous writer transaction so a note and

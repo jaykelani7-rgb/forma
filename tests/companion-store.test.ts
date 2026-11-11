@@ -10,9 +10,107 @@ import { clampPosition, defaultPreferences, validatePreferences } from '../apps/
 import { ClockContinuity } from '../apps/desktop/main/clock-continuity';
 import { applySubmissionEvidence } from '../packages/core/src/companion';
 import { parseEvent } from '../packages/contracts/src';
+import { withPracticeSession } from '../src/lib/practice-session';
 
 const start=Date.parse('2026-10-19T10:00:00Z');
 const attach={id:'attach-1',type:'attach',payload:{url:'https://codeforces.com/contest/4/problem/A',title:'Watermelon'}};
+
+test('desktop workspace merges independent changes and preserves conflicting proposals', () => {
+  const store = new CompanionStore(':memory:');
+  try {
+    const base = store.readWorkspace();
+    const proposed = (settings: Partial<typeof base.data.settings>) => ({ ...base.data, settings: { ...base.data.settings, ...settings } });
+    const first = store.commitWorkspace({ base, proposed: proposed({ displayName: 'First window' }), replace: false }, start);
+    const second = store.commitWorkspace({ base, proposed: proposed({ weeklyGoal: 7 }), replace: false }, start + 1);
+    assert.deepEqual(first.conflicts, []);
+    assert.deepEqual(second.conflicts, []);
+    assert.equal(second.record.data.settings.displayName, 'First window');
+    assert.equal(second.record.data.settings.weeklyGoal, 7);
+    const collision = store.commitWorkspace({ base, proposed: proposed({ displayName: 'Other window' }), replace: false }, start + 2);
+    assert.deepEqual(collision.conflicts, ['workspace.settings.displayName']);
+    assert.equal(collision.record.revision, second.record.revision);
+    assert.equal(store.workspaceRecoveries().find(row => row.id === collision.recoveryId)?.data.settings.displayName, 'Other window');
+    store.preserveWorkspaceRecovery({ data: base.data, reason: 'Kept for review' }, start + 3);
+    assert.equal(store.workspaceRecoveries()[0].reason, 'Kept for review');
+
+    const replacement = store.commitWorkspace({ base: store.readWorkspace(), proposed: base.data, replace: true }, start + 4);
+    assert.deepEqual(replacement.conflicts, []);
+    assert.notEqual(replacement.record.recoveryEpoch, base.recoveryEpoch);
+    assert.equal(store.workspaceRecoveries().find(row => row.id === replacement.recoveryId)?.data.settings.displayName, 'First window');
+    const stale = store.commitWorkspace({ base, proposed: proposed({ displayName: 'Before restore' }), replace: false }, start + 5);
+    assert.match(stale.conflicts[0], /notebook was restored/);
+    assert.deepEqual(store.readWorkspace(), replacement.record);
+  } finally {
+    store.close();
+  }
+});
+
+test('workspace and Ribbon share one session through a running checkpoint, pause, resume and reflection', () => {
+  const store = new CompanionStore(':memory:');
+  try {
+    store.command({ id: 'profile', type: 'set-handle', payload: { handle: 'sample' } }, 'desktop', start);
+    store.command(attach, 'desktop', start);
+    const base = store.readWorkspace();
+    const problem = base.data.problems[0];
+    const opened = store.commitWorkspace({
+      base, proposed: withPracticeSession(base.data, problem, 30, start, 'workspace-session'), replace: false,
+    }, start);
+    assert.deepEqual(opened.conflicts, []);
+    assert.equal(store.snapshot().state.lifecycle, 'working');
+    assert.equal(store.snapshot().state.followups?.[0].id, 'workspace-session');
+    const running = store.readWorkspace();
+    store.checkpoint(start + 15_000);
+    assert.equal(store.readWorkspace().data.session?.elapsedMs, 15_000);
+    const paused = store.commitWorkspace({ base: running, replace: false, proposed: {
+      ...running.data, session: { ...running.data.session!, runningSince: null, elapsedMs: 16_000 },
+    } }, start + 16_000);
+    assert.deepEqual(paused.conflicts, []);
+    assert.equal(paused.record.data.session?.elapsedMs, 16_000);
+    assert.equal(store.snapshot().state.lifecycle, 'paused');
+    assert.ok(store.commitWorkspace({ base: store.readWorkspace(), proposed: base.data, replace: true }, start + 17_000).conflicts.length);
+
+    store.command({ id: 'ribbon-resume', type: 'resume', payload: {} }, 'desktop', start + 18_000);
+    const resumed = store.readWorkspace();
+    const reflecting = store.commitWorkspace({ base: resumed, replace: false, proposed: {
+      ...resumed.data, session: { ...resumed.data.session!, runningSince: null, elapsedMs: 17_000, phase: 'reflection' },
+    } }, start + 19_000);
+    assert.deepEqual(reflecting.conflicts, []);
+    assert.equal(store.snapshot().state.followups?.[0].finishedAt, new Date(start + 19_000).toISOString());
+    const revising = store.commitWorkspace({ base: reflecting.record, replace: false, proposed: {
+      ...reflecting.record.data, session: { ...reflecting.record.data.session!, phase: 'focus' },
+    } }, start + 20_000);
+    assert.deepEqual(revising.conflicts, []);
+    assert.equal(store.snapshot().state.followups?.[0].finishedAt, null);
+    store.command({ id: 'ribbon-finish', type: 'finish', payload: {} }, 'desktop', start + 21_000);
+    store.command({ id: 'ribbon-save', type: 'reflect', payload: { outcome: 'independent', takeaway: 'Track the boundary.' } }, 'desktop', start + 22_000);
+    const saved = store.readWorkspace().data;
+    assert.equal(saved.session, null);
+    assert.deepEqual(saved.attempts.map(row => [row.id, row.elapsedMs, row.takeaway]), [['workspace-session', 17_000, 'Track the boundary.']]);
+    assert.equal(store.snapshot().state.lifecycle, 'closed');
+  } finally {
+    store.close();
+  }
+});
+
+test('Ribbon can pause a workspace session on another practice platform', () => {
+  const store = new CompanionStore(':memory:');
+  try {
+    store.command(attach, 'desktop', start);
+    const base = store.readWorkspace();
+    const problem = { ...base.data.problems[0], id: 'other-platform', platform: 'Custom', url: 'https://example.com/practice', problemCode: '' };
+    const result = store.commitWorkspace({
+      base, proposed: withPracticeSession(base.data, problem, 30, start, 'custom-session', true), replace: false,
+    }, start);
+    assert.deepEqual(result.conflicts, []);
+    assert.equal(store.snapshot().state.problemId, problem.id);
+    assert.equal(store.snapshot().state.identity, null);
+    store.command({ id: 'ribbon-pause', type: 'pause', payload: {} }, 'desktop', start + 5000);
+    assert.equal(store.readWorkspace().data.session?.elapsedMs, 5000);
+  } finally {
+    store.close();
+  }
+});
+
 test('SQLite command, immutable receipt and outbox commit atomically; retries survive reopen',()=>{
   const folder=mkdtempSync(join(tmpdir(),'forma-store-'));const path=join(folder,'notebook.sqlite');
   let store=new CompanionStore(path);
