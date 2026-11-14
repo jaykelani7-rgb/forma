@@ -1,0 +1,29 @@
+# Forma: a thread through a little world
+
+Created 13 November 2026 using the built-in image-generation tool. Original artwork for the public site; no Kivi assets are used. The landscape carries the vermilion thread from opening to closing. The second artwork, a transparent silk sculpture, has been retired from the rendered site. The companion now uses the actual desktop Ribbon mark and working interface components.
+
+Production assets:
+
+- `apps/site/assets/forma-workspace.png` — 1360 × 900 capture of the actual desktop workspace renderer, approximately 722 KB. Captured 14 November 2026 with generated `createDemo()` records and an ephemeral in-memory `formaWorkspace` bridge. No personal notebook data or generated product UI. Lazy-loaded below the first screen.
+- `apps/site/assets/forma-night-garden.webp` — 1536 × 1024, approximately 244 KB.
+- `apps/site/assets/forma-silk-ribbon.webp` — archived concept, not imported or served by the site; 760 pixels wide, alpha preserved, approximately 56 KB.
+
+Generated PNGs were converted to WebP for the site. The ribbon was resized for its display sizes. No generative fallback CLI or API key was used.
+
+## Landscape: final prompt
+
+Use case: stylized-concept. Asset type: high-end website hero background, wide panoramic 3:2 composition. Create an original poetic nocturnal landscape for Forma, a thoughtful programming companion. Scene: an almost black charcoal sky, softly engraved rolling hills in muted olive, moss, ochre and warm ivory, tiny distant cypress trees, delicate wild grasses and ferns silhouetted in the lower corners, an extraordinary narrow vermilion red silk ribbon winding like a path through the hills from lower left across the foreground toward the distant right, softly catching warm light. Style: meticulous copperplate etching meets grainy risograph and editorial illustration, thousands of fine stippled dots and crosshatched lines, handcrafted tactile print, restrained cinematic chiaroscuro, contemplative and magical, exceptionally sophisticated. Composition: upper 65 percent is mostly empty nearly black #10120f sky with barely visible mist and sparse subtle grain, lower 35 percent contains the luminous detailed landscape and flowing red ribbon. The middle of the sky must remain perfectly quiet for large ivory HTML typography. Hills enter gently from edges; foreground may be brighter at the bottom. No typography, no letters, no logos, no interface, no stars, no moon, no buildings, no people. Fine art quality. The image must feel like an inhabitable little world, not a glossy 3D wallpaper.
+
+## Retired Ribbon concept: final prompt
+
+Use case: product-mockup. Asset type: transparent website product mascot illustration. A single exquisite vermilion silk ribbon folded into an airy inverted U loop, like an abstract origami lowercase arch, both free ends extending toward bottom left and bottom right, one end pointed with a dovetail cut. Three-quarter front perspective. Deep red underside, luminous orange-red front and fine warm peach edge light. The material is thick finely textured woven satin with soft crisp folds and beautifully controlled highlights, almost a sculptural piece of typography. It should look like one continuous gracefully bending strip, elegant and friendly, no face, no eyes, no characters. One single object centered with generous transparent margins, floating, no surface, no background, no text, no additional objects, no cast shadow beyond the object. Premium physical product photograph with warm studio lighting, subtly grainy, entirely isolated on truly transparent background. Wide horizontal composition.
+
+## Motion and interaction
+
+The opening uses centered typography, a concise explanation, one primary action, and the still night landscape. A quiet saved-thought illustration below provides the next point of interest. Detailed controls are deferred until a visitor opens the interactive story. Inside that optional story, the code selection sits beside the actual companion. A vermilion seam connects the selection to an editable paper thought; folding leaves a small paper bookmark above the Ribbon, and returning restores the same Problem Desk state. This is a website illustration of retained context, not a new native bookmark feature. Playback is opt-in, pausable, stops offscreen or in a hidden tab, and becomes manual under reduced motion. The story adds DOM and CSS, without video, canvas, or animation dependencies.
+
+The workspace introduction uses quieter upright display type and two direct practice entry points. The hero and closing retain the expressive italic treatment. The navigation retains the Download route. Mobile keeps the same quiet opening and stacks the editor and companion at readable widths after the story is opened.
+
+The first screen has no autoplay, timer, editor, or pointer parallax. The optional experience uses interactive Ribbon folding and scroll-triggered chapter reveals. Ambient animation pauses outside the viewport and when the document is hidden. Reduced-motion mode removes decorative animation and smooth scrolling while retaining all interaction states. The sample timer runs only after the visitor starts it, and pauses counting while offscreen or in a hidden tab.
+
+The optional story’s real companion expands into one continuous guided session. Visitors pin code, write their own thought, question a prepared assumption, reflect, and recall using real desktop desk, idea, hint, and appearance components with in-memory sample data. A vermilion progress thread connects the steps. An interactive boundary-case illustration explains why an even weight of 2 does not work. Reflections carry into a semantic HTML notebook panel. The live companion remains DOM content with the original SVG Ribbon mark; a separate, clearly captioned screenshot shows the actual full workspace.

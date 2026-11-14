@@ -16,15 +16,12 @@
 .rs-kicker,
 .rs-stage-label {
   font:
-    600 0.75em/1.4 Geist,
-    sans-serif;
+    600 0.75em/1.4 var(--font-sans, Geist, sans-serif);
   letter-spacing: 0.12em;
 }
 :is(.ribbon-studio, .ribbon-rehearsal) h2 {
   font:
-    400 2.3em/1.1 "Instrument Serif",
-    Georgia,
-    serif;
+    400 2.3em/1.1 var(--font-display, "Instrument Serif", Georgia, serif);
   margin: 6px 0 9px;
 }
 :is(.ribbon-studio, .ribbon-rehearsal) p {
@@ -134,9 +131,7 @@
 }
 .rs-rehearsal-sheet strong {
   font:
-    400 2em/1.12 "Instrument Serif",
-    Georgia,
-    serif;
+    400 2em/1.12 var(--font-display, "Instrument Serif", Georgia, serif);
 }
 .rs-rehearsal-sheet time {
   font-variant-numeric: tabular-nums;

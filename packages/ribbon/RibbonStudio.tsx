@@ -8,11 +8,13 @@ export function RibbonStudio({
   onSave,
   onRehearse,
   reducedMotion = false,
+  savedMessage = "Ribbon appearance saved on this device.",
 }: {
   saved?: RibbonOptions;
   onSave: (options: RibbonOptions) => Promise<void>;
   onRehearse: () => void;
   reducedMotion?: boolean;
+  savedMessage?: string;
 }) {
   const [draft, setDraft] = useState(saved);
   const [focus, setFocus] = useState(false);
@@ -34,7 +36,7 @@ export function RibbonStudio({
     setPending(true);
     try {
       await onSave(draft);
-      setMessage("Ribbon appearance saved on this device.");
+      setMessage(savedMessage);
     } catch (error) {
       setMessage(
         error instanceof Error

@@ -51,14 +51,12 @@ import {
   resolvedPracticeProblems,
   sharedPracticeState,
 } from "./practice-state";
+import { OUTCOMES, type Outcome } from "../../packages/core/src/practice-presentation";
+
+export { clockTime, OUTCOMES, type Outcome } from "../../packages/core/src/practice-presentation";
+
 // Rename the product here; navigation, exports, and metadata use this value.
 export const BRAND = "Forma";
-export const OUTCOMES = {
-  independent: "Solved independently",
-  hint: "Needed a hint",
-  editorial: "Needed the editorial",
-  unsolved: "Not solved yet",
-} as const;
 export const DIFFICULTIES = {
   approach: "Finding the approach",
   coding: "Turning the idea into code",
@@ -66,7 +64,6 @@ export const DIFFICULTIES = {
   complexity: "Complexity",
   debugging: "Implementation / debugging",
 } as const;
-export type Outcome = keyof typeof OUTCOMES;
 export type Difficulty = keyof typeof DIFFICULTIES;
 export type Focus = "cp" | "placement" | "mixed";
 export type Theme = "light" | "dark" | "system";
@@ -209,11 +206,6 @@ export function elapsed(session: Session, now = Date.now()): number {
       ? 0
       : Math.max(0, now - session.runningSince))
   );
-}
-export function clockTime(ms: number): string {
-  const seconds = Math.floor(ms / 1000);
-  const hours = Math.floor(seconds / 3600);
-  return `${hours ? `${String(hours).padStart(2, "0")}:` : ""}${String(Math.floor(seconds / 60) % 60).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
 }
 export function latestAttempt(
   data: Data,

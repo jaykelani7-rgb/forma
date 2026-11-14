@@ -1,0 +1,366 @@
+.path {
+  min-width: 0;
+  color: #e9e1cf;
+}
+.hero {
+  position: relative;
+  padding: 28px 30px;
+  border: 1px solid #67563e;
+  border-radius: 10px;
+  background:
+    radial-gradient(ellipse at top right, #6d4c3044, transparent 65%), #252219;
+}
+.hero > svg {
+  color: #e4a172;
+  display: block;
+  margin-bottom: 18px;
+}
+.hero > span,
+.stage > span,
+.comparison article > span,
+.queue > div > span {
+  font: 10px/1.8 var(--font-mono);
+  letter-spacing: 0.07em;
+  color: #c8ae88;
+}
+.hero h4 {
+  font: 42px/1.08 var(--font-display);
+  margin: 15px 0;
+}
+.hero h4 em {
+  color: #e7ac82;
+}
+.hero > p,
+.stage > p,
+.comparison p,
+.queue p {
+  font-size: 14px;
+  line-height: 1.85;
+  color: #c1b49b;
+  max-width: 560px;
+}
+.primary,
+.link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-height: 46px;
+  padding: 12px 16px;
+  font: 13px var(--font-sans);
+  border-radius: 7px;
+  cursor: pointer;
+}
+.primary {
+  border: 1px solid #b9825b;
+  background: #e9a77c;
+  color: #2e271c;
+}
+.primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.link {
+  border: 0;
+  background: transparent;
+  color: #edaf83;
+  padding-inline: 0;
+  text-align: left;
+}
+.hero .caption {
+  font-size: 12px;
+  margin-bottom: 0;
+}
+.progress {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 18px;
+  margin: 27px 0;
+  color: #bdb199;
+  font-size: 12px;
+}
+.progress strong {
+  color: #e5d9ba;
+  font-size: 21px;
+  font-weight: 500;
+}
+.progress progress {
+  flex: 1;
+  min-width: 80px;
+  height: 6px;
+  accent-color: #b5bb83;
+}
+.progress small {
+  flex-basis: 100%;
+  font-size: 11px;
+  line-height: 1.8;
+}
+.stages {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 20px 0;
+}
+.stages button {
+  position: relative;
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  text-align: left;
+  background: #211e18;
+  border: 1px solid #4e4839;
+  border-radius: 9px;
+  color: #c7bca5;
+  padding: 18px;
+  min-height: 155px;
+}
+.stages button[aria-pressed="true"] {
+  background: #3b3525;
+  border-color: #be9468;
+  color: #f5e2be;
+}
+.stages button > span {
+  font: 12px var(--font-mono);
+  color: #e6a67c;
+}
+.stages strong {
+  font: 24px/1.15 var(--font-display);
+  font-weight: 400;
+}
+.stages small {
+  font-size: 11px;
+  line-height: 1.6;
+}
+.stage {
+  padding: 26px;
+  background: #242019;
+  border: 1px solid #5b503d;
+  border-radius: 10px;
+}
+.stage h4,
+.queue h4 {
+  font: 32px var(--font-display);
+  margin: 10px 0;
+}
+.stage dl {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 28px;
+  margin: 24px 0;
+}
+.stage dt,
+.comparison dt {
+  font-size: 11px;
+  color: #bfb097;
+  margin-bottom: 8px;
+}
+.stage dd,
+.comparison dd {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.7;
+}
+.stage dd small {
+  display: block;
+  font-size: 11px;
+  color: #a99b80;
+  margin-top: 5px;
+}
+.stage blockquote,
+.savedNote {
+  border-left: 2px solid #cb7950;
+  font: italic 25px/1.4 var(--font-display);
+  padding-left: 16px;
+  margin: 24px 0;
+  overflow-wrap: anywhere;
+}
+.actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+.roundMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 22px 0 0;
+}
+.roundMeta span {
+  font-size: 11px;
+  line-height: 1.6;
+  border: 1px solid #66543b;
+  border-radius: 20px;
+  padding: 6px 11px;
+  color: #d9c6a6;
+}
+.comparison {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin: 24px 0;
+}
+.comparison article {
+  border: 1px solid #62503b;
+  border-radius: 10px;
+  padding: 24px;
+  background: #292117;
+  min-width: 0;
+}
+.comparison article + article {
+  background: #24271c;
+  border-color: #4e5b37;
+}
+.comparison article[data-complete="true"] {
+  border-color: #a2b476;
+  animation: arrive 0.45s both;
+}
+.comparison h4 {
+  font: 28px/1.2 var(--font-display);
+  margin: 16px 0;
+}
+.comparison h4 small {
+  font: 11px var(--font-mono);
+  color: #b0a184;
+}
+.comparison dt {
+  margin-top: 18px;
+}
+.comparison p {
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.comparison strong {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: #d0d9ae;
+}
+.debrief {
+  border-block: 1px solid #4e4635;
+  padding: 24px 0;
+  margin: 24px 0;
+}
+.debrief label,
+.queue label {
+  display: grid;
+  gap: 10px;
+  font-size: 14px;
+  color: #d6c8ad;
+}
+.debrief textarea,
+.queue select {
+  border: 1px solid #605643;
+  background: #211e18;
+  color: #f4e7d0;
+  font: 14px/1.8 var(--font-sans);
+  padding: 12px;
+  border-radius: 7px;
+  max-width: 100%;
+  width: 100%;
+  resize: vertical;
+}
+.debrief textarea {
+  margin-bottom: 16px;
+}
+.debrief .actions > span {
+  font-size: 11px;
+  line-height: 1.8;
+  color: #b6c797;
+}
+.savedNote > span {
+  display: block;
+  font: 10px var(--font-mono);
+  color: #baaa88;
+  margin-bottom: 12px;
+}
+.queue {
+  border: 1px solid #61563e;
+  border-radius: 10px;
+  padding: 26px;
+  display: grid;
+  gap: 20px;
+}
+.queue p {
+  margin-bottom: 0;
+}
+.queue label {
+  max-width: 220px;
+}
+.queue > .primary {
+  justify-self: start;
+}
+.queue .queueStatus {
+  color: #c4d39d;
+  font-size: 13px;
+}
+.queue > small {
+  font-size: 12px;
+  line-height: 1.8;
+  color: #b5a990;
+}
+.queue h4 {
+  margin-bottom: 0;
+}
+@keyframes arrive {
+  from {
+    transform: translateY(6px);
+    opacity: 0.4;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+@media (max-width: 900px) {
+  .stages {
+    grid-template-columns: 1fr;
+  }
+  .stages button {
+    grid-template-columns: 28px 1fr;
+    gap: 8px;
+    min-height: 85px;
+    padding: 16px;
+  }
+  .stages small {
+    grid-column: 2;
+  }
+  .stages strong {
+    font-size: 23px;
+  }
+  .comparison {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 760px) {
+  .hero,
+  .stage,
+  .queue,
+  .comparison article {
+    padding: 21px 17px;
+  }
+  .hero h4 {
+    font-size: 36px;
+  }
+  .primary {
+    font-size: 12px;
+    gap: 9px;
+    padding: 12px;
+  }
+  .actions {
+    gap: 10px;
+  }
+  .stage dl {
+    gap: 18px;
+  }
+  .hero > span,
+  .stage > span {
+    font-size: 9px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .comparison article[data-complete="true"] {
+    animation: none;
+  }
+}

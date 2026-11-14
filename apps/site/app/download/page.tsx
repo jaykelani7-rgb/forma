@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
-import { MacDownload } from "@/components/mac-site";
-import { macDownloadUrl } from "@/lib/mac-download";
+import { MacDownload } from "../../components/mac-site";
+import { macDownloadUrl } from "../../lib/site-links";
 
 export const metadata: Metadata = {
   title: "Download Forma for Mac",

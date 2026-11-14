@@ -1,0 +1,48 @@
+name: Deploy Forma site
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: forma-site-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - id: pages
+        uses: actions/configure-pages@v5
+      - run: npm ci --workspace=@forma/site --ignore-scripts
+      - run: npm run site:build
+        env:
+          FORMA_SITE_BASE_PATH: ${{ steps.pages.outputs.base_path }}
+          FORMA_MAC_DOWNLOAD_URL: ${{ vars.FORMA_MAC_DOWNLOAD_URL }}
+          FORMA_NOTEBOOK_ORIGIN: ${{ vars.FORMA_NOTEBOOK_ORIGIN }}
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: apps/site/out
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

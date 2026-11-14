@@ -31,9 +31,10 @@ jobs:
           npm run tutor:evaluate -- --fixtures
       - run: npm test
       - run: npm run build
-      - run: npx playwright install --with-deps chromium
+      - run: npx playwright install --with-deps chromium firefox webkit
       - run: npm run test:browser
       - run: npm run test:share-links
+      - run: npm run test:site
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

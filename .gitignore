@@ -2,6 +2,8 @@ node_modules/
 .next/
 .next-share-links/
 out/
+apps/site/next-env.d.ts
+apps/site/.site-test-export/
 .env*
 !.env.example
 *.tsbuildinfo

@@ -14,6 +14,10 @@ export default defineConfig([
     "public/import-assets/**",
     ".companion-build/**",
     "dist/**",
+    "apps/site/.next/**",
+    "apps/site/.site-test-export/**",
+    "apps/site/next-env.d.ts",
+    "apps/site/out/**",
     "apps/vscode-extension/dist/**",
   ]),
 ]);

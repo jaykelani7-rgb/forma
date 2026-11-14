@@ -5,14 +5,12 @@ import { WorkspaceProvider } from "./provider";
 import { Shell } from "./shell";
 import { InstallSupport } from "./install";
 
-export function WorkspaceBoundary({ children, publicHome = false }: { children: ReactNode; publicHome?: boolean }) {
+export function WorkspaceBoundary({ children }: { children: ReactNode }) {
   const path = usePathname();
-  // Public browsing and rehearsal never initialize, reconcile or sync a notebook.
-  if (path === "/preview" || path === "/download" || (publicHome && path === "/") || path.startsWith("/share/")) {
-    return children;
-  }
+  // An unlisted curriculum preview does not open a notebook.
+  if (path.startsWith("/share/")) return children;
   return (
-    <WorkspaceProvider todayHref={publicHome ? "/today" : "/"}>
+    <WorkspaceProvider>
       <Shell>{children}</Shell>
       <InstallSupport />
     </WorkspaceProvider>

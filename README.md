@@ -38,6 +38,8 @@ npm run build -- --webpack
 npm run start -- --port 3001
 ```
 
+The public Mac site runs separately with `npm run site:dev` on port 3004. `npm run site:build` exports the site to `apps/site/out/`. See [site development and deployment](apps/site/README.md).
+
 Local mode needs no account or environment variables. Optional account setup is documented in [docs/cloud-setup.md](docs/cloud-setup.md); the service was not provisioned or deployed during development.
 
 ## Daily workflow

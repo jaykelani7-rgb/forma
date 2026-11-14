@@ -39,7 +39,7 @@ The repository includes `supabase/config.toml`; do not initialize over it with `
 
 ## Continue a desktop session on web
 
-Apply `supabase/migrations/20261109020000_session_handoffs.sql` after the account workspace migration and keep `forma_private` outside the exposed schemas. Configure `SUPABASE_SECRET_KEY` in the web server environment using the same server-only key as Shared Tracks. Launch the desktop process with `FORMA_WEB_ORIGIN` set to your HTTPS Forma origin for a hosted site. The local development default is `http://localhost:3001`.
+Apply `supabase/migrations/20261109020000_session_handoffs.sql` after the account workspace migration and keep `forma_private` outside the exposed schemas. Configure `SUPABASE_SECRET_KEY` in the web server environment using the same server-only key as Shared Tracks. Launch the desktop process with `FORMA_WEB_ORIGIN` set to your HTTPS web notebook origin, which serves the handoff API. The local development default is `http://localhost:3001`.
 
 In the Ribbon, choose **Pause and continue on web** and review the next step. Open the browser, sign in, and link the chosen account. Confirm that account back in the Ribbon to send the paused session. Choose **Receive session** in the browser, wait for account sync, then open the session and resume. The account needs a free practice slot and a settled local notebook.
 
