@@ -1,6 +1,6 @@
 # Forma for Mac website
 
-The public homepage, interactive preview and download page build separately from the web notebook. Run these commands from the repository root with Node.js 22 or later.
+The public homepage, interactive preview, download page, and Windows waitlist build separately from the web notebook. Run these commands from the repository root with Node.js 22 or later.
 
 ```sh
 npm ci --workspace=@forma/site --ignore-scripts
@@ -52,7 +52,7 @@ See `assets/ART-DIRECTION.md` for original artwork, screenshot provenance, produ
 
 ## Deployment
 
-Deploy the contents of `apps/site/out/` to a static host. Serve directory indexes so `/preview/` and `/download/` work when opened directly. The build uses the repository's npm lockfile and shared Ribbon artwork and fonts.
+Deploy the contents of `apps/site/out/` to a static host. Serve directory indexes so `/preview/`, `/download/`, and `/waitlist/` work when opened directly. The build uses the repository's npm lockfile and shared Ribbon artwork and fonts.
 
 For GitHub Pages, select **GitHub Actions** under the repository's **Settings → Pages**. Set the site URL variables under **Settings → Secrets and variables → Actions → Variables**. Run **Deploy Forma site** from `main` to publish or refresh the build after changing a URL. [GitHub Pages setup](https://docs.github.com/en/pages/getting-started-with-github-pages/configuring-a-publishing-source-for-your-github-pages-site)
 

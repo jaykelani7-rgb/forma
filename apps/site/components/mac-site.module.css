@@ -112,6 +112,9 @@
 .main {
   flex: 1;
 }
+.site:has([data-waitlist-page]) :is(.navigation, .footer) {
+  display: none;
+}
 .label {
   margin: 0 0 1rem;
   color: var(--accent);
@@ -121,20 +124,18 @@
   letter-spacing: 0.13em;
   text-transform: uppercase;
 }
-.split {
-  display: grid;
-  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
-  align-items: start;
-  gap: clamp(2rem, 6vw, 5.5rem);
+.downloadPage {
+  max-width: 40rem;
   padding-block: 11rem 6rem;
   min-height: calc(100svh - 6.5rem);
+  margin-inline: auto;
 }
-.split h1 {
+.downloadPage h1 {
   margin: 0;
   font: 400 clamp(3.25rem, 6.4vw, 6.25rem) / 0.96 var(--font-display);
   letter-spacing: -0.04em;
 }
-.split h1 em {
+.downloadPage h1 em {
   display: block;
   color: var(--accent);
 }
@@ -216,8 +217,7 @@
 .rehearsal :global(.ribbon-rehearsal) textarea {
   resize: vertical;
 }
-.rehearsal :global(.ribbon-rehearsal),
-.waitlist {
+.rehearsal :global(.ribbon-rehearsal) {
   margin: 0;
   padding: clamp(1.25rem, 4vw, 2rem);
   border: 1px solid var(--line);
@@ -262,8 +262,7 @@
   .navigation a:last-child {
     padding-inline: 0.8rem;
   }
-  .split {
-    grid-template-columns: 1fr;
+  .downloadPage {
     padding-block: 9rem 3rem;
   }
   .footer {
@@ -350,73 +349,4 @@
   .navigation a:first-child {
     display: none;
   }
-}
-.waitlist {
-  background: linear-gradient(145deg, #2a2c20, var(--surface) 70%);
-}
-.waitlist h2 {
-  margin: 0;
-  font: 400 clamp(2.25rem, 3.65vw, 3.5rem) / 1.04 var(--font-display);
-  letter-spacing: -0.025em;
-}
-.waitlist h2 em {
-  display: block;
-  color: #e7b996;
-}
-.waitlist > p {
-  margin: 1rem 0 1.65rem;
-  color: #c7c9b6;
-  font-size: 0.9rem;
-}
-.waitlist label {
-  display: block;
-  margin-bottom: 0.55rem;
-  color: var(--text);
-  font-size: 0.85rem;
-}
-.waitlistFields {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.65rem;
-}
-.waitlistFields input {
-  flex: 1 1 12rem;
-  width: 100%;
-  min-width: 0;
-  min-height: 3rem;
-  padding: 0.7rem 0.9rem;
-  border: 1px solid #656b54;
-  border-radius: 0.65rem;
-  background: #171b14;
-  color: var(--text);
-  font: inherit;
-  font-size: 1rem;
-}
-.waitlistFields input::placeholder {
-  color: #a6ad98;
-}
-.waitlistFields button {
-  flex: 1 0 auto;
-}
-.waitlistFields button:disabled {
-  opacity: 0.65;
-  cursor: default;
-  transform: none;
-  background: var(--button-bg);
-}
-.waitlistStatus {
-  display: flex;
-  align-items: center;
-  gap: 0.55rem;
-  min-height: 1.4rem;
-  margin: 0.65rem 0 0;
-  color: #c7c9b6;
-  font-size: 0.8rem;
-}
-.waitlistStatus[data-state="joined"] {
-  color: #d5e5b4;
-}
-.waitlistStatus[data-state="failed"],
-.waitlistStatus[data-state="busy"] {
-  color: #ffc4ad;
 }

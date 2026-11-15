@@ -1,0 +1,210 @@
+.page {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 100svh;
+  margin-inline: calc(50% - 50vw);
+  padding: clamp(8rem, 19svh, 12rem) 1.25rem 1.4rem;
+  row-gap: clamp(10rem, 27svh, 16rem);
+  overflow: clip;
+  background: radial-gradient(ellipse at 50% 16%, #20241a, #10120f 66%);
+  text-align: center;
+}
+
+.page::before {
+  position: absolute;
+  z-index: -1;
+  inset: 21% 0 0;
+  background:
+    linear-gradient(
+      to bottom,
+      #151811 0%,
+      #15181140 37%,
+      transparent 63%,
+      #10120fe8 100%
+    ),
+    url("../../assets/forma-night-garden.webp") center 92% / cover no-repeat;
+  mask-image: linear-gradient(to bottom, transparent, #000 31%);
+  content: "";
+  pointer-events: none;
+}
+
+.invitation {
+  width: min(100%, 48rem);
+}
+
+.invitation h1 {
+  margin: 0;
+  color: #f4efdf;
+  font: 400 clamp(3.5rem, 10vw, 7rem) / 0.98 var(--font-display);
+  letter-spacing: -0.042em;
+}
+
+.invitation h1 em {
+  color: #f1ad88;
+}
+
+.invitation > p {
+  max-width: 29rem;
+  margin: 1.25rem auto 2rem;
+  color: #c4c9b5;
+  font-size: clamp(0.875rem, 2vw, 1rem);
+  text-wrap: pretty;
+}
+
+.form {
+  width: min(100%, 28.5rem);
+  margin-inline: auto;
+}
+
+.form label {
+  display: block;
+  margin: 0 0 0.45rem 0.15rem;
+  color: #d2d2c4;
+  font-size: 0.8rem;
+  text-align: left;
+}
+
+.fields {
+  display: flex;
+  gap: 0.3rem;
+  padding: 0.35rem;
+  border: 1px solid #575a44;
+  border-radius: 0.9rem;
+  background: #161a14;
+  box-shadow:
+    0 12px 40px #0003,
+    inset 0 1px #ffffff05;
+}
+
+.fields input {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 3rem;
+  padding: 0.65rem 0.7rem;
+  border: 0;
+  border-radius: 0.55rem;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-overflow: ellipsis;
+}
+
+.fields input::placeholder {
+  color: #a2a894;
+}
+
+.fields input:focus-visible {
+  outline-offset: -2px;
+}
+
+.fields button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.65rem;
+  min-height: 3rem;
+  padding: 0.7rem 1rem;
+  border: 1px solid #ffbf9e;
+  border-radius: 0.55rem;
+  background: #f4ad87;
+  color: #27271e;
+  font-size: 0.85rem;
+  font-weight: 600;
+  transition: background 160ms ease-out;
+}
+
+.fields button:hover:enabled {
+  background: #ffcaab;
+}
+
+.fields button:disabled {
+  opacity: 0.72;
+  cursor: default;
+}
+
+.status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
+  min-height: 1.35rem;
+  margin: 0.75rem 0 0;
+  color: #bfc4b1;
+  font-size: 0.8rem;
+}
+
+.status[data-state="joined"] {
+  min-height: 3.8rem;
+  margin-top: 0;
+  padding: 0.9rem;
+  border: 1px solid #697254;
+  border-radius: 0.9rem;
+  background: #1d2419;
+  color: #d7e5bf;
+  font-size: 0.95rem;
+}
+
+.status[data-state="failed"],
+.status[data-state="busy"] {
+  color: #ffc1ab;
+}
+
+.availability {
+  width: min(100%, 38rem);
+  padding: 0.85rem 0.5rem 0.4rem;
+  border-top: 1px solid #d5c3a033;
+  color: #d4cfbc;
+  font-size: 0.75rem;
+}
+
+.availability p {
+  margin: 0;
+  text-wrap: balance;
+}
+
+.availability a {
+  display: inline-block;
+  padding-block: 0.45rem;
+  color: #f2e3cb;
+  text-decoration: underline;
+  text-decoration-color: #d5c3a088;
+  text-underline-offset: 0.28em;
+}
+
+.availability a:hover {
+  color: #f4ad87;
+}
+
+@media (max-width: 36rem) {
+  .page {
+    row-gap: clamp(7.5rem, 22svh, 12rem);
+  }
+
+  .page::before {
+    inset-block-start: 30%;
+    background-position:
+      center,
+      49% bottom;
+  }
+}
+
+@media (max-width: 26rem) {
+  .fields {
+    flex-direction: column;
+  }
+
+  .fields input {
+    flex-basis: auto;
+  }
+
+  .availability a {
+    display: block;
+    width: fit-content;
+    margin-inline: auto;
+    padding-block: 0.35rem;
+  }
+}

@@ -2,7 +2,6 @@ import { ArrowDownToLine, ArrowRight, Play } from "lucide-react";
 import Link from "next/link";
 import { CompanionPlayground } from "./companion-playground";
 import { HomeExperience } from "./home-experience";
-import { WindowsWaitlist } from "./windows-waitlist";
 import styles from "./mac-site.module.css";
 
 function DownloadLink({ href }: { href: string }) {
@@ -58,49 +57,36 @@ export function MacPreview({
   );
 }
 
-export function MacDownload({
-  downloadUrl,
-  waitlistUrl,
-}: {
-  downloadUrl: string | null;
-  waitlistUrl: string | null;
-}) {
+export function MacDownload({ downloadUrl }: { downloadUrl: string | null }) {
   return (
-    <div className={styles.split}>
-      <section aria-labelledby="mac-download-title">
-        <h1 id="mac-download-title">
-          Forma for Mac <em>is ready.</em>
-        </h1>
-        <p className={styles.intro}>
-          A practice workspace and a floating companion that keeps your next
-          thought beside your code.
-        </p>
-        <div className={styles.actions}>
-          {downloadUrl && <DownloadLink href={downloadUrl} />}
-          <PreviewLink primary={!downloadUrl} />
-        </div>
-        {downloadUrl && (
-          <details className={styles.installHelp}>
-            <summary>How to install on an Apple silicon Mac</summary>
-            <ol>
-              <li>Open the downloaded disk image.</li>
-              <li>Drag Forma Companion into Applications.</li>
-              <li>Open Forma Companion from Applications.</li>
-            </ol>
-          </details>
-        )}
-      </section>
-      <section
-        className={styles.waitlist}
-        id="windows-waitlist"
-        aria-labelledby="windows-title"
-      >
-        <h2 id="windows-title">
-          Forma for Windows <em>is in development.</em>
-        </h2>
-        <p>Get an email when Forma is ready for Windows.</p>
-        <WindowsWaitlist endpoint={waitlistUrl} />
-      </section>
-    </div>
+    <section
+      className={styles.downloadPage}
+      aria-labelledby="mac-download-title"
+    >
+      <h1 id="mac-download-title">
+        Forma for Mac <em>is ready.</em>
+      </h1>
+      <p className={styles.intro}>
+        A practice workspace and a floating companion that keeps your next
+        thought beside your code.
+      </p>
+      <div className={styles.actions}>
+        {downloadUrl && <DownloadLink href={downloadUrl} />}
+        <PreviewLink primary={!downloadUrl} />
+      </div>
+      {downloadUrl && (
+        <details className={styles.installHelp}>
+          <summary>How to install on an Apple silicon Mac</summary>
+          <ol>
+            <li>Open the downloaded disk image.</li>
+            <li>Drag Forma Companion into Applications.</li>
+            <li>Open Forma Companion from Applications.</li>
+          </ol>
+        </details>
+      )}
+      <Link id="windows-waitlist" className={styles.textLink} href="/waitlist">
+        Join the Windows waitlist <ArrowRight size={16} aria-hidden="true" />
+      </Link>
+    </section>
   );
 }

@@ -110,10 +110,19 @@ test("the Windows waitlist validates email and confirms an accepted signup after
     });
   });
   await page.goto(`${siteBasePath}/download/`);
-  await expect(
-    page.getByRole("heading", { name: "Forma for Windows is in development." }),
-  ).toBeVisible();
   const form = page.getByRole("form", { name: "Windows waitlist" });
+  await expect(form).toHaveCount(0);
+  await page.getByRole("link", { name: "Join the Windows waitlist" }).click();
+  await expect(page).toHaveURL(`${siteBasePath}/waitlist/`);
+  await expect(
+    page.getByRole("heading", { name: "Join the waitlist.", level: 1 }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Forma for Windows is in development.", { exact: false }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "Forma for Mac is ready." }),
+  ).toHaveAttribute("href", `${siteBasePath}/download/`);
   const email = form.getByLabel("Email address");
   const submit = form.getByRole("button", { name: "Join the waitlist" });
   const status = form.getByRole("status");
@@ -135,7 +144,7 @@ test("the Windows waitlist validates email and confirms an accepted signup after
   await submit.click();
   await expect(status).toHaveText("You’re on the Windows waitlist.");
   await expect(submit).toHaveCount(0);
-  await expect(page).toHaveURL(`${siteBasePath}/download/`);
+  await expect(page).toHaveURL(`${siteBasePath}/waitlist/`);
   expect(submissions).toHaveLength(2);
   for (const submission of submissions) {
     expect(submission).toContain('name="email"');

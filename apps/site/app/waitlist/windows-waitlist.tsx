@@ -2,7 +2,7 @@
 
 import { ArrowRight, Check } from "lucide-react";
 import { useState, type FormEvent } from "react";
-import styles from "./mac-site.module.css";
+import styles from "./waitlist.module.css";
 
 const messages = {
   idle: "",
@@ -51,6 +51,7 @@ export function WindowsWaitlist({ endpoint }: { endpoint: string | null }) {
 
   return (
     <form
+      className={styles.form}
       aria-label="Windows waitlist"
       action={endpoint ?? undefined}
       method="post"
@@ -60,7 +61,7 @@ export function WindowsWaitlist({ endpoint }: { endpoint: string | null }) {
       {!joined && (
         <>
           <label htmlFor="windows-waitlist-email">Email address</label>
-          <div className={styles.waitlistFields}>
+          <div className={styles.fields}>
             <input
               id="windows-waitlist-email"
               name="email"
@@ -72,11 +73,7 @@ export function WindowsWaitlist({ endpoint }: { endpoint: string | null }) {
               readOnly={submitting}
               required
             />
-            <button
-              className={styles.primary}
-              type="submit"
-              disabled={!endpoint || submitting}
-            >
+            <button type="submit" disabled={!endpoint || submitting}>
               {submitting ? "Joining…" : "Join the waitlist"}
               <ArrowRight size={16} aria-hidden="true" />
             </button>
@@ -90,11 +87,7 @@ export function WindowsWaitlist({ endpoint }: { endpoint: string | null }) {
           />
         </>
       )}
-      <p
-        className={styles.waitlistStatus}
-        data-state={submission}
-        role="status"
-      >
+      <p className={styles.status} data-state={submission} role="status">
         {joined && <Check size={17} aria-hidden="true" />}
         {endpoint ? messages[submission] : "Signups will open soon."}
       </p>
