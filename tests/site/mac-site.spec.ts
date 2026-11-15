@@ -1,5 +1,10 @@
 import { expect, test, type Page } from "@playwright/test";
-import { siteBasePath, siteDownloadUrl, siteNotebookOrigin } from "./fixtures";
+import {
+  siteBasePath,
+  siteDownloadUrl,
+  siteNotebookOrigin,
+  siteWaitlistUrl,
+} from "./fixtures";
 
 const companion = (page: Page) =>
   page.getByRole("region", { name: "Interactive Forma companion" });
@@ -74,7 +79,7 @@ test("the homepage explains Forma and opens the relevant companion feature", asy
   await page.getByRole("link", { name: "Download", exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`${siteBasePath}/download/$`));
   await expect(
-    page.getByRole("heading", { name: "Forma for Mac." }),
+    page.getByRole("heading", { name: "Forma for Mac is ready." }),
   ).toBeVisible();
   await expect(
     page.getByRole("link", { name: "Download for Mac", exact: true }),
@@ -85,6 +90,57 @@ test("the homepage explains Forma and opens the relevant companion feature", asy
   await expect(
     page.getByRole("link", { name: "Open web notebook" }),
   ).toHaveAttribute("href", `${siteNotebookOrigin}/today`);
+});
+
+test("the Windows waitlist validates email and confirms an accepted signup after retry", async ({
+  page,
+}) => {
+  const emailAddress = "windows-fan@example.com";
+  const submissions: Array<string | null> = [];
+  await page.route(siteWaitlistUrl, async (route) => {
+    expect(route.request().method()).toBe("POST");
+    submissions.push(route.request().postData());
+    const firstAttempt = submissions.length === 1;
+    await route.fulfill({
+      status: firstAttempt ? 503 : 200,
+      headers: { "Access-Control-Allow-Origin": "*" },
+      json: firstAttempt
+        ? { error: "Service unavailable" }
+        : { next: "https://formspree.io/thanks" },
+    });
+  });
+  await page.goto(`${siteBasePath}/download/`);
+  await expect(
+    page.getByRole("heading", { name: "Forma for Windows is in development." }),
+  ).toBeVisible();
+  const form = page.getByRole("form", { name: "Windows waitlist" });
+  const email = form.getByLabel("Email address");
+  const submit = form.getByRole("button", { name: "Join the waitlist" });
+  const status = form.getByRole("status");
+
+  await email.fill("invalid-email");
+  await submit.click();
+  expect(
+    await email.evaluate(
+      (input: HTMLInputElement) => input.validity.typeMismatch,
+    ),
+  ).toBe(true);
+  expect(submissions).toHaveLength(0);
+  await email.fill(emailAddress);
+  await submit.click();
+  await expect(status).toHaveText(
+    "We couldn’t save your email. Please try again.",
+  );
+  await expect(email).toHaveValue(emailAddress);
+  await submit.click();
+  await expect(status).toHaveText("You’re on the Windows waitlist.");
+  await expect(submit).toHaveCount(0);
+  await expect(page).toHaveURL(`${siteBasePath}/download/`);
+  expect(submissions).toHaveLength(2);
+  for (const submission of submissions) {
+    expect(submission).toContain('name="email"');
+    expect(submission).toContain(emailAddress);
+  }
 });
 
 test("the preview starts and folds the companion without losing the timer or persisting data", async ({

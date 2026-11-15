@@ -13,7 +13,8 @@ Copy `.env.example` from this directory to `apps/site/.env.local` to configure l
 
 | Variable | Purpose |
 | --- | --- |
-| `FORMA_MAC_DOWNLOAD_URL` | HTTPS URL of the published, signed and notarized Apple silicon `.dmg`. With no URL, the site offers the demo and shows the pending release state. |
+| `FORMA_MAC_DOWNLOAD_URL` | HTTPS URL of the published, signed and notarized Apple silicon `.dmg`. With no URL, the download page offers the browser demo. |
+| `FORMA_WINDOWS_WAITLIST_URL` | Public Formspree endpoint (`https://formspree.io/f/<form-id>`). With no URL, signup stays disabled. |
 | `FORMA_NOTEBOOK_ORIGIN` | Origin of the existing web notebook. Adds links to its `/today` and `/settings` routes. Set it to the origin existing users know. Defaults to `http://localhost:3001` in dev. |
 | `FORMA_SITE_BASE_PATH` | Optional URL prefix such as `/forma` when the host serves the site below its root. GitHub Pages supplies this value in the workflow. |
 
@@ -53,4 +54,6 @@ See `assets/ART-DIRECTION.md` for original artwork, screenshot provenance, produ
 
 Deploy the contents of `apps/site/out/` to a static host. Serve directory indexes so `/preview/` and `/download/` work when opened directly. The build uses the repository's npm lockfile and shared Ribbon artwork and fonts.
 
-For GitHub Pages, select **GitHub Actions** under the repository's **Settings → Pages**. Add the two site URL variables under **Settings → Secrets and variables → Actions → Variables** as they become available. Run **Deploy Forma site** from `main` to publish or to refresh a changed release URL. [GitHub Pages setup](https://docs.github.com/en/pages/getting-started-with-github-pages/configuring-a-publishing-source-for-your-github-pages-site)
+For GitHub Pages, select **GitHub Actions** under the repository's **Settings → Pages**. Set the site URL variables under **Settings → Secrets and variables → Actions → Variables**. Run **Deploy Forma site** from `main` to publish or refresh the build after changing a URL. [GitHub Pages setup](https://docs.github.com/en/pages/getting-started-with-github-pages/configuring-a-publishing-source-for-your-github-pages-site)
+
+To collect Windows waitlist signups, create a form in your Formspree account and use its public Integration endpoint for `FORMA_WINDOWS_WAITLIST_URL`. After publishing, submit a test address you control and check Formspree's Submissions tab. [Formspree form setup](https://help.formspree.io/articles/building-your-form/building-an-html-form)

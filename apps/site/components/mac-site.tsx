@@ -1,8 +1,8 @@
-import { ArrowDownToLine, ArrowRight, Laptop, Play } from "lucide-react";
+import { ArrowDownToLine, ArrowRight, Play } from "lucide-react";
 import Link from "next/link";
 import { CompanionPlayground } from "./companion-playground";
 import { HomeExperience } from "./home-experience";
-import { DesktopRibbonMark } from "../../desktop/renderer/DesktopRibbonMark";
+import { WindowsWaitlist } from "./windows-waitlist";
 import styles from "./mac-site.module.css";
 
 function DownloadLink({ href }: { href: string }) {
@@ -58,78 +58,48 @@ export function MacPreview({
   );
 }
 
-export function MacDownload({ downloadUrl }: { downloadUrl: string | null }) {
+export function MacDownload({
+  downloadUrl,
+  waitlistUrl,
+}: {
+  downloadUrl: string | null;
+  waitlistUrl: string | null;
+}) {
   return (
     <div className={styles.split}>
       <section aria-labelledby="mac-download-title">
-        <p className={styles.label}>Apple silicon</p>
         <h1 id="mac-download-title">
-          Forma <em>for Mac.</em>
+          Forma for Mac <em>is ready.</em>
         </h1>
         <p className={styles.intro}>
-          {downloadUrl
-            ? "Your practice workspace and floating Ribbon, together. Connect VS Code, keep a Problem Desk, explore ideas with your optional AI Tutor, and build on what you learn."
-            : "Explore Forma’s companion in your browser while the public Mac release is being prepared. The Apple silicon download will appear here when a release is published."}
+          A practice workspace and a floating companion that keeps your next
+          thought beside your code.
         </p>
         <div className={styles.actions}>
           {downloadUrl && <DownloadLink href={downloadUrl} />}
           <PreviewLink primary={!downloadUrl} />
         </div>
-      </section>
-      <section className={styles.install} aria-labelledby="mac-install-title">
-        <div className={styles.releaseMark}>
-          <DesktopRibbonMark size={52} />
-          <span>
-            ONE NOTEBOOK.
-            <br />A LITTLE PRESENCE BESIDE IT.
-          </span>
-        </div>
-        <p className={styles.releaseState}>
-          {downloadUrl
-            ? "Public Mac installer available"
-            : "Public Mac installer coming later"}
-        </p>
-        {downloadUrl ? (
-          <>
-            <Laptop size={25} aria-hidden="true" />
-            <h2 id="mac-install-title">Install Forma</h2>
+        {downloadUrl && (
+          <details className={styles.installHelp}>
+            <summary>How to install on an Apple silicon Mac</summary>
             <ol>
               <li>Open the downloaded disk image.</li>
               <li>Drag Forma Companion into Applications.</li>
               <li>Open Forma Companion from Applications.</li>
             </ol>
-          </>
-        ) : (
-          <>
-            <h2 id="mac-install-title">Get a feel for your first session.</h2>
-            <p className={styles.releaseNote}>
-              The browser sample is ready now. Keep a thought, fold the Ribbon,
-              and return to the same problem.
-            </p>
-            <Link href="/#try-forma" className={styles.textLink}>
-              Explore a practice session <ArrowRight size={16} />
-            </Link>
-          </>
+          </details>
         )}
-        <dl className={styles.setupNotes}>
-          <div>
-            <dt>Your notebook</dt>
-            <dd>Local to your Mac, with export and backup options.</dd>
-          </div>
-          <div>
-            <dt>Your editor</dt>
-            <dd>
-              Pair the VS Code extension when you want to share selected code.
-            </dd>
-          </div>
-          <div>
-            <dt>Optional Tutor</dt>
-            <dd>
-              Use your own supported provider key. Notes and tracking work
-              without AI.
-            </dd>
-          </div>
-        </dl>
+      </section>
+      <section
+        className={styles.waitlist}
+        id="windows-waitlist"
+        aria-labelledby="windows-title"
+      >
+        <h2 id="windows-title">
+          Forma for Windows <em>is in development.</em>
+        </h2>
+        <p>Get an email when Forma is ready for Windows.</p>
+        <WindowsWaitlist endpoint={waitlistUrl} />
       </section>
     </div>
   );

@@ -14,6 +14,18 @@ export function macDownloadUrl(value = process.env.FORMA_MAC_DOWNLOAD_URL): stri
   return url?.protocol === "https:" && !url.hash && /\.dmg$/i.test(url.pathname) ? url.href : null;
 }
 
+export function windowsWaitlistUrl(
+  value = process.env.FORMA_WINDOWS_WAITLIST_URL,
+): string | null {
+  const url = httpUrl(value);
+  return url?.origin === "https://formspree.io" &&
+    !url.search &&
+    !url.hash &&
+    /^\/f\/[a-z0-9]+$/i.test(url.pathname)
+    ? url.href
+    : null;
+}
+
 export function webNotebookOrigin(value = process.env.FORMA_NOTEBOOK_ORIGIN): string | null {
   const url = httpUrl(value ?? (process.env.NODE_ENV === "development" ? "http://localhost:3001" : undefined));
   return url?.pathname === "/" && !url.search && !url.hash ? url.origin : null;

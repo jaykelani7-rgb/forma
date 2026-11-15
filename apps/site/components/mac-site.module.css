@@ -135,6 +135,7 @@
   letter-spacing: -0.04em;
 }
 .split h1 em {
+  display: block;
   color: var(--accent);
 }
 .intro {
@@ -193,13 +194,6 @@
   text-decoration: underline;
   text-underline-offset: 0.3em;
 }
-.install svg {
-  color: var(--accent);
-}
-.install h2 {
-  margin: 0.7rem 0;
-  font: 400 2.2rem/1.06 var(--font-display);
-}
 .rehearsal {
   min-width: 0;
   --surface: #fffdf7;
@@ -223,7 +217,7 @@
   resize: vertical;
 }
 .rehearsal :global(.ribbon-rehearsal),
-.install {
+.waitlist {
   margin: 0;
   padding: clamp(1.25rem, 4vw, 2rem);
   border: 1px solid var(--line);
@@ -231,15 +225,22 @@
   background: var(--surface);
   box-shadow: 0 1rem 3rem #0001;
 }
-.install ol {
-  margin: 1rem 0 0;
-  padding-inline-start: 1.25rem;
+.installHelp {
+  margin-top: 0.9rem;
   color: var(--muted);
-  font-size: 0.9rem;
-  list-style: decimal;
+  font-size: 0.85rem;
 }
-.install li + li {
-  margin-top: 0.65rem;
+.installHelp summary {
+  width: fit-content;
+  padding-block: 0.75rem;
+  cursor: pointer;
+}
+.installHelp ol {
+  margin: 0.35rem 0 0;
+  padding-inline-start: 1.25rem;
+}
+.installHelp li + li {
+  margin-top: 0.4rem;
 }
 @media (max-width: 45rem) {
   .site {
@@ -350,42 +351,72 @@
     display: none;
   }
 }
-.releaseMark {
+.waitlist {
+  background: linear-gradient(145deg, #2a2c20, var(--surface) 70%);
+}
+.waitlist h2 {
+  margin: 0;
+  font: 400 clamp(2.25rem, 3.65vw, 3.5rem) / 1.04 var(--font-display);
+  letter-spacing: -0.025em;
+}
+.waitlist h2 em {
+  display: block;
+  color: #e7b996;
+}
+.waitlist > p {
+  margin: 1rem 0 1.65rem;
+  color: #c7c9b6;
+  font-size: 0.9rem;
+}
+.waitlist label {
+  display: block;
+  margin-bottom: 0.55rem;
+  color: var(--text);
+  font-size: 0.85rem;
+}
+.waitlistFields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
+.waitlistFields input {
+  flex: 1 1 12rem;
+  width: 100%;
+  min-width: 0;
+  min-height: 3rem;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid #656b54;
+  border-radius: 0.65rem;
+  background: #171b14;
+  color: var(--text);
+  font: inherit;
+  font-size: 1rem;
+}
+.waitlistFields input::placeholder {
+  color: #a6ad98;
+}
+.waitlistFields button {
+  flex: 1 0 auto;
+}
+.waitlistFields button:disabled {
+  opacity: 0.65;
+  cursor: default;
+  transform: none;
+  background: var(--button-bg);
+}
+.waitlistStatus {
   display: flex;
   align-items: center;
-  gap: 18px;
-  padding-bottom: 22px;
-  border-bottom: 1px solid #555943;
+  gap: 0.55rem;
+  min-height: 1.4rem;
+  margin: 0.65rem 0 0;
+  color: #c7c9b6;
+  font-size: 0.8rem;
 }
-.releaseMark > span {
-  font: 10px/1.8 var(--font-mono);
-  color: #cbc5ac;
-  letter-spacing: 0.06em;
+.waitlistStatus[data-state="joined"] {
+  color: #d5e5b4;
 }
-.releaseState {
-  color: #f0b38e;
-  font-size: 12px;
-  margin: 22px 0;
-}
-.releaseNote {
-  font-size: 14px;
-  line-height: 1.8;
-  color: #bdc5ad;
-}
-.setupNotes {
-  margin: 26px 0 0;
-  border-top: 1px solid #555943;
-}
-.setupNotes > div {
-  padding-top: 20px;
-}
-.setupNotes dt {
-  color: #e6dcc4;
-  font-size: 13px;
-}
-.setupNotes dd {
-  margin: 6px 0 0;
-  color: #b9c0a9;
-  font-size: 12px;
-  line-height: 1.8;
+.waitlistStatus[data-state="failed"],
+.waitlistStatus[data-state="busy"] {
+  color: #ffc4ad;
 }

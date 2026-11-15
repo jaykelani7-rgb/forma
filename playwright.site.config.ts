@@ -3,6 +3,7 @@ import {
   siteBasePath,
   siteDownloadUrl,
   siteNotebookOrigin,
+  siteWaitlistUrl,
 } from "./tests/site/fixtures";
 
 export default defineConfig({
@@ -23,6 +24,7 @@ export default defineConfig({
       FORMA_SITE_BASE_PATH: siteBasePath,
       FORMA_SITE_TEST: "1",
       FORMA_MAC_DOWNLOAD_URL: siteDownloadUrl,
+      FORMA_WINDOWS_WAITLIST_URL: siteWaitlistUrl,
       FORMA_NOTEBOOK_ORIGIN: siteNotebookOrigin,
     },
     url: `http://127.0.0.1:3005${siteBasePath}/`,

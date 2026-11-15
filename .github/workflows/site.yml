@@ -29,6 +29,7 @@ jobs:
         env:
           FORMA_SITE_BASE_PATH: ${{ steps.pages.outputs.base_path }}
           FORMA_MAC_DOWNLOAD_URL: ${{ vars.FORMA_MAC_DOWNLOAD_URL }}
+          FORMA_WINDOWS_WAITLIST_URL: ${{ vars.FORMA_WINDOWS_WAITLIST_URL }}
           FORMA_NOTEBOOK_ORIGIN: ${{ vars.FORMA_NOTEBOOK_ORIGIN }}
       - uses: actions/upload-pages-artifact@v4
         with:
