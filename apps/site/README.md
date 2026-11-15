@@ -14,7 +14,7 @@ Copy `.env.example` from this directory to `apps/site/.env.local` to configure l
 | Variable | Purpose |
 | --- | --- |
 | `FORMA_MAC_DOWNLOAD_URL` | HTTPS URL of the published, signed and notarized Apple silicon `.dmg`. With no URL, the download page offers the browser demo. |
-| `FORMA_WINDOWS_WAITLIST_URL` | Public Formspree endpoint (`https://formspree.io/f/<form-id>`). With no URL, signup stays disabled. |
+| `FORMA_WINDOWS_WAITLIST_URL` | Optional override for the public Formspree endpoint. Defaults to the connected Forma waitlist. |
 | `FORMA_NOTEBOOK_ORIGIN` | Origin of the existing web notebook. Adds links to its `/today` and `/settings` routes. Set it to the origin existing users know. Defaults to `http://localhost:3001` in dev. |
 | `FORMA_SITE_BASE_PATH` | Optional URL prefix such as `/forma` when the host serves the site below its root. GitHub Pages supplies this value in the workflow. |
 

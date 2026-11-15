@@ -17,7 +17,7 @@ export function macDownloadUrl(value = process.env.FORMA_MAC_DOWNLOAD_URL): stri
 export function windowsWaitlistUrl(
   value = process.env.FORMA_WINDOWS_WAITLIST_URL,
 ): string | null {
-  const url = httpUrl(value);
+  const url = httpUrl(value || "https://formspree.io/f/xppdpdog");
   return url?.origin === "https://formspree.io" &&
     !url.search &&
     !url.hash &&
